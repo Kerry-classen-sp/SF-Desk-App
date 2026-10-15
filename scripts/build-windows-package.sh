@@ -43,7 +43,8 @@ rm -rf "$TMP"
 cp "$ROOT/windows/package/Install SF Desk.cmd" "$ROOT/windows/package/READ ME FIRST.txt" "$STAGE/"
 # Notepad shows CRLF line endings best.
 awk '{ printf "%s\r\n", $0 }' "$ROOT/RELEASE-NOTES.md" > "$STAGE/Release Notes.txt"
-printf 'SF Desk %s (%s, %s), Node.js %s for Windows '"$ARCH"'\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/package.json" | head -1)" \
+printf 'SF Desk %s build %s (%s, %s), Node.js %s for Windows '"$ARCH"'\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)" \
+  "$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$STAGE/app/package.json" | head -1 | grep . || echo 0)" \
   "$(git -C "$ROOT" describe --always --dirty)" "$(git -C "$ROOT" log -1 --format=%cs)" "$NODE_VERSION" | tee "$OUT/VERSION-windows-$ARCH.txt" > "$STAGE/app/VERSION.txt"
 
 (cd "$OUT" && zip -qry "$ZIP" "SF Desk for Windows")

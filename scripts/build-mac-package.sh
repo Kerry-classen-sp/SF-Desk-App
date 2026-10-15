@@ -43,7 +43,8 @@ rm -rf "$TMP"
 cp "$ROOT/mac/package/Install SF Desk.command" "$ROOT/mac/package/READ ME FIRST.txt" "$STAGE/"
 cp "$ROOT/RELEASE-NOTES.md" "$STAGE/Release Notes.txt"
 chmod +x "$STAGE/Install SF Desk.command" "$STAGE/app/mac/package/"*.command "$STAGE/runtime/node/bin/node"
-printf 'SF Desk %s (%s, %s), Node.js %s\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/package.json" | head -1)" \
+printf 'SF Desk %s build %s (%s, %s), Node.js %s\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)" \
+  "$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$STAGE/app/package.json" | head -1 | grep . || echo 0)" \
   "$(git -C "$ROOT" describe --always --dirty)" "$(git -C "$ROOT" log -1 --format=%cs)" "$NODE_VERSION" | tee "$OUT/VERSION.txt" > "$STAGE/app/VERSION.txt"
 
 (cd "$OUT" && zip -qry SF-Desk-mac.zip "SF Desk Installer")

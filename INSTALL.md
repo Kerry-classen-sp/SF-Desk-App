@@ -53,10 +53,12 @@ again. macOS ties the permission to each unsigned build.
 ### Building the app
 
 To build everything that's handed out (the Mac app and disk image, the Mac Terminal installer and both
-Windows downloads) in one go, commit your changes and run `scripts/build-apps.sh` on a Mac. It runs
-`git pull --tags` first, so the build is of the latest commit and named after its version tag. It uses the
+Windows downloads), run `scripts/build-apps.sh` on a Mac with the GitHub CLI (`gh`) signed in. It does the
+whole release: `git pull --tags`, commits anything uncommitted, raises the build number in `package.json`
+(the version only changes when you change it), merges that into `main` through a pull request, tags it
+`v<version>-build.<build>` and builds from `main`, so every download names its build. It uses the
 checkout's `node_modules` (checked against `package-lock.json`), so it works on the SailPoint network;
-`--npm` installs them from the registry instead. The steps below are what it runs.
+`--npm` installs them from the registry instead. The steps below are the builds it runs.
 
 The app has to be compiled on a Mac with the Xcode Command Line Tools (`xcode-select --install`). Its
 `node_modules` and Node.js come from the same download as the Terminal installer below, which can be

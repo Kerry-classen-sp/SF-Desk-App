@@ -41,7 +41,9 @@ trap 'rm -rf "$TMP"' EXIT
 PAYLOAD="$TMP/payload"
 mkdir -p "$PAYLOAD"
 git -C "$ROOT" archive HEAD | tar -x -C "$PAYLOAD"
-BUILD_INFO="SF Desk $(git -C "$ROOT" describe --always --dirty) ($(git -C "$ROOT" log -1 --format=%cs))"
+BUILD_NO="$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$PAYLOAD/package.json" | head -1)"
+BUILD_NO="${BUILD_NO:-0}"
+BUILD_INFO="($(git -C "$ROOT" describe --always --dirty), $(git -C "$ROOT" log -1 --format=%cs))"
 if [ -n "$FROM" ]; then
   if [ -f "$FROM" ]; then
     ditto -x -k "$FROM" "$TMP/from"
@@ -64,9 +66,9 @@ else
     die "$NODE needs libraries outside macOS (Homebrew's node does), so it can't go in the app. Use nodejs.org's build with --node, or --from."
   fi
 fi
-BUILD_INFO="$BUILD_INFO, Node.js $("$NODE" -v)"
 VERSION="$("$NODE" -p "require(process.argv[1]).version" "$PAYLOAD/package.json" 2>/dev/null ||
   sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$PAYLOAD/package.json" | head -1)"
+BUILD_INFO="SF Desk $VERSION build $BUILD_NO $BUILD_INFO, Node.js $("$NODE" -v)"
 
 # 2. The app and the calendar reader, for Apple Silicon and Intel.
 compile() { # compile OUTPUT SWIFTC-ARGS...
@@ -91,7 +93,7 @@ echo "Compiling the calendar reader..."
 compile "$C/MacOS/sfdesk-calendar" "$PAYLOAD/mac/calendar.swift" \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PAYLOAD/mac/Info.plist"
 
-sed -e "s|__VERSION__|$VERSION|" -e "s|__BUILD__|$(date +%Y%m%d.%H%M)|" -e "s|__BUILD_INFO__|$BUILD_INFO|" \
+sed -e "s|__VERSION__|$VERSION|" -e "s|__BUILD__|$BUILD_NO|" -e "s|__BUILD_INFO__|$BUILD_INFO|" \
   "$ROOT/mac/app/Info.plist" > "$C/Info.plist"
 plutil -lint "$C/Info.plist" >/dev/null
 
