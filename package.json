@@ -1,6 +1,7 @@
 {
   "name": "sf-desk",
   "version": "1.2.1",
+  "build": 1,
   "private": true,
   "description": "Local web app to view and edit your Salesforce accounts and opportunities",
   "type": "module",

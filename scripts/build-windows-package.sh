@@ -24,7 +24,12 @@ git -C "$ROOT" archive HEAD | tar -x -C "$STAGE/app"
 
 # Dependencies from the lockfile. better-sqlite3 ships prebuilt binaries for every platform in
 # its package, so installing on Linux or macOS still gives a tree that runs on Windows.
-(cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+# SF_DESK_NODE_MODULES copies an existing node_modules instead (see build-mac-package.sh).
+if [ -n "${SF_DESK_NODE_MODULES:-}" ]; then
+  cp -R "$SF_DESK_NODE_MODULES" "$STAGE/app/node_modules"
+else
+  (cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+fi
 test -f "$STAGE/app/node_modules/better-sqlite3/prebuilds/win32-$ARCH.node"
 
 # Node.js for this kind of Windows PC, checked against nodejs.org's published checksums.
@@ -38,7 +43,8 @@ rm -rf "$TMP"
 cp "$ROOT/windows/package/Install SF Desk.cmd" "$ROOT/windows/package/READ ME FIRST.txt" "$STAGE/"
 # Notepad shows CRLF line endings best.
 awk '{ printf "%s\r\n", $0 }' "$ROOT/RELEASE-NOTES.md" > "$STAGE/Release Notes.txt"
-printf 'SF Desk %s (%s, %s), Node.js %s for Windows '"$ARCH"'\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/package.json" | head -1)" \
+printf 'SF Desk %s build %s (%s, %s), Node.js %s for Windows '"$ARCH"'\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)" \
+  "$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$STAGE/app/package.json" | head -1 | grep . || echo 0)" \
   "$(git -C "$ROOT" describe --always --dirty)" "$(git -C "$ROOT" log -1 --format=%cs)" "$NODE_VERSION" | tee "$OUT/VERSION-windows-$ARCH.txt" > "$STAGE/app/VERSION.txt"
 
 (cd "$OUT" && zip -qry "$ZIP" "SF Desk for Windows")

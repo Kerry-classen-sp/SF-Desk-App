@@ -11,8 +11,7 @@ jobs:
   approve:
     if: >-
       github.event.pull_request.draft == false &&
-      (github.event.pull_request.user.login == 'Kerry-classen-sp' ||
-       github.event.pull_request.user.login == 'kclassen-kccs')
+      github.event.pull_request.user.login == 'Kerry-classen-sp'
     runs-on: ubuntu-latest
     steps:
       - name: Approve pull request
