@@ -24,7 +24,12 @@ git -C "$ROOT" archive HEAD | tar -x -C "$STAGE/app"
 
 # Dependencies from the lockfile. better-sqlite3 ships prebuilt binaries for every platform in
 # its package, so installing on Linux or macOS still gives a tree that runs on Windows.
-(cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+# SF_DESK_NODE_MODULES copies an existing node_modules instead (see build-mac-package.sh).
+if [ -n "${SF_DESK_NODE_MODULES:-}" ]; then
+  cp -R "$SF_DESK_NODE_MODULES" "$STAGE/app/node_modules"
+else
+  (cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+fi
 test -f "$STAGE/app/node_modules/better-sqlite3/prebuilds/win32-$ARCH.node"
 
 # Node.js for this kind of Windows PC, checked against nodejs.org's published checksums.

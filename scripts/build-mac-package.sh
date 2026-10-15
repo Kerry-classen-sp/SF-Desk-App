@@ -19,8 +19,14 @@ mkdir -p "$STAGE/app" "$STAGE/runtime"
 git -C "$ROOT" archive HEAD | tar -x -C "$STAGE/app"
 
 # Dependencies from the lockfile. better-sqlite3 ships prebuilt binaries for every platform in
-# its package, so installing on Linux still gives a tree that runs on a Mac.
-(cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+# its package, so installing on Linux still gives a tree that runs on a Mac. SF_DESK_NODE_MODULES
+# copies an existing node_modules instead, for where the npm registry is blocked (scripts/build-apps.sh
+# checks it against the lockfile first).
+if [ -n "${SF_DESK_NODE_MODULES:-}" ]; then
+  cp -R "$SF_DESK_NODE_MODULES" "$STAGE/app/node_modules"
+else
+  (cd "$STAGE/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+fi
 test -f "$STAGE/app/node_modules/better-sqlite3/prebuilds/darwin-arm64.node"
 
 # Node.js for Apple Silicon, checked against nodejs.org's published checksums.
