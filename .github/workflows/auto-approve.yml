@@ -1,0 +1,28 @@
+name: Auto-approve owner pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  approve:
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.pull_request.user.login == 'Kerry-classen-sp' ||
+       github.event.pull_request.user.login == 'kclassen-kccs')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          decision="$(gh pr view "$PR_URL" --json reviewDecision --jq .reviewDecision)"
+          if [ "$decision" = "APPROVED" ]; then
+            echo "Already approved."
+            exit 0
+          fi
+          gh pr review "$PR_URL" --approve --body "Approved automatically because this repository currently has one developer."
