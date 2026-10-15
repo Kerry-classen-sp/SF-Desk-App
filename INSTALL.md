@@ -125,7 +125,7 @@ Use this if you'd rather work from a Git checkout, for example to change the cod
 |---|---|---|
 | A Mac on macOS 14 (Sonoma) or newer, Apple Silicon or Intel | Built and tested on Apple Silicon (arm64) | Apple menu > **About This Mac** |
 | Node.js 22 or newer | Runs the app (built and tested on Node 26) | `node -v` |
-| Git (or GitHub Desktop) and read access to `kclassen-kccs/sf-desk` | To get the code; ask Kerry Classen for access | `git --version` |
+| Git (or GitHub Desktop) and read access to `Kerry-classen-sp/SF-Desk-App` | To get the code; ask Kerry Classen for access | `git --version` |
 | Salesforce CLI (`sf`) | SF Desk borrows its login, because we can't create our own Salesforce app | `sf --version` |
 | A Salesforce login to `sailpoint.my.salesforce.com` with API access | Your normal SSO login is fine | |
 | Your SailPoint Exchange account added to the Mac and syncing in Calendar.app | The **Time Entry** tab reads your meetings from it | Your meetings show in Calendar.app |
@@ -201,7 +201,7 @@ login with `--alias`, you'll set that alias in `.env` in step 5.
 
 ```bash
 cd ~/Documents
-git clone https://github.com/kclassen-kccs/sf-desk.git SF-Desk
+git clone https://github.com/Kerry-classen-sp/SF-Desk-App.git SF-Desk
 cd SF-Desk
 ```
 

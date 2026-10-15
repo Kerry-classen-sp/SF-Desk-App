@@ -686,7 +686,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   @objc func outlookHelp(_ sender: Any?) {
-    NSWorkspace.shared.open(URL(string: "https://github.com/kclassen-kccs/sf-desk/blob/main/OUTLOOK.md")!)
+    NSWorkspace.shared.open(URL(string: "https://github.com/Kerry-classen-sp/SF-Desk-App/blob/main/OUTLOOK.md")!)
   }
 
   func buildMenu() {
