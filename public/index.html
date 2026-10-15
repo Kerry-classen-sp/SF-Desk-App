@@ -108,6 +108,8 @@
   .ds-more dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; margin: 4px 0; }
   .ds-more dt { font-size: 12px; color: var(--muted); }
   .ds-more dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  tr.ds-group td { font-weight: 600; background: var(--bg); }
+  .deals td.tes-notes { white-space: pre-wrap; min-width: 240px; overflow-wrap: anywhere; }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
@@ -347,6 +349,7 @@
     <button id="navDash" onclick="showDashboard()">Deals</button>
     <button id="navTime" onclick="showTime()">DS Time</button>
     <button id="navCal" onclick="showCalendar()">Time Entry</button>
+    <button id="navTes" onclick="showTes()">TES</button>
     <button id="navAccts" onclick="showMain()">Accounts</button>
   <div class="hdr-right">
     <span id="who"></span>
@@ -673,6 +676,7 @@ function setNav(which) {
   document.getElementById('navDash').classList.toggle('on', which === 'dash');
   document.getElementById('navTime').classList.toggle('on', which === 'time');
   document.getElementById('navCal').classList.toggle('on', which === 'cal');
+  document.getElementById('navTes').classList.toggle('on', which === 'tes');
   document.getElementById('navAccts').classList.toggle('on', which === 'accts');
 }
 
@@ -1784,7 +1788,7 @@ const weighted = (list) => list.reduce((s, o) => s + amt(o) * (Number(o.Probabil
 const compact = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n >= 1e6 ? 1 : 0 });
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-const dash = { all: [], view: 'month', fy: null, pick: null, filters: null, loads: 0 };
+const dash = { all: [], view: 'month', page: 0, pick: null, filters: null, loads: 0 };
 
 async function showDashboard() {
   setNav('dash');
@@ -1846,7 +1850,6 @@ function renderDashboard() {
   const opps = inRep.filter((o) => !isHidden(o.Id) && !isHidden(o.AccountId));
   const hiddenCount = inRep.length - opps.length;
   const today = todayStr(), now = fiscal(today);
-  dash.fy ??= now.fy;
   document.getElementById('dashSub').textContent =
     `${plural(opps.length, 'open opportunity', 'open opportunities')} · ${filterText(dash.filters)}` +
     (hiddenCount ? `, not counting ${hiddenCount} hidden` : '') +
@@ -1908,29 +1911,28 @@ function renderStageChart(opps) {
 function renderForecastChart(opps, now, today) {
   const sec = document.getElementById('forecastChart');
   const view = dash.view;
-  const fys = opps.map((o) => fiscal(o.CloseDate).fy);
-  const minFy = Math.min(now.fy, ...fys), maxFy = Math.max(now.fy, ...fys);
-  dash.fy = Math.min(maxFy, Math.max(minFy, dash.fy));
 
-  // The periods to show, in order.
+  // The periods to show, in order: from the current one (earlier close dates are counted in "Past
+  // close date") through the last one with a close date. Months come 12 at a time.
+  const end = fiscal(opps.reduce((m, o) => (o.CloseDate > m ? o.CloseDate : m), today));
   let periods = [];
   if (view === 'month') {
-    for (let i = 0; i < 12; i++) {
-      const m = (FY_START + i) % 12, y = dash.fy - 1 + (FY_START + i >= 12 ? 1 : 0);
-      periods.push({ key: periodKey('month', { y, m }), label: MONTHS[m], long: `${MONTHS[m]} ${y} (${fyName(dash.fy)})` });
+    for (let i = now.y * 12 + now.m; i <= end.y * 12 + end.m; i++) {
+      const y = Math.floor(i / 12), m = i % 12, fy = m >= FY_START ? y + 1 : y;
+      const label = i === now.y * 12 + now.m || m === 0 ? `${MONTHS[m]} ${String(y % 100).padStart(2, '0')}` : MONTHS[m];
+      periods.push({ key: periodKey('month', { y, m }), label, long: `${MONTHS[m]} ${y} (${fyName(fy)})`, y, m });
     }
   } else {
-    const lo = Math.min(...(opps.length ? fys : [now.fy])), hi = Math.max(now.fy, ...fys);
-    for (let fy = Math.min(lo, now.fy); fy <= hi; fy++) {
+    for (let fy = now.fy; fy <= end.fy; fy++) {
       if (view === 'year') periods.push({ key: fyName(fy), label: fyName(fy), long: `${fyName(fy)} (Feb ${fy - 1} – Jan ${fy})` });
-      else for (let q = 1; q <= 4; q++) periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}` });
+      else for (let q = fy === now.fy ? now.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
+        periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}` });
+      }
     }
-    // Drop empty quarters at either end, but keep the current one.
-    const nowKey = periodKey(view, now);
-    const has = new Set(opps.map((o) => periodKey(view, fiscal(o.CloseDate))));
-    while (periods.length > 1 && !has.has(periods[0].key) && periods[0].key !== nowKey) periods.shift();
-    while (periods.length > 1 && !has.has(periods.at(-1).key) && periods.at(-1).key !== nowKey) periods.pop();
   }
+  const pages = view === 'month' ? Math.ceil(periods.length / 12) : 1;
+  dash.page = Math.min(pages - 1, Math.max(0, dash.page));
+  if (view === 'month') periods = periods.slice(dash.page * 12, dash.page * 12 + 12);
   const byKey = new Map(periods.map((p) => [p.key, []]));
   for (const o of opps) byKey.get(periodKey(view, fiscal(o.CloseDate)))?.push(o);
   const nowKey = periodKey(view, now);
@@ -1944,10 +1946,11 @@ function renderForecastChart(opps, now, today) {
 
   const seg = el('div', { class: 'seg' }, [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']].map(([v, t]) =>
     el('button', { class: view === v ? 'on' : null, onclick: () => { dash.view = v; dash.pick = null; renderDashboard(); } }, t)));
-  const fynav = view === 'month' ? el('span', { class: 'fynav' },
-    el('button', { disabled: dash.fy <= minFy, onclick: () => { dash.fy--; dash.pick = null; renderDashboard(); }, 'aria-label': 'Previous fiscal year' }, '‹'),
-    fyName(dash.fy),
-    el('button', { disabled: dash.fy >= maxFy, onclick: () => { dash.fy++; dash.pick = null; renderDashboard(); }, 'aria-label': 'Next fiscal year' }, '›')) : null;
+  const monthName = (p) => `${MONTHS[p.m]} ${p.y}`;
+  const fynav = view === 'month' && pages > 1 ? el('span', { class: 'fynav' },
+    el('button', { disabled: dash.page <= 0, onclick: () => { dash.page--; dash.pick = null; renderDashboard(); }, 'aria-label': 'Earlier 12 months' }, '‹'),
+    periods.length > 1 ? `${monthName(periods[0])} – ${monthName(periods.at(-1))}` : monthName(periods[0]),
+    el('button', { disabled: dash.page >= pages - 1, onclick: () => { dash.page++; dash.pick = null; renderDashboard(); }, 'aria-label': 'Later 12 months' }, '›')) : null;
   const legend = cats.length > 1 ? el('div', { class: 'legend' },
     cats.map(([c, color]) => el('span', {}, el('i', { style: `background:${color}` }), c))) : null;
   const box = el('div');
@@ -1960,7 +1963,7 @@ function renderForecastChart(opps, now, today) {
   const ymax = ticks.at(-1), plotH = H - top - bottom;
   const y = (v) => top + plotH - (v / ymax) * plotH;
   const slot = (W - left - right) / periods.length;
-  const bw = Math.min(24, slot * 0.6);
+  const bw = Math.min(140, slot * 0.75);
   const pick = dash.pick?.kind === 'period' ? dash.pick.key : null;
   const g = svgEl('svg', { class: 'cols', viewBox: `0 0 ${W} ${H}`, height: H, role: 'img',
     'aria-label': 'Open pipeline by close date' });
@@ -2094,6 +2097,187 @@ async function openDeal(o) {
   showMain();
   await openAccount(o.AccountId);
   if (current?.opportunities.some((x) => x.Id === o.Id)) openOpportunity(o.Id);
+}
+
+// ---------- TES ----------
+// TES Requests (the Deal Supports of record type "TES Request") on the accounts the shared filters
+// cover, newest Date of Activity first, grouped by account; and the TES Events among them.
+const tes = { data: null, filters: null, editing: null, loads: 0 };
+const tesOpp = (r) => r[tes.data.oppRel] || null;
+const tesAcct = (r) => tesOpp(r)?.Account || null;
+const tesText = (r, key) => {
+  const f = tes.data.fields[key];
+  return !f ? '' : f.rel ? r[f.rel]?.Name || '' : dsText(f, r[f.name]);
+};
+// A TES Request's date: its Date of Activity, else its Date Requested, else the day it was created.
+const tesDate = (r) => {
+  const { activityDate: a, requestDate: q } = tes.data.fields;
+  if (a && r[a.name]) return { value: r[a.name], from: a.label };
+  if (q && r[q.name]) return { value: r[q.name], from: q.label };
+  return { value: String(r.CreatedDate || '').slice(0, 10), from: 'Created Date' };
+};
+
+function showTes() {
+  setNav('tes');
+  current = null;
+  tes.editing = null;
+  // The same BOAT, team and sales rep filters as the Accounts and Deals tabs (and saved with them).
+  // The rep filter is applied here, to each request's account owner.
+  const refilter = () => { loadTes(); tesReps(); };
+  const filters = tes.filters = filterSelects({ onBoat: refilter, onTeam: refilter, onRep: () => renderTes() });
+  ensureAcctFilters().then(() => {
+    const before = JSON.stringify(filterQuery());
+    fillBoatSelect(filters); fillTeamSelect(filters);
+    if (JSON.stringify(filterQuery()) !== before) loadTes();
+    tesReps();
+  }).catch(() => {});
+  document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
+    el('div', { class: 'dash-head' },
+      el('h2', {}, 'TES'),
+      el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: loadTes }, 'Reload'),
+    ),
+    el('div', { class: 'sub', id: 'tesSub' }, 'Loading…'),
+    el('section', { id: 'tesRequests' }, el('h3', {}, 'TES Requests')),
+    el('section', { id: 'tesEvents' }, el('h3', {}, 'TES Events')),
+  ));
+  loadTes();
+}
+
+// The sales rep choices, as on the Deals tab: the owners of the accounts the BOAT and team filters
+// cover, else (offline, or until they load) the account owners of the requests loaded.
+async function tesReps() {
+  const f = tes.filters, key = JSON.stringify(filterQuery());
+  try { await loadRepChoices(); } catch { /* use the requests' owners */ }
+  if (!f?.rep.isConnected || JSON.stringify(filterQuery()) !== key) return;
+  const before = repFilter;
+  if (repChoices?.key === key) fillRepSelect(f, repChoices.reps);
+  else {
+    const byId = new Map((tes.data?.records || []).map(tesAcct).filter((a) => a?.OwnerId).map((a) => [a.OwnerId, a.Owner?.Name || a.OwnerId]));
+    fillRepSelect(f, [...byId].map(([value, label]) => ({ value, label })));
+  }
+  if (repFilter !== before) { saveAcctPrefs(); if (tes.data && document.getElementById('tesRequests')) renderTes(); }
+}
+
+async function loadTes() {
+  const seq = ++tes.loads;
+  try {
+    const [data] = await Promise.all([api('/tes?' + new URLSearchParams(filterQuery())),
+      dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
+    if (seq !== tes.loads) return; // a newer filter choice is loading
+    tes.data = data;
+    if (document.getElementById('tesRequests')) renderTes();
+  } catch (e) {
+    const sub = document.getElementById('tesSub');
+    if (sub) sub.textContent = e.message;
+  }
+}
+
+function renderTes() {
+  const d = tes.data;
+  const inRep = d.records.filter((r) => !repFilter || tesAcct(r)?.OwnerId === repFilter);
+  const list = inRep.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
+    .sort((x, y) => tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
+  const hiddenCount = inRep.length - list.length;
+  const eventIds = new Set(d.eventIds);
+  const events = list.filter((r) => eventIds.has(r.Id));
+  document.getElementById('tesSub').textContent =
+    `${plural(list.length, 'TES Request')} · ${plural(events.length, 'TES Event')} · ${filterText(tes.filters)}` +
+    (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
+    (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
+    (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '');
+  renderTesRequests(list);
+  renderTesEvents(events);
+}
+
+// Shown like the opportunity's Deal Supports list (click a row for every field, ✎ to edit), with the
+// Date of Activity and opportunity added, under a heading row per account.
+function renderTesRequests(list) {
+  const sec = document.getElementById('tesRequests');
+  const d = tes.data, canEdit = dsMeta.canUpdate;
+  const dates = [d.fields.activityDate, d.fields.requestDate].filter(Boolean);
+  const nameField = dsMeta.fields.find((f) => f.name === 'Name');
+  const rest = dsColumns().filter((f) => f.name !== 'Name' && !dates.some((x) => x.name === f.name));
+  const dateHead = el('th', { title: `${[...dates.map((x) => x.label), 'Created Date'].join(', else ')}; hover a date to see which` },
+    d.fields.activityDate?.label || 'Date');
+  const heads = [nameField?.label || dsMeta.label, dateHead, 'Opportunity', ...rest.map((f) => f.label), 'Created by', 'Created'];
+  const ncols = heads.length + (canEdit ? 1 : 0);
+  const extra = Object.values(d.fields).filter((f) => !dsMeta.fields.some((x) => x.name === f.name));
+  const details = (r) => [
+    ...dsMeta.fields.filter((f) => f.type !== 'reference').map((f) => [f.label, dsText(f, r[f.name])]),
+    ...extra.map((f) => [f.label, f.rel ? r[f.rel]?.Name : dsText(f, r[f.name])]),
+  ].filter(([, v]) => v);
+  const edit = (r) => editDealSupport(r.Id, tes, renderTes, loadTes);
+  const tbody = el('tbody');
+  // Rows come newest first, so each account's group sits where its newest request is.
+  const groups = new Map();
+  for (const r of list) {
+    const k = tesOpp(r)?.AccountId || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  for (const rows of groups.values()) {
+    tbody.append(el('tr', { class: 'ds-group' }, el('td', { colspan: ncols }, `${tesAcct(rows[0])?.Name || '(No account)'} (${rows.length})`)));
+    for (const r of rows) {
+      const more = el('tr', { class: 'ds-more', hidden: true }, el('td', { colspan: ncols },
+        el('dl', {}, details(r).map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v)))),
+        el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+      ));
+      tbody.append(
+        el('tr', { class: 'ds-row' + (tes.editing?.id === r.Id ? ' sel' : ''), onclick: () => { more.hidden = !more.hidden; } },
+          canEdit ? editPencil(r.Name, () => edit(r)) : null,
+          dsNameCell(r.Name),
+          (({ value, from }) => el('td', { title: from }, value || '—'))(tesDate(r)),
+          el('td', {}, tesOpp(r)?.Name || ''),
+          rest.map((f) => el('td', {}, dsText(f, r[f.name]) || '—')),
+          el('td', {}, r.CreatedBy?.Name || ''),
+          el('td', {}, shortDate(r.CreatedDate)),
+        ),
+        more,
+      );
+    }
+  }
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests on these accounts.')));
+  sec.replaceChildren(
+    el('h3', {}, `TES Requests (${list.length})`),
+    tes.editing?.box || '',
+    el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
+      tbody,
+    )),
+  );
+}
+
+// The TES Events: one row each; click a row to open its opportunity.
+function renderTesEvents(list) {
+  const sec = document.getElementById('tesEvents');
+  const d = tes.data, f = d.fields;
+  const field = (key, cls) => f[key] && { head: f[key].label, cls, value: (r) => tesText(r, key) };
+  const cols = [
+    { head: 'Opportunity Name', cls: 'wrap', value: (r) => tesOpp(r)?.Name || '' },
+    { head: dsMeta.label, value: (r) => el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener',
+      title: `${r.Name || r.Id} · Open in Salesforce`, onclick: (ev) => ev.stopPropagation() }, r.Name || r.Id) },
+    field('type'), field('leadSe'), field('assignedSe'), field('tesStatus'), field('status'),
+    field('statusNotes', 'tes-notes'), field('lastStatus'),
+    { head: 'Created Date', value: (r) => shortDate(r.CreatedDate) },
+    field('notes', 'tes-notes'),
+  ].filter(Boolean);
+  const criteria = `${f.geo?.label || 'Opportunity Geo'} = ${d.eventGeo} · ${f.stage?.label || 'TES Stage'}: ${listOr(d.eventStages)}`;
+  const tbody = el('tbody', {}, list.map((r) => el('tr', {
+    onclick: () => openDeal({ Id: r[d.oppField], AccountId: tesOpp(r)?.AccountId }), title: 'Open this opportunity' },
+  cols.map((c) => el('td', { class: c.cls || null }, c.value(r))))));
+  const why = !f.geo || !f.stage ? `Can't pick out TES Events: no ${[!f.geo && 'Opportunity Geo', !f.stage && 'TES Stage'].filter(Boolean).join(' or ')} field found.`
+    : 'No TES Events on these accounts.';
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: cols.length, class: 'empty' }, why)));
+  sec.replaceChildren(
+    el('h3', {}, `TES Events (${list.length})`),
+    el('div', { class: 'sub' }, criteria),
+    el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
+      el('thead', {}, el('tr', {}, cols.map((c) => el('th', {}, c.head)))),
+      tbody,
+    )),
+  );
 }
 
 // ---------- My Time ----------

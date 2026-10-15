@@ -1491,6 +1491,85 @@ api.get('/my-time', wrap(async (req, res) => {
   }));
 }));
 
+// ---------- TES ----------
+
+// TES Requests are the Deal Supports of this record type; TES Events are the ones of them on
+// opportunities in this Geo that are in one of these TES Stages.
+const TES_RECORD_TYPE = 'TES Request';
+const TES_EVENT_GEO = 'AMER';
+const TES_EVENT_STAGES = ['Requested', 'Planning', 'Active', 'Stalled'];
+const TES_MAX = 5000;
+// The Deal Support fields the TES tab uses: [key, label, API name when no field has that label].
+// TES Requests are dated by Date of Activity, else Date Requested (TES Requests rarely have the first).
+const TES_FIELDS = [
+  ['activityDate', 'Date of Activity', 'Date_of_Sales_Activity__c'],
+  ['requestDate', 'Date Requested', 'Date_Requested__c'],
+  ['type', 'TES Type', 'TES_Offering__c'],
+  ['stage', 'TES Stage', 'Stage__c'],
+  ['geo', 'Opportunity Geo', 'Opportunity_Geo__c'],
+  ['leadSe', 'Opportunity Lead SE', 'Opportunity_Lead_SE__c'],
+  ['assignedSe', 'Assigned SE', 'Regional_SE_IDN__c'],
+  ['tesStatus', 'Most Recent TES Status', 'TES_Status__c'],
+  ['status', 'Status', 'Status__c'],
+  ['statusNotes', 'Most Recent TES Status Notes', 'Most_Recent_TES_Status_Notes__c'],
+  ['lastStatus', 'Last TES Status', 'Last_TES_Status__c'],
+  ['notes', 'Notes', 'RFP_Notes__c'],
+];
+const lower = (s) => String(s ?? '').trim().toLowerCase();
+
+async function tesMeta(req) {
+  if (req.session.tesMeta) return req.session.tesMeta;
+  const ds = await dealSupportMeta(req);
+  if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
+  const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
+  if (!(d.recordTypeInfos || []).some((r) => lower(r.name) === lower(TES_RECORD_TYPE))) {
+    throw new HttpError(404, `${d.label} has no "${TES_RECORD_TYPE}" record type, or your user can't see it.`);
+  }
+  const fields = {}, missing = [];
+  for (const [key, label, name] of TES_FIELDS) {
+    const f = d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name);
+    if (f) fields[key] = { name: f.name, label: f.label, type: f.type, rel: f.type === 'reference' ? f.relationshipName || null : null };
+    else missing.push(label);
+  }
+  req.session.tesMeta = { recordType: TES_RECORD_TYPE, eventGeo: TES_EVENT_GEO, eventStages: TES_EVENT_STAGES, fields, missing };
+  return req.session.tesMeta;
+}
+
+// Every TES Request on the accounts the BOAT and team filters cover, newest first, with the Ids of
+// the ones that are TES Events. The page applies the sales rep filter.
+api.get('/tes', wrap(async (req, res) => {
+  const af = await accountFilters(req);
+  const ds = await dealSupportMeta(req);
+  const filter = await accountFilter(req, af, `${ds.oppRel}.Account.`);
+  const kind = `tes:${filter.boat}:${filter.team}`;
+  res.json(await withCacheFallback(req, res, async () => {
+    const tm = await tesMeta(req), f = tm.fields, o = ds.oppRel;
+    const fields = [...dsReadFields(ds), 'Name', ds.oppField, `${o}.Name`, `${o}.AccountId`, `${o}.Account.Name`,
+      `${o}.Account.OwnerId`, `${o}.Account.Owner.Name`, ...Object.values(f).flatMap((x) => [x.name, ...(x.rel ? [`${x.rel}.Name`] : [])])]
+      .filter((x, i, all) => all.indexOf(x) === i);
+    const order = [...[f.activityDate, f.requestDate].filter(Boolean).map((x) => `${x.name} DESC NULLS LAST`), 'CreatedDate DESC'].join(', ');
+    const run = (cols) => query(req, `SELECT ${cols.join(', ')} FROM ${ds.object} ` +
+      `WHERE ${[`RecordType.Name = ${soqlStr(TES_RECORD_TYPE)}`, ...filter.soql].join(' AND ')} ORDER BY ${order} LIMIT ${TES_MAX}`, TES_MAX);
+    let records;
+    try {
+      records = await run(fields);
+    } catch (err) {
+      // Not every custom object has an owner; retry without it.
+      if (err.status !== 400) throw err;
+      records = await run(fields.filter((x) => x !== 'Owner.Name'));
+    }
+    const stages = new Set(TES_EVENT_STAGES.map(lower));
+    const isEvent = (r) => f.geo && f.stage && lower(r[f.geo.name]) === lower(TES_EVENT_GEO) && stages.has(lower(r[f.stage.name]));
+    const out = { ...tm, oppField: ds.oppField, oppRel: o, truncated: records.length >= TES_MAX,
+      eventIds: records.filter(isEvent).map((r) => r.Id), records };
+    store.saveSetting(orgOf(req), kind, out);
+    return out;
+  }, () => {
+    const saved = store.getSetting(orgOf(req), kind);
+    return saved && { data: saved };
+  }));
+}));
+
 // ---------- My Calendar ----------
 
 // Your Salesforce calendar (Event records you own; invitees get their own copy) for a date range,
