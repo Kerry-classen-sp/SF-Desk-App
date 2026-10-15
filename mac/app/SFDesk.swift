@@ -187,7 +187,10 @@ final class Server: @unchecked Sendable {
 
     let db = { (d: URL) in d.appendingPathComponent("data/sf-desk.db") }
     let used = { (d: URL) in ((try? fm.attributesOfItem(atPath: db(d).path))?[.modificationDate] as? Date) ?? .distantPast }
-    let installs = oldDirs.filter { fm.fileExists(atPath: $0.appendingPathComponent("server.js").path) }
+    let installs = oldDirs.filter {
+      fm.fileExists(atPath: $0.appendingPathComponent("server.js").path)
+        || fm.fileExists(atPath: $0.appendingPathComponent("src/server.js").path)
+    }
     guard let old = installs.filter({ fm.fileExists(atPath: db($0).path) }).max(by: { used($0) < used($1) })
             ?? installs.first(where: { fm.fileExists(atPath: $0.appendingPathComponent(".env").path) }) else { return }
 
@@ -272,7 +275,7 @@ final class Server: @unchecked Sendable {
 
     let p = Process()
     p.executableURL = URL(fileURLWithPath: node)
-    p.arguments = [appDir.appendingPathComponent("server.js").path]
+    p.arguments = [appDir.appendingPathComponent("src/server.js").path]
     p.currentDirectoryURL = supportDir // the server reads .env from its working folder
     p.environment = ProcessInfo.processInfo.environment.merging([
       "PATH": path,

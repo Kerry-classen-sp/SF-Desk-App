@@ -4,9 +4,9 @@
   "private": true,
   "description": "Local web app to view and edit your Salesforce accounts and opportunities",
   "type": "module",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node src/server.js",
     "outlook-cert": "sh scripts/outlook-cert.sh"
   },
   "engines": {

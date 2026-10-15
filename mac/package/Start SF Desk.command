@@ -23,4 +23,4 @@ fi
 ( for _ in $(seq 1 60); do curl -fs -o /dev/null "$URL" && { open "$URL"; exit; }; sleep 0.5; done ) &
 
 echo "Starting SF Desk at $URL (close this window to stop it)..."
-exec "$NODE" server.js
+exec "$NODE" src/server.js

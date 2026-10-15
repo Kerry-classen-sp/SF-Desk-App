@@ -20,19 +20,20 @@ import { isWindows, windowsCalendar } from './windowsCalendar.js';
 import { graphCalendar } from './graphCalendar.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { version: VERSION } = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+const ROOT = path.join(__dirname, '..');
+const { version: VERSION } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 const PORT = Number(process.env.PORT || 3000);
 // The Outlook add-in needs HTTPS. When the certificate made by scripts/outlook-cert.sh is there, SF Desk also
 // listens on https://localhost:HTTPS_PORT (see OUTLOOK.md).
 const HTTPS_PORT = Number(process.env.HTTPS_PORT || 3443);
-const CERT_DIR = process.env.SF_DESK_CERTS || path.join(__dirname, 'certs');
+const CERT_DIR = process.env.SF_DESK_CERTS || path.join(ROOT, 'certs');
 const LOGIN_URL = (process.env.SF_LOGIN_URL || 'https://login.salesforce.com').replace(/\/$/, '');
 const API = process.env.SF_API_VERSION || 'v62.0';
 const CLIENT_ID = process.env.SF_CLIENT_ID;
 const CLIENT_SECRET = process.env.SF_CLIENT_SECRET || '';
 const REDIRECT_URI = `http://localhost:${PORT}/oauth/callback`;
-const DB_FILE = process.env.SF_DESK_DB || path.join(__dirname, 'data', 'sf-desk.db');
+const DB_FILE = process.env.SF_DESK_DB || path.join(ROOT, 'data', 'sf-desk.db');
 // Without a client ID, sign in by borrowing the Salesforce CLI's login instead of running OAuth here.
 const USE_CLI = !CLIENT_ID;
 const SF_CLI = process.env.SF_CLI_PATH || 'sf';
@@ -78,7 +79,7 @@ const b64url = (buf) => buf.toString('base64url');
 
 const store = openDb(DB_FILE);
 // This computer's own calendar for Time Entry: the Mac's Internet Accounts, or classic Outlook on Windows.
-const localCal = isMac ? macCalendar(__dirname, path.dirname(DB_FILE)) : isWindows ? windowsCalendar(__dirname) : null;
+const localCal = isMac ? macCalendar(ROOT, path.dirname(DB_FILE)) : isWindows ? windowsCalendar(ROOT) : null;
 const LOCAL_CAL_NAME = isWindows ? 'Outlook (classic)' : 'Mac calendar';
 // Microsoft 365 calendars through Microsoft Graph, for the new Outlook (Windows; SF_DESK_GRAPH=1 elsewhere).
 const graphCal = isWindows || process.env.SF_DESK_GRAPH ? graphCalendar(path.dirname(DB_FILE)) : null;
@@ -93,7 +94,7 @@ const sessionOpts = { secret: process.env.SESSION_SECRET || crypto.randomBytes(3
 const httpSession = session({ ...sessionOpts, cookie: { httpOnly: true, sameSite: 'lax' } });
 const httpsSession = session({ ...sessionOpts, name: 'sfdesk.sid', cookie: { httpOnly: true, sameSite: 'none', secure: true } });
 app.use((req, res, next) => (req.secure ? httpsSession : httpSession)(req, res, next));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(ROOT, 'public')));
 
 // ---------- Outlook add-in ----------
 
@@ -101,12 +102,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 // "create from this meeting" form.
 const OFFICE_JS = '<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>';
 app.get('/outlook/pane', (req, res) => {
-  const page = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+  const page = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
   res.type('html').set('Cache-Control', 'no-store').send(page.replace('<script src="xlsx.js"></script>', `${OFFICE_JS}\n<script src="/xlsx.js"></script>`));
 });
 // The add-in manifest to sideload, pointing at this server's HTTPS address.
 app.get('/outlook/manifest.xml', (req, res) => {
-  const xml = fs.readFileSync(path.join(__dirname, 'outlook', 'manifest.xml'), 'utf8');
+  const xml = fs.readFileSync(path.join(ROOT, 'outlook', 'manifest.xml'), 'utf8');
   res.type('application/xml').set('Content-Disposition', 'attachment; filename="sf-desk-outlook.xml"')
     .send(xml.replaceAll('https://localhost:3443', `https://localhost:${HTTPS_PORT}`));
 });

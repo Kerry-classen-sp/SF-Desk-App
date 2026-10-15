@@ -10,7 +10,7 @@ $dest = Join-Path $env:LOCALAPPDATA 'Programs\SF Desk'
 function Say($text) { Write-Host "  $text" }
 function Die($text) { Write-Host "`n$text`n" -ForegroundColor Red; exit 1 }
 
-if (-not (Test-Path (Join-Path $From 'app\server.js'))) {
+if (-not (Test-Path (Join-Path $From 'app\src\server.js'))) {
   Die 'Can''t find the app folder next to the installer. Unzip the whole download first, then run "Install SF Desk" from the unzipped folder.'
 }
 # SF-Desk-windows.zip is for Intel/AMD PCs and SF-Desk-windows-arm64.zip for ARM ones (e.g. Snapdragon).
