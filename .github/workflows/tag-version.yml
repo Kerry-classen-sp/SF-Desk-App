@@ -1,0 +1,34 @@
+name: Tag new versions
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag the commit that set the version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists."
+            exit 0
+          fi
+          # The version commit itself, not the merge that brought it in, so the tag matches local builds.
+          commit="$(git log -1 --format=%H -G'"version":' -- package.json)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" "$commit" -m "SF Desk $version"
+          git push origin "$tag"
+          echo "Tagged $commit as $tag."

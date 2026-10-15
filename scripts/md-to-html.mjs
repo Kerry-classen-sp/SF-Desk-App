@@ -10,7 +10,7 @@ import path from 'node:path';
 
 const [input, output, titleArg, linksFile] = process.argv.slice(2);
 const links = linksFile ? JSON.parse(fs.readFileSync(linksFile, 'utf8')) : {};
-const REPO = 'https://github.com/kclassen-kccs/sf-desk/blob/main/';
+const REPO = 'https://github.com/Kerry-classen-sp/SF-Desk-App/blob/main/';
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const slug = (s) => s.toLowerCase().replace(/<[^>]+>/g, '').replace(/[^\w\- ]+/g, '').trim().replace(/ /g, '-');

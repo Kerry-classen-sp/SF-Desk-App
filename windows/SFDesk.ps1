@@ -123,7 +123,7 @@ function Start-Server {
   # cmd.exe only to send the server's output to the log. Our end of its input pipe closes when this
   # launcher quits or dies, and the server then exits (SF_DESK_APP).
   $psi.FileName = $env:ComSpec
-  $psi.Arguments = '/d /s /c ""' + $node + '" "' + (Join-Path $appDir 'server.js') + '" >> "' + $logFile + '" 2>&1"'
+  $psi.Arguments = '/d /s /c ""' + $node + '" "' + (Join-Path $appDir 'src\server.js') + '" >> "' + $logFile + '" 2>&1"'
   $psi.WorkingDirectory = $dataDir # the server reads .env from its working folder
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true

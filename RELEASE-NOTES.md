@@ -1,5 +1,10 @@
 # SF Desk release notes
 
+## 1.2.1 (October 14, 2026)
+
+- The server code now lives in a `src` folder. Nothing changes in how SF Desk looks or works.
+- Help links in the app, the disk image and the Outlook add-in point to the SF-Desk-App repository.
+
 ## 1.2.0 (October 14, 2026)
 
 - **Filters everywhere:** Accounts, Deals and DS Time can all be narrowed by SailPoint BOAT, team and sales

@@ -176,7 +176,7 @@ Accounts it shows the open opportunities on accounts where you are in any of the
 
 ## Changing which fields appear
 
-Edit `ACCOUNT_FIELDS` / `OPP_FIELDS` near the top of `server.js` (the server only allows writes
+Edit `ACCOUNT_FIELDS` / `OPP_FIELDS` near the top of `src/server.js` (the server only allows writes
 to those fields), and `ACCOUNT_UI` / `OPP_UI` near the top of `public/index.html` to show them.
 Custom fields work too, e.g. `Region__c`.
 
