@@ -1475,27 +1475,21 @@ function renderOppSelbar() {
   selbar(document.getElementById('oppSelbar'), pickedOpps, current.opportunities, 'Opportunity', renderOpps);
 }
 
+// Read-only: changes to opportunities are made in Salesforce.
 function oppRow(o) {
   const tr = el('tr', { class: [o.IsClosed && 'closed', isHidden(o.Id) && 'is-hidden'].filter(Boolean).join(' ') || null });
-  const save = el('button', { class: 'primary', disabled: true }, 'Save');
-  const onChange = () => { save.disabled = !Object.keys(changes(tr, o)).length; };
   const pick = el('input', { type: 'checkbox', checked: pickedOpps.has(o.Id), 'aria-label': `Select ${o.Name}`, title: isHidden(o.Id) ? 'Hidden' : null });
   pick.addEventListener('change', () => { pick.checked ? pickedOpps.add(o.Id) : pickedOpps.delete(o.Id); renderOppSelbar(); });
   tr.append(el('td', { class: 'pick' }, pick));
-  for (const def of OPP_UI) tr.append(el('td', {}, field(def, o[def[0]], meta.editable.Opportunity.includes(def[0]), onChange)));
-  tr.append(el('td', { class: 'actions' }, save, ' ', el('button', { onclick: () => openOpportunity(o.Id), title: 'Focus on this opportunity and its deal supports' }, 'Open')));
-
-  save.addEventListener('click', async () => {
-    const fields = changes(tr, o);
-    save.disabled = true;
-    try {
-      const rec = await api('/opportunities/' + o.Id, { method: 'PATCH', body: { fields, lastModified: o.LastModifiedDate } });
-      const i = current.opportunities.findIndex((x) => x.Id === o.Id);
-      current.opportunities[i] = rec;
-      tr.replaceWith(oppRow(rec));
-      toast(`Saved "${rec.Name}" to Salesforce`, 'ok');
-    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
-  });
+  const text = (name, v) => v == null || v === '' ? '' : name === 'Amount' ? money(v) : name === 'Probability' ? v + '%' : String(v);
+  for (const [name] of OPP_UI) {
+    tr.append(el('td', { class: name === 'Amount' || name === 'Probability' ? 'n' : null }, name === 'Name'
+      ? el('a', { href: '#', title: 'Focus on this opportunity and its deal supports', onclick: (ev) => { ev.preventDefault(); openOpportunity(o.Id); } }, o.Name)
+      : text(name, o[name])));
+  }
+  tr.append(el('td', { class: 'actions' },
+    el('button', { onclick: () => openOpportunity(o.Id), title: 'Focus on this opportunity and its deal supports' }, 'Open'), ' ',
+    el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', title: 'Edit in Salesforce' }, '↗')));
   return tr;
 }
 
