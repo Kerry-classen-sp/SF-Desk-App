@@ -409,17 +409,12 @@ const ACCT_PAGE = 200, ACCT_MAX = 5000;
 let acctPage = 0;
 let savedRepName = ''; // the picked rep's name from the saved filters, until the rep choices load
 
-// Each launch starts on My BOAT(s) (All BOATs if mine can't be found), My Accounts and All sales reps
-// (and My Time on the My Time tab); the picks then carry across the tabs. The sort, grouping and "Show hidden" are kept in SF Desk's local
-// database, so they survive a restart.
+// Each launch starts on My BOAT(s), My Accounts and All sales reps (and My Time on the DS Time tab); the
+// picks then carry across the tabs. With no BOAT of mine to be found, My BOAT(s) covers every BOAT.
+// The sort, grouping and "Show hidden" are kept in SF Desk's local database, so they survive a restart.
 async function loadAcctPrefs() {
   boatFilter = 'mine'; teamFilter = 'mine'; repFilter = ''; savedRepName = '';
-  // When my BOAT can't be found (no BOAT field, none of my accounts has one, or Salesforce can't be
-  // reached), start on All BOATs instead.
-  try {
-    await ensureAcctFilters();
-    if (!acctFilters.boat || !acctFilters.myBoats?.length) boatFilter = 'all';
-  } catch { boatFilter = 'all'; }
+  await ensureAcctFilters().catch(() => {});
   try {
     const p = await api('/prefs/accounts');
     sortRecent = !!p.sortRecent; groupByRep = !!p.groupByRep; showHiddenAccts = !!p.showHidden;
@@ -2225,11 +2220,12 @@ function renderTesRequests(list, older = []) {
   const d = tes.data, f = d.fields;
   const dates = [f.activityDate, f.requestDate].filter(Boolean);
   const nameField = dsMeta.fields.find((x) => x.name === 'Name');
-  const rest = dsColumns().filter((x) => x.name !== 'Name' && ![...dates, f.stage, f.tesStatus].some((y) => y?.name === x.name));
+  // Last Update Date, Assigned SE and Lead SE, each when the field is there: [heading, field].
+  const cols = [['Last Update Date', f.lastStatus], ['Assigned SE', f.assignedSe], ['Lead SE', f.leadSe]].filter(([, x]) => x);
   const dateHead = el('th', { title: `${[...dates.map((x) => x.label), 'Created Date'].join(', else ')}; hover a date to see which` },
     f.activityDate?.label || 'Date');
-  const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity', ...rest.map((x) => x.label), 'Created by', 'Created']
-    .filter(Boolean);
+  const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity',
+    ...cols.map(([h, x]) => el('th', { title: x.label }, h)), 'Created by', 'Created'].filter(Boolean);
   const ncols = heads.length;
   const tbody = el('tbody');
   // Rows come sorted by stage, then customer, so each group's requests are together.
@@ -2269,7 +2265,7 @@ function renderTesRequests(list, older = []) {
           el('a', { href: `${me.instanceUrl}/${oppId}`, target: '_blank', rel: 'noopener', title: 'Open the opportunity in Salesforce',
             onclick: (ev) => ev.stopPropagation() }, '↗'),
         ] : '—'),
-        rest.map((x) => el('td', {}, dsText(x, r[x.name]) || '—')),
+        cols.map(([, x]) => el('td', {}, (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—')),
         el('td', {}, r.CreatedBy?.Name || ''),
         el('td', {}, shortDate(r.CreatedDate)),
       ),
