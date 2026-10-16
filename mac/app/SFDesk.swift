@@ -582,9 +582,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   @objc func actualSize(_ sender: Any?) { web.pageZoom = 1 }
   @objc func showLog(_ sender: Any?) { NSWorkspace.shared.activateFileViewerSelecting([logFile]) }
   @objc func showData(_ sender: Any?) { NSWorkspace.shared.open(supportDir) }
-  @objc func editSettings(_ sender: Any?) {
-    NSWorkspace.shared.open([envFile], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
-                            configuration: NSWorkspace.OpenConfiguration())
+  // SF Desk's own Settings screen; a page that isn't SF Desk's (still starting, an error) loads it fresh.
+  @objc func showSettings(_ sender: Any?) {
+    window.makeKeyAndOrderFront(nil)
+    if web.url?.scheme == "http" {
+      web.evaluateJavaScript("showSettings()") { _, error in
+        if error != nil { self.web.load(URLRequest(url: URL(string: "#settings", relativeTo: self.baseURL)!)) }
+      }
+    } else {
+      web.load(URLRequest(url: URL(string: "#settings", relativeTo: baseURL)!))
+    }
   }
 
   // One-click Outlook add-in setup (OUTLOOK.md): make and trust the HTTPS certificate, restart the server so
@@ -711,7 +718,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       item("About SF Desk", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
       .separator(),
       item("Set Up Outlook Add-in...", #selector(setUpOutlook(_:))),
-      item("Edit Settings...", #selector(editSettings(_:))),
+      item("Settings...", #selector(showSettings(_:)), ","),
       .separator(),
       item("Hide SF Desk", #selector(NSApplication.hide(_:)), "h"),
       item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),

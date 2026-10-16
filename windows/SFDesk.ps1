@@ -38,7 +38,7 @@ function Ask($title, $message) {
 
 # ---------- settings ----------
 
-# .env is yours to edit (Edit Settings...); the launcher never writes it, since some PCs refuse writes to
+# .env is yours to edit (in Show Data Folder); the launcher never writes it, since some PCs refuse writes to
 # it (security tools guarding ".env" files, or attributes it picked up). What the launcher works out
 # itself (where sf is, which org alias) goes in launcher.json, and reaches the server as environment
 # variables unless .env sets them.
@@ -238,8 +238,8 @@ function Find-Edge {
 
 # SF Desk in its own window: Edge in app mode with its own profile, so it has no tabs or address bar
 # and keeps its own sign-in cookies. Without Edge, the default browser.
-function Open-Window {
-  $url = Get-Url
+function Open-Window($hash = '') {
+  $url = (Get-Url) + $hash
   $edge = Find-Edge
   if ($edge) {
     Start-Process $edge -ArgumentList @("--app=$url", ('--user-data-dir="' + (Join-Path $dataDir 'edge') + '"'), '--no-first-run', '--no-default-browser-check')
@@ -329,7 +329,7 @@ function Add-MenuItem($text, [scriptblock]$action) {
 }
 Add-MenuItem 'Open SF Desk' { Open-Window }
 [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
-Add-MenuItem 'Edit Settings...' { Start-Process notepad.exe -ArgumentList ('"' + $envFile + '"') }
+Add-MenuItem 'Settings...' { Open-Window '#settings' }
 Add-MenuItem 'Restart Server' { Restart-Server }
 Add-MenuItem 'Show Server Log' { Start-Process notepad.exe -ArgumentList ('"' + $logFile + '"') }
 Add-MenuItem 'Show Data Folder' { Start-Process explorer.exe -ArgumentList ('"' + $dataDir + '"') }

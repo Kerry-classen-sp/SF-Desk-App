@@ -7,6 +7,19 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script>
+// Display Mode (Settings), kept in this browser: light, dark, or system (the default) to follow the
+// computer. Set before the page draws, so it never flashes the other one.
+const THEME_KEY = 'sfdesk.theme';
+const themePick = () => { try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; } };
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const t = themePick();
+  document.documentElement.dataset.theme = t === 'light' || t === 'dark' ? t : darkQuery.matches ? 'dark' : 'light';
+}
+applyTheme();
+darkQuery.addEventListener('change', applyTheme);
+</script>
 <style>
   .ol-pane { padding: 12px; --covered: #c9f2d6; --open: #fdd3cf; --skip: #eef0f3; }
   .ol-pane section { padding: 12px; margin-bottom: 12px; }
@@ -16,7 +29,31 @@
   :root { --chrome: 74px; /* header (50px) + footer (24px) */
     --bg: #f5f6f8; --panel: #ffffff; --ink: #1b1f24; --muted: #667085; --line: #e3e6eb;
     --accent: #0b5cad; --accent-soft: #e8f1fb; --ok: #067647; --err: #b42318; --dirty: #fff6dd;
+    --field: #ffffff; --row-soft: #fafbfc; --tip: #1b1f24; color-scheme: light;
   }
+  /* Display Mode (Settings): data-theme is set to light or dark, following the system when that's the pick. */
+  :root[data-theme=dark] { color-scheme: dark;
+    --bg: #14171c; --panel: #1c2027; --ink: #e6e8ec; --muted: #9aa3b2; --line: #313844;
+    --accent: #5aa2f0; --accent-soft: #1d2d44; --ok: #3fb67a; --err: #f07067; --dirty: #3a3220;
+    --field: #12151a; --row-soft: #20252d; --tip: #2b313b;
+  }
+  :root[data-theme=dark] .dash { --grid: #2a303a; }
+  :root[data-theme=dark] .cal, :root[data-theme=dark] .ol-pane { --covered: #1e4630; --open: #4d2522; --skip: #262b33; }
+  :root[data-theme=dark] .status-pill.covered { color: #9be3b8; } :root[data-theme=dark] .status-pill.open { color: #f6b1aa; }
+  :root[data-theme=dark] .hours-col .hl { border-top-color: #262b33; }
+  :root[data-theme=dark] .tes-chip.g { background: #1e4630; color: #9be3b8; }
+  :root[data-theme=dark] .tes-chip.y { background: #4a3d12; color: #f3d77a; }
+  :root[data-theme=dark] .tes-chip.r { background: #4d2522; color: #f6b1aa; }
+  :root[data-theme=dark] button.danger { color: #f07067; border-color: #6b2c27; }
+  :root[data-theme=dark] dialog.popup::backdrop { background: rgba(0, 0, 0, .6); }
+  .settings { max-width: 640px; margin: 0 auto; padding: 24px clamp(12px, 2vw, 32px) 48px; }
+  .settings h2 { margin: 0 0 16px; font-size: 20px; }
+  .settings fieldset { border: 0; margin: 0; padding: 0; display: flex; gap: 10px; flex-wrap: wrap; }
+  .settings legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+  .settings .choice { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); cursor: pointer; }
+  .settings .choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .settings .choice input { width: auto; margin: 0; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
   header { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -33,7 +70,7 @@
   button:disabled { opacity: .45; cursor: default; }
   button.danger { color: #b42318; border-color: #f0b4ae; }
   button.danger:hover:not(:disabled) { background: #b42318; border-color: #b42318; color: #fff; }
-  input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink); }
   /* Text boxes, number and date boxes and dropdowns all draw at one height, so a row of them lines up. */
   select:not([multiple]), input:not([type=checkbox]):not([type=radio]) { box-sizing: border-box; height: 34px; vertical-align: middle; }
   input:disabled, select:disabled, textarea:disabled { background: var(--bg); color: var(--muted); }
@@ -98,7 +135,7 @@
   th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
   td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   tr.closed td { opacity: .65; }
-  tr.new td { background: #fafbfc; }
+  tr.new td { background: var(--row-soft); }
   td.actions { white-space: nowrap; width: 1%; }
   .tablewrap { overflow-x: auto; }
   .col-name { min-width: 180px; } .col-stage { min-width: 150px; } .col-num { min-width: 100px; } .col-date { min-width: 140px; } .col-next { min-width: 180px; }
@@ -106,7 +143,7 @@
   .back { margin-bottom: 8px; }
   .ds-row { cursor: pointer; }
   .ds-row:hover td { background: var(--bg); }
-  .ds-more td { background: #fafbfc; }
+  .ds-more td { background: var(--row-soft); }
   .ds-more dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; margin: 4px 0; }
   .ds-more dt { font-size: 12px; color: var(--muted); }
   .ds-more dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -150,7 +187,7 @@
 
   body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; } #app { flex: 1 0 auto; min-width: 0; }
   footer#ver { height: 24px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
-  #toast { position: fixed; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: #1b1f24; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
+  #toast { position: fixed; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: var(--tip); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
   #toast.ok { background: var(--ok); } #toast.err { background: var(--err); }
 
   /* ---------- dashboard ---------- */
@@ -203,7 +240,7 @@
   svg.cols text.cap { fill: var(--ink); font-variant-numeric: tabular-nums; }
   svg.cols .hit { fill: transparent; cursor: pointer; }
   svg.cols .hit:hover { fill: rgba(11, 92, 173, .06); }
-  #tip { position: fixed; pointer-events: none; z-index: 10; background: #1b1f24; color: #fff; font-size: 12px; padding: 7px 10px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: none; max-width: 260px; }
+  #tip { position: fixed; pointer-events: none; z-index: 10; background: var(--tip); color: #fff; font-size: 12px; padding: 7px 10px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: none; max-width: 260px; }
   #tip b { display: block; margin-bottom: 3px; }
   #tip .row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
   #tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
@@ -689,6 +726,25 @@ function setNav(which) {
   document.getElementById('navCal').classList.toggle('on', which === 'cal');
   document.getElementById('navTes').classList.toggle('on', which === 'tes');
   document.getElementById('navAccts').classList.toggle('on', which === 'accts');
+}
+
+// Settings (the app's Settings... menu, or #settings): Display Mode, saved in this browser.
+function showSettings() {
+  if (me?.connected) { setNav('settings'); current = null; }
+  const modes = [['light', 'Light'], ['dark', 'Dark'], ['system', 'System Auto']];
+  const pick = themePick();
+  const choice = ([value, text]) => el('label', { class: 'choice' },
+    el('input', { type: 'radio', name: 'theme', value, checked: pick === value, onchange: () => {
+      try { localStorage.setItem(THEME_KEY, value); } catch {}
+      applyTheme();
+    } }), text);
+  document.getElementById('app').replaceChildren(el('div', { class: 'settings' },
+    el('h2', {}, 'Settings'),
+    el('section', {},
+      el('fieldset', {}, el('legend', {}, 'Display Mode'), modes.map(choice)),
+      el('div', { class: 'sub', style: 'margin:10px 0 0' }, 'System Auto follows your computer\'s light or dark appearance.')),
+    me?.connected ? null : el('button', { onclick: () => showConnect() }, '← Back'),
+  ));
 }
 
 function showMain() {
@@ -3517,17 +3573,20 @@ function renderOutlookPane(e, reload) {
     }
     return;
   }
+  // Opened from the app's Settings... menu: show Settings instead of the Deals tab.
+  const settings = location.hash === '#settings';
+  if (settings) history.replaceState(null, '', location.pathname + location.search);
   try {
     me = await api('/me');
     if (me.version) document.getElementById('ver').textContent = `SF Desk v${me.version}`;
-    if (!me.connected) return showConnect();
+    if (!me.connected) return settings ? showSettings() : showConnect();
     showLoading('Loading your Salesforce data…');
     document.getElementById('who').textContent = me.user?.username || me.user?.name || '';
     document.getElementById('logout').hidden = false;
     meta = await api('/meta');
     await loadHidden();
     await loadAcctPrefs();
-    showDashboard();
+    if (settings) showSettings(); else showDashboard();
   } catch (e) {
     if (e.status !== 401) toast(e.message, 'err');
   }

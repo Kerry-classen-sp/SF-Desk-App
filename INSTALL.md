@@ -33,7 +33,7 @@ quit it (**SF Desk > Quit SF Desk**) to stop it. If SF Desk is already running f
 checkout, the app shows that one instead of starting another.
 
 **Your data** lives in `~/Library/Application Support/SF Desk` (**Help > Show Data Folder**): `.env` for
-settings (**SF Desk > Edit Settings...**, then **File > Restart Server**), `data/` for the local copy of
+settings (open it from that folder in a text editor, then **File > Restart Server**), `data/` for the local copy of
 your records, `certs/` for the Outlook add-in's certificate and `sf-cli/` if the app downloaded the CLI.
 To update, replace the app with the new one; all of that is kept. The server's log is in
 `~/Library/Logs/SF Desk` (**Help > Show Server Log**).
@@ -301,9 +301,10 @@ calendar, so turn off the **New Outlook** toggle if it's on.
    whether to allow a program to access its data, choose **Allow** (this happens when Windows doesn't report
    an up-to-date antivirus).
 
-Closing the window keeps SF Desk running; the SF Desk icon by the clock reopens it and has **Edit Settings...**,
-**Restart Server**, **Show Server Log**, **Show Data Folder** and **Quit SF Desk**. Settings and data are in
-`%LOCALAPPDATA%\SF Desk`; running **Install SF Desk** from a newer zip updates the app and keeps them.
+Closing the window keeps SF Desk running; the SF Desk icon by the clock reopens it and has **Settings...**
+(Display Mode: Light, Dark or System Auto), **Restart Server**, **Show Server Log**, **Show Data Folder** and
+**Quit SF Desk**. The `.env` settings file and data are in `%LOCALAPPDATA%\SF Desk`; running **Install SF Desk**
+from a newer zip updates the app and keeps them.
 
 If Time Entry says PowerShell's policy stops SF Desk from reading Outlook, your PC only allows signed scripts;
 ask IT, or use Salesforce events. If it says Outlook and SF Desk run with different permissions, start Outlook

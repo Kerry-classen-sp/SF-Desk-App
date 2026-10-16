@@ -79,8 +79,9 @@ SF Desk.app (source in `mac/app`, built by `scripts/build-mac-app.sh`; see
 shows SF Desk in its own window. On first launch it downloads the Salesforce CLI if you don't have one and
 signs you in (Option A below), so the setup steps that follow are only for running from a checkout.
 
-- **Settings:** the `.env` settings below live in `~/Library/Application Support/SF Desk/.env`. Open it
-  with **SF Desk > Edit Settings...**, then **File > Restart Server**.
+- **Settings:** **SF Desk > Settings...** (⌘,) picks the Display Mode: Light, Dark or System Auto. The `.env`
+  settings below live in `~/Library/Application Support/SF Desk/.env` (**Help > Show Data Folder**); edit it
+  in a text editor, then **File > Restart Server**.
 - **Data:** the same folder holds `data/` (the local copy), `certs/` (the Outlook certificate) and `sf-cli/`
   if the app downloaded the CLI. Updating the app keeps all of it. The first launch copies these from
   `~/SF-Desk` or a Git checkout.
