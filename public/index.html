@@ -119,6 +119,7 @@
   .tes-update { display: grid; grid-template-columns: 160px 1fr; gap: 8px 14px; align-items: start; margin: 4px 0 10px; }
   .tes-update label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   .tes-update .form-actions { grid-column: 1 / -1; margin-top: 0; }
+  .tes-more { display: flex; justify-content: center; margin-top: 12px; }
   .ds-more details { margin: 6px 0; } .ds-more details summary { cursor: pointer; color: var(--accent); }
   dialog.popup { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 22px;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
@@ -2116,7 +2117,11 @@ async function openDeal(o) {
 // TES Requests (the Deal Supports of record type "TES Request") where I, my team or one of them is the
 // Opportunity Lead SE or Assigned SE, grouped by TES Stage, then by customer A–Z, newest first within each.
 // `open` holds the rows showing their status updates; `updates` the updates fetched, by request Id.
-const tes = { data: null, filters: null, editing: null, loads: 0, open: new Set(), updates: new Map() };
+// Completed requests show for the last `completedDays` days; "Show more" adds TES_COMPLETED_DAYS at a time.
+// `focus` is the request whose update form to bring into view.
+const TES_COMPLETED_DAYS = 90;
+const tes = { data: null, filters: null, editing: null, loads: 0, open: new Set(), updates: new Map(),
+  completedDays: TES_COMPLETED_DAYS, focus: null };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
 // These stages first, in this order; any others follow A–Z, then requests with no stage.
@@ -2135,11 +2140,19 @@ const tesDate = (r) => {
   if (q && r[q.name]) return { value: r[q.name], from: q.label };
   return { value: String(r.CreatedDate || '').slice(0, 10), from: 'Created Date' };
 };
+const tesCompleted = (r) => tesStage(r).toLowerCase() === 'completed';
+// When a Completed request finished: Date TES Completed, else TES End Date, else Last TES Stage, else its date.
+const tesCompletedOn = (r) => {
+  const f = tes.data.fields;
+  const x = [f.completedDate, f.endDate, f.stageDate].find((y) => y && r[y.name]);
+  return x ? r[x.name] : tesDate(r).value;
+};
 
 function showTes() {
   setNav('tes');
   current = null;
   tes.editing = null;
+  tes.completedDays = TES_COMPLETED_DAYS;
   // The team and sales rep filters of the other tabs (and saved with them); the team pick matches the
   // request's Opportunity Lead SE or Assigned SE, the rep its account owner. BOAT doesn't apply here.
   const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => renderTes() });
@@ -2204,15 +2217,19 @@ function renderTes() {
     `${plural(list.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}${repFilter ? ` · Sales rep: ${t(f.rep)}` : ''}` +
     (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
     (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
-    (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '');
-  renderTesRequests(list);
+    (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '') +
+    ` · Completed ones from the last ${tes.completedDays} days`;
+  const since = addDays(todayStr(), -tes.completedDays);
+  const shown = list.filter((r) => !tesCompleted(r) || tesCompletedOn(r) >= since);
+  renderTesRequests(shown, list.filter((r) => !shown.includes(r)));
 }
 
 // Shown like the opportunity's Deal Supports list (✎ to edit), with the date, Most Recent TES Status and
-// opportunity added, under a heading row per TES Stage and per customer. Click a row for its status updates.
-function renderTesRequests(list) {
+// opportunity added, under a heading row per TES Stage and per customer. Click a row for its status updates,
+// or + to add one. `older` holds the Completed requests left out for finishing before the window.
+function renderTesRequests(list, older = []) {
   const sec = document.getElementById('tesRequests');
-  const d = tes.data, canEdit = dsMeta.canUpdate, f = d.fields;
+  const d = tes.data, canEdit = dsMeta.canUpdate, f = d.fields, canAdd = !!d.updates?.canCreate;
   const dates = [f.activityDate, f.requestDate].filter(Boolean);
   const nameField = dsMeta.fields.find((x) => x.name === 'Name');
   const rest = dsColumns().filter((x) => x.name !== 'Name' && ![...dates, f.stage, f.tesStatus].some((y) => y?.name === x.name));
@@ -2220,8 +2237,14 @@ function renderTesRequests(list) {
     f.activityDate?.label || 'Date');
   const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity', ...rest.map((x) => x.label), 'Created by', 'Created']
     .filter(Boolean);
-  const ncols = heads.length + (canEdit ? 1 : 0);
+  const ncols = heads.length + (canEdit ? 1 : 0) + (canAdd ? 1 : 0);
   const edit = (r) => editDealSupport(r.Id, tes, renderTes, loadTes);
+  const addUpdate = (r, more) => {
+    tes.open.add(r.Id);
+    tes.focus = r.Id;
+    more.hidden = false;
+    renderTesPanel(r, more.firstChild);
+  };
   const tbody = el('tbody');
   // Rows come sorted by stage, then customer, so each group's requests are together.
   let stage = null, acct = null;
@@ -2230,7 +2253,8 @@ function renderTesRequests(list) {
     if (tesStage(r) !== stage) {
       stage = tesStage(r); acct = null;
       tbody.append(el('tr', { class: 'tes-stage' }, el('td', { colspan: ncols },
-        `${stage || `(No ${f.stage?.label || 'TES Stage'})`} (${count((x) => tesStage(x) === stage)})`)));
+        `${stage || `(No ${f.stage?.label || 'TES Stage'})`} (${count((x) => tesStage(x) === stage)})` +
+        (tesCompleted(r) ? ` · finished in the last ${tes.completedDays} days` : ''))));
     }
     const a = tesOpp(r)?.AccountId || '';
     if (a !== acct) {
@@ -2249,6 +2273,8 @@ function renderTesRequests(list) {
     const opp = tesOpp(r), oppId = r[d.oppField];
     tbody.append(
       el('tr', { class: 'ds-row' + (tes.editing?.id === r.Id ? ' sel' : ''), onclick: toggle },
+        canAdd ? el('td', { class: 'edit-cell' }, el('button', { class: 'icon-btn', title: `Add a TES Status update to ${r.Name || 'this request'}`,
+          'aria-label': `Add a TES Status update to ${r.Name || 'this request'}`, onclick: (ev) => { ev.stopPropagation(); addUpdate(r, more); } }, '+')) : null,
         canEdit ? editPencil(r.Name, () => edit(r)) : null,
         dsNameCell(r.Name),
         (({ value, from }) => el('td', { title: from }, value || '—'))(tesDate(r)),
@@ -2268,13 +2294,24 @@ function renderTesRequests(list) {
     );
   }
   if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
+  // Each click reaches back another TES_COMPLETED_DAYS, and always at least to the newest one left out.
+  const showMore = older.length ? el('div', { class: 'tes-more' }, el('button', {
+    onclick: () => {
+      const newest = older.map(tesCompletedOn).sort().at(-1);
+      const toNewest = Math.ceil((Date.parse(todayStr()) - Date.parse(newest)) / 864e5);
+      tes.completedDays = Math.max(tes.completedDays + TES_COMPLETED_DAYS, toNewest);
+      renderTes();
+    },
+  }, `Show more Completed (${older.length.toLocaleString()} older)`)) : null;
   sec.replaceChildren(
     el('h3', {}, `TES Requests (${list.length})`),
     tes.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
+      el('thead', {}, el('tr', {}, canAdd ? el('th', { 'aria-label': 'Add update' }) : null, canEdit ? el('th', { 'aria-label': 'Edit' }) : null,
+        heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
       tbody,
     )),
+    showMore,
   );
 }
 
@@ -2309,11 +2346,15 @@ function renderTesPanel(r, box) {
       el('label', {}, el('span', {}, 'TES Status'), status),
       el('label', { class: 'wide' }, el('span', {}, f.statusNotes?.label || 'Notes'), notes),
       el('div', { class: 'form-actions' }, save));
+    if (tes.focus === r.Id) {
+      tes.focus = null;
+      requestAnimationFrame(() => { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); notes.focus(); });
+    }
   }
   box.replaceChildren(
     el('h4', {}, `${u?.label || 'TES Status'} updates`),
-    history,
     form,
+    history,
     el('details', {}, el('summary', {}, 'All fields'),
       el('dl', {}, details.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
     el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),

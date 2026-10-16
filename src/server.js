@@ -1510,11 +1510,15 @@ const TES_FIELDS = [
   ['statusNotes', 'Most Recent TES Status Notes', 'Most_Recent_TES_Status_Notes__c'],
   ['lastStatus', 'Last TES Status', 'Last_TES_Status__c'],
   ['notes', 'Notes', 'RFP_Notes__c'],
+  // When a Completed request finished: the first of these it has.
+  ['completedDate', 'Date TES Completed', 'Date_TES_Complete_T80__c'],
+  ['endDate', 'TES End Date', 'TES_End_Date__c'],
+  ['stageDate', 'Last TES Stage', 'Last_TES_Stage__c'],
 ];
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 3) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 4) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
@@ -1529,7 +1533,7 @@ async function tesMeta(req) {
         isUser: isUserRef(f) };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 3, recordType: TES_RECORD_TYPE, fields, missing, updates: await tesUpdatesMeta(req, d) };
+  req.session.tesMeta = { v: 4, recordType: TES_RECORD_TYPE, fields, missing, updates: await tesUpdatesMeta(req, d) };
   return req.session.tesMeta;
 }
 
