@@ -1488,8 +1488,7 @@ function oppRow(o) {
       : text(name, o[name])));
   }
   tr.append(el('td', { class: 'actions' },
-    el('button', { onclick: () => openOpportunity(o.Id), title: 'Focus on this opportunity and its deal supports' }, 'Open'), ' ',
-    el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', title: 'Edit in Salesforce' }, '↗')));
+    el('a', { class: 'btn', href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', title: 'Open this opportunity in Salesforce' }, 'Open')));
   return tr;
 }
 
