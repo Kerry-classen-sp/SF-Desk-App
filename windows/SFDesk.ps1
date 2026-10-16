@@ -38,7 +38,7 @@ function Ask($title, $message) {
 
 # ---------- settings ----------
 
-# .env is yours to edit (Edit Settings...); the launcher never writes it, since some PCs refuse writes to
+# .env is yours to edit (in Show Data Folder); the launcher never writes it, since some PCs refuse writes to
 # it (security tools guarding ".env" files, or attributes it picked up). What the launcher works out
 # itself (where sf is, which org alias) goes in launcher.json, and reaches the server as environment
 # variables unless .env sets them.
@@ -89,20 +89,6 @@ function Get-Url {
   return "http://localhost:$port"
 }
 
-function Test-Answers($url) {
-  try {
-    $req = [Net.HttpWebRequest]::Create($url)
-    $req.Proxy = $null
-    $req.Timeout = 2000
-    $req.GetResponse().Close()
-    return $true
-  } catch [Net.WebException] {
-    return $null -ne $_.Exception.Response # any HTTP answer means it's up
-  } catch {
-    return $false
-  }
-}
-
 function Find-Node {
   $bundled = Join-Path (Split-Path -Parent $appDir) 'runtime\node.exe'
   if (Test-Path $bundled) { return $bundled }
@@ -119,6 +105,9 @@ function Start-Server {
   if (-not $node) { throw 'SF Desk can''t find Node.js. Run the SF Desk installer again.' }
   New-Item -ItemType Directory -Force $logDir | Out-Null
   [IO.File]::WriteAllText($logFile, '')
+  # The server writes this once it's listening.
+  $ready = Join-Path $logDir 'server.ready'
+  Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
   $psi = New-Object Diagnostics.ProcessStartInfo
   # cmd.exe only to send the server's output to the log. Our end of its input pipe closes when this
   # launcher quits or dies, and the server then exits (SF_DESK_APP).
@@ -129,6 +118,7 @@ function Start-Server {
   $psi.CreateNoWindow = $true
   $psi.RedirectStandardInput = $true
   $psi.EnvironmentVariables['SF_DESK_APP'] = '1'
+  $psi.EnvironmentVariables['SF_DESK_READY'] = $ready
   $psi.EnvironmentVariables['SF_DESK_DB'] = Join-Path $dataDir 'data\sf-desk.db'
   $psi.EnvironmentVariables['SF_DESK_CERTS'] = Join-Path $dataDir 'certs'
   foreach ($key in 'SF_CLI_PATH', 'SF_TARGET_ORG') {
@@ -137,13 +127,13 @@ function Start-Server {
   }
   $script:server = [Diagnostics.Process]::Start($psi)
 
-  $url = Get-Url
-  for ($i = 0; $i -lt 120; $i++) {
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $ready) { return }
     if ($script:server.HasExited) { throw "The SF Desk server stopped while starting.`n`n$(Get-LogTail)" }
-    if (Test-Answers $url) { return }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 50
   }
-  throw "The SF Desk server didn't answer at $url.`n`n$(Get-LogTail)"
+  throw "The SF Desk server didn't start at $(Get-Url).`n`n$(Get-LogTail)"
 }
 
 function Stop-Server {
@@ -216,13 +206,46 @@ function Connect-Salesforce($target) {
   $targetArgs = @(); if ($target) { $targetArgs = @('--target-org', $target) }
   $shown = (& $sf org display --json @targetArgs 2>$null) -join "`n"
   if ($shown -match '"status":\s*0') { return }
+  [void](Invoke-SignIn $sf $target)
+}
 
-  if (-not (Ask 'Sign in to Salesforce' 'Your browser will open the Salesforce login. Sign in with SSO as usual, then come back to SF Desk.')) { return }
+# Run the CLI's browser sign-in, if the user agrees. Returns whether they signed in.
+function Invoke-SignIn($sf, $target) {
+  $ErrorActionPreference = 'Continue'
+  if (-not (Ask 'Sign in to Salesforce' 'Your browser will open the Salesforce login. Sign in with SSO as usual, then come back to SF Desk.')) { return $false }
   Show-Status 'Waiting for you to sign in to Salesforce in your browser...'
   $alias = $target; if (-not $alias) { $alias = $sfAlias }
   $login = (& $sf org login web --instance-url $sfInstance --alias $alias 2>&1) -join "`n"
   if ($LASTEXITCODE -ne 0) { throw "Salesforce sign-in didn't finish. Quit SF Desk and open it again to retry.`n`n$login" }
   if (-not $target) { Save-Setting 'SF_TARGET_ORG' $alias }
+  return $true
+}
+
+# Once the CLI is installed, its login is checked while the server starts and the window opens, instead
+# of before (sf takes several seconds to start). The timer below picks up the result.
+$script:loginCheck = $null
+function Start-LoginCheck($sf, $target) {
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $env:ComSpec
+  $targetArg = ''; if ($target) { $targetArg = ' --target-org "' + $target + '"' }
+  $psi.Arguments = '/d /s /c ""' + $sf + '" org display --json' + $targetArg + ' 2>nul"'
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $p = [Diagnostics.Process]::Start($psi)
+  $script:loginCheck = @{ sf = $sf; target = $target; output = $p.StandardOutput.ReadToEndAsync() }
+}
+function Complete-LoginCheck {
+  $c = $script:loginCheck
+  if (-not $c -or -not $c.output.IsCompleted) { return }
+  $script:loginCheck = $null
+  $shown = ''; try { $shown = $c.output.Result } catch {}
+  if ($shown -match '"status":\s*0') { return }
+  try {
+    if (Invoke-SignIn $c.sf $c.target) { Show-Status 'Signed in to Salesforce. Click Connect in the SF Desk window.' }
+  } catch {
+    Show-Error $_.Exception.Message
+  }
 }
 
 # ---------- the window and the tray icon ----------
@@ -238,8 +261,8 @@ function Find-Edge {
 
 # SF Desk in its own window: Edge in app mode with its own profile, so it has no tabs or address bar
 # and keeps its own sign-in cookies. Without Edge, the default browser.
-function Open-Window {
-  $url = Get-Url
+function Open-Window($hash = '') {
+  $url = (Get-Url) + $hash
   $edge = Find-Edge
   if ($edge) {
     Start-Process $edge -ArgumentList @("--app=$url", ('--user-data-dir="' + (Join-Path $dataDir 'edge') + '"'), '--no-first-run', '--no-default-browser-check')
@@ -288,7 +311,7 @@ if ($elevated -and -not (Ask 'SF Desk is running as administrator' ("SF Desk was
 $created = $false
 $mutex = New-Object Threading.Mutex($true, 'Local\SFDeskLauncher', [ref]$created)
 if (-not $created) {
-  if (Test-Answers (Get-Url)) { Open-Window }
+  Open-Window
   exit 0
 }
 
@@ -305,14 +328,18 @@ try {
   $script:tray.Text = 'SF Desk'
   $script:tray.Visible = $true
 
-  $url = Get-Url
-  $ownServer = -not (Test-Answers $url) # else already running (a checkout's "npm start", say): just show it
-  if ($ownServer) {
-    $vars = Read-Env
-    if (-not $vars['SF_CLIENT_ID']) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
-    Show-Status 'Starting SF Desk...'
-    Start-Server
+  $vars = Read-Env
+  if (-not $vars['SF_CLIENT_ID']) {
+    # The first time (no CLI yet) get it and sign in first; after that, check the login alongside.
+    $sf = Find-Sf
+    if (-not $sf) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
+    else {
+      if ((Get-Setting 'SF_CLI_PATH') -ne $sf) { Save-Setting 'SF_CLI_PATH' $sf }
+      Start-LoginCheck $sf (Get-Setting 'SF_TARGET_ORG')
+    }
   }
+  Show-Status 'Starting SF Desk...'
+  Start-Server
   $script:tray.Text = 'SF Desk'
 } catch {
   if ($script:tray) { $script:tray.Visible = $false }
@@ -329,7 +356,7 @@ function Add-MenuItem($text, [scriptblock]$action) {
 }
 Add-MenuItem 'Open SF Desk' { Open-Window }
 [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
-Add-MenuItem 'Edit Settings...' { Start-Process notepad.exe -ArgumentList ('"' + $envFile + '"') }
+Add-MenuItem 'Settings...' { Open-Window '#settings' }
 Add-MenuItem 'Restart Server' { Restart-Server }
 Add-MenuItem 'Show Server Log' { Start-Process notepad.exe -ArgumentList ('"' + $logFile + '"') }
 Add-MenuItem 'Show Data Folder' { Start-Process explorer.exe -ArgumentList ('"' + $dataDir + '"') }
@@ -338,16 +365,17 @@ Add-MenuItem 'Quit SF Desk' { Quit-App }
 $script:tray.ContextMenuStrip = $menu
 $script:tray.add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { Open-Window } })
 
-# Say so if the server stops by itself, and offer to start it again.
+# Finish the login check, and say so if the server stops by itself and offer to start it again.
 $timer = New-Object Windows.Forms.Timer
-$timer.Interval = 2000
+$timer.Interval = 1000
 $timer.add_Tick({
+  Complete-LoginCheck
   $p = $script:server
   if ($script:quitting -or -not $p -or -not $p.HasExited) { return }
   $script:server = $null
   if (Ask 'SF Desk' "The SF Desk server stopped (exit code $($p.ExitCode)). Start it again?`n`n$(Get-LogTail)") { Restart-Server }
 })
-if ($ownServer) { $timer.Start() }
+$timer.Start()
 
 Open-Window
 [Windows.Forms.Application]::Run()

@@ -29,11 +29,11 @@ for calendar access.
 
 Keep SF Desk in the Dock (right-click its icon > **Options > Keep in Dock**). Closing the window keeps it
 running in the background, so the Outlook add-in keeps working; click the Dock icon to bring it back, and
-quit it (**SF Desk > Quit SF Desk**) to stop it. If SF Desk is already running from a Terminal window or a
-checkout, the app shows that one instead of starting another.
+quit it (**SF Desk > Quit SF Desk**) to stop it. The app runs its own server, so stop any SF Desk running
+from a Terminal window or a checkout first; otherwise the app reports that its server couldn't start.
 
 **Your data** lives in `~/Library/Application Support/SF Desk` (**Help > Show Data Folder**): `.env` for
-settings (**SF Desk > Edit Settings...**, then **File > Restart Server**), `data/` for the local copy of
+settings (open it from that folder in a text editor, then **File > Restart Server**), `data/` for the local copy of
 your records, `certs/` for the Outlook add-in's certificate and `sf-cli/` if the app downloaded the CLI.
 To update, replace the app with the new one; all of that is kept. The server's log is in
 `~/Library/Logs/SF Desk` (**Help > Show Server Log**).
@@ -281,8 +281,8 @@ Calendars**, turn on **Terminal**, then stop SF Desk with Ctrl+C, run `npm start
 
 ## Windows
 
-SF Desk for Windows comes as `SF-Desk-windows.zip` for Intel and AMD PCs, or `SF-Desk-windows-arm64.zip` for ARM PCs
-(Snapdragon; **Settings > System > About** shows which). You need Windows 10 or 11 (64-bit), Microsoft Edge (built
+SF Desk for Windows comes as `SF-Desk-windows.zip`, one download for Intel, AMD and ARM (Snapdragon) PCs: the
+installer puts in the Node.js built for the PC. You need Windows 10 or 11 (64-bit), Microsoft Edge (built
 in) and **classic Outlook** signed in to your SailPoint mailbox; the new Outlook doesn't let other apps read its
 calendar, so turn off the **New Outlook** toggle if it's on.
 
@@ -301,9 +301,10 @@ calendar, so turn off the **New Outlook** toggle if it's on.
    whether to allow a program to access its data, choose **Allow** (this happens when Windows doesn't report
    an up-to-date antivirus).
 
-Closing the window keeps SF Desk running; the SF Desk icon by the clock reopens it and has **Edit Settings...**,
-**Restart Server**, **Show Server Log**, **Show Data Folder** and **Quit SF Desk**. Settings and data are in
-`%LOCALAPPDATA%\SF Desk`; running **Install SF Desk** from a newer zip updates the app and keeps them.
+Closing the window keeps SF Desk running; the SF Desk icon by the clock reopens it and has **Settings...**
+(Display Mode: Light, Dark or System Auto), **Restart Server**, **Show Server Log**, **Show Data Folder** and
+**Quit SF Desk**. The `.env` settings file and data are in `%LOCALAPPDATA%\SF Desk`; running **Install SF Desk**
+from a newer zip updates the app and keeps them.
 
 If Time Entry says PowerShell's policy stops SF Desk from reading Outlook, your PC only allows signed scripts;
 ask IT, or use Salesforce events. If it says Outlook and SF Desk run with different permissions, start Outlook
@@ -312,7 +313,7 @@ normally (not as administrator).
 ### Building the Windows download
 
 Anywhere npm and nodejs.org are reachable (e.g. in the cloud), `scripts/build-windows-package.sh` writes
-`dist/SF-Desk-windows.zip`; with `--arch arm64` it writes `dist/SF-Desk-windows-arm64.zip`. Running from a Git checkout on Windows also works: `npm start` uses Outlook the
+`dist/SF-Desk-windows.zip`, with Node.js for both x64 and arm64. Running from a Git checkout on Windows also works: `npm start` uses Outlook the
 same way, with `sf` from your PATH.
 
 ## Optional: the Outlook add-in

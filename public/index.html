@@ -7,6 +7,19 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script>
+// Display Mode (Settings), kept in this browser: light, dark, or system (the default) to follow the
+// computer. Set before the page draws, so it never flashes the other one.
+const THEME_KEY = 'sfdesk.theme';
+const themePick = () => { try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; } };
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const t = themePick();
+  document.documentElement.dataset.theme = t === 'light' || t === 'dark' ? t : darkQuery.matches ? 'dark' : 'light';
+}
+applyTheme();
+darkQuery.addEventListener('change', applyTheme);
+</script>
 <style>
   .ol-pane { padding: 12px; --covered: #c9f2d6; --open: #fdd3cf; --skip: #eef0f3; }
   .ol-pane section { padding: 12px; margin-bottom: 12px; }
@@ -16,7 +29,31 @@
   :root { --chrome: 74px; /* header (50px) + footer (24px) */
     --bg: #f5f6f8; --panel: #ffffff; --ink: #1b1f24; --muted: #667085; --line: #e3e6eb;
     --accent: #0b5cad; --accent-soft: #e8f1fb; --ok: #067647; --err: #b42318; --dirty: #fff6dd;
+    --field: #ffffff; --row-soft: #fafbfc; --tip: #1b1f24; color-scheme: light;
   }
+  /* Display Mode (Settings): data-theme is set to light or dark, following the system when that's the pick. */
+  :root[data-theme=dark] { color-scheme: dark;
+    --bg: #14171c; --panel: #1c2027; --ink: #e6e8ec; --muted: #9aa3b2; --line: #313844;
+    --accent: #5aa2f0; --accent-soft: #1d2d44; --ok: #3fb67a; --err: #f07067; --dirty: #3a3220;
+    --field: #12151a; --row-soft: #20252d; --tip: #2b313b;
+  }
+  :root[data-theme=dark] .dash { --grid: #2a303a; }
+  :root[data-theme=dark] .cal, :root[data-theme=dark] .ol-pane { --covered: #1e4630; --open: #4d2522; --skip: #262b33; }
+  :root[data-theme=dark] .status-pill.covered { color: #9be3b8; } :root[data-theme=dark] .status-pill.open { color: #f6b1aa; }
+  :root[data-theme=dark] .hours-col .hl { border-top-color: #262b33; }
+  :root[data-theme=dark] .tes-chip.g { background: #1e4630; color: #9be3b8; }
+  :root[data-theme=dark] .tes-chip.y { background: #4a3d12; color: #f3d77a; }
+  :root[data-theme=dark] .tes-chip.r { background: #4d2522; color: #f6b1aa; }
+  :root[data-theme=dark] button.danger { color: #f07067; border-color: #6b2c27; }
+  :root[data-theme=dark] dialog.popup::backdrop { background: rgba(0, 0, 0, .6); }
+  .settings { max-width: 640px; margin: 0 auto; padding: 24px clamp(12px, 2vw, 32px) 48px; }
+  .settings h2 { margin: 0 0 16px; font-size: 20px; }
+  .settings fieldset { border: 0; margin: 0; padding: 0; display: flex; gap: 10px; flex-wrap: wrap; }
+  .settings legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+  .settings .choice { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); cursor: pointer; }
+  .settings .choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .settings .choice input { width: auto; margin: 0; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
   header { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -33,8 +70,12 @@
   button:disabled { opacity: .45; cursor: default; }
   button.danger { color: #b42318; border-color: #f0b4ae; }
   button.danger:hover:not(:disabled) { background: #b42318; border-color: #b42318; color: #fff; }
-  input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink); }
+  /* Text boxes, number and date boxes and dropdowns all draw at one height, so a row of them lines up. */
+  select:not([multiple]), input:not([type=checkbox]):not([type=radio]) { box-sizing: border-box; height: 34px; vertical-align: middle; }
   input:disabled, select:disabled, textarea:disabled { background: var(--bg); color: var(--muted); }
+  .grid.readonly :disabled { color: var(--ink); opacity: 1; -webkit-text-fill-color: var(--ink); }
+  .sub.opp-sub { font-size: 15px; color: var(--ink); }
   .dirty { background: var(--dirty); border-color: #e6b94a; }
 
   main { display: grid; grid-template-columns: clamp(280px, 20vw, 380px) minmax(0, 1fr); height: calc(100vh - var(--chrome)); height: calc(100dvh - var(--chrome)); }
@@ -51,6 +92,7 @@
     color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); }
   .pager button { width: auto; padding: 4px 10px; white-space: nowrap; }
   .pager span { white-space: nowrap; }
+  .acct-bar h2 .count { color: var(--muted); font-weight: 500; }
   .pager:last-child { border-bottom: 0; border-top: 1px solid var(--line); }
   .acct { padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
   .acct:hover { background: var(--bg); }
@@ -96,7 +138,7 @@
   th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
   td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   tr.closed td { opacity: .65; }
-  tr.new td { background: #fafbfc; }
+  tr.new td { background: var(--row-soft); }
   td.actions { white-space: nowrap; width: 1%; }
   .tablewrap { overflow-x: auto; }
   .col-name { min-width: 180px; } .col-stage { min-width: 150px; } .col-num { min-width: 100px; } .col-date { min-width: 140px; } .col-next { min-width: 180px; }
@@ -104,10 +146,33 @@
   .back { margin-bottom: 8px; }
   .ds-row { cursor: pointer; }
   .ds-row:hover td { background: var(--bg); }
-  .ds-more td { background: #fafbfc; }
+  .ds-more td { background: var(--row-soft); }
   .ds-more dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; margin: 4px 0; }
   .ds-more dt { font-size: 12px; color: var(--muted); }
   .ds-more dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  tr.ds-group td { font-weight: 600; background: var(--bg); }
+  tr.ds-group td:first-child { padding-left: 18px; }
+  tr.tes-stage td { font-weight: 700; font-size: 13px; background: var(--accent-soft); color: var(--accent); }
+  tr.tes-stage .tes-stalled { color: var(--err); }
+  tr.tes-stage { cursor: pointer; } tr.tes-stage:hover td { filter: brightness(.97); }
+  .tes-twisty { display: inline-block; width: 1.2em; }
+  .tes-date { white-space: nowrap; min-width: 112px; }
+  td.tes-opp { white-space: normal; max-width: 260px; overflow-wrap: anywhere; }
+  tr.tes-pager td { text-align: center; } tr.tes-pager td > * { margin: 0 6px; vertical-align: middle; }
+  tr.tes-pager button { padding: 2px 10px; }
+  .tes-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--bg); }
+  .tes-chip.g { background: #dcf3e4; color: #17703a; } .tes-chip.y { background: #fff1c2; color: #7a5600; } .tes-chip.r { background: #fde0de; color: #b42318; }
+  .ds-more h4 { margin: 4px 0 8px; font-size: 13px; }
+  table.tes-history { margin-bottom: 10px; } table.tes-history td { vertical-align: top; }
+  td.tes-notes { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 240px; }
+  .tes-update { display: grid; grid-template-columns: 160px 1fr; gap: 8px 14px; align-items: start; margin: 4px 0 10px; }
+  .tes-update label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .tes-update textarea { min-height: calc(3lh + 14px); resize: vertical; }
+  .tes-update .form-actions { grid-column: 1 / -1; margin-top: 0; }
+  .ds-more details { margin: 6px 0; } .ds-more details summary { cursor: pointer; color: var(--accent); }
+  dialog.popup { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 22px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
+  dialog.popup::backdrop { background: rgba(0, 0, 0, .35); }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
@@ -132,7 +197,7 @@
 
   body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; } #app { flex: 1 0 auto; min-width: 0; }
   footer#ver { height: 24px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
-  #toast { position: fixed; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: #1b1f24; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
+  #toast { position: fixed; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: var(--tip); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
   #toast.ok { background: var(--ok); } #toast.err { background: var(--err); }
 
   /* ---------- dashboard ---------- */
@@ -185,7 +250,7 @@
   svg.cols text.cap { fill: var(--ink); font-variant-numeric: tabular-nums; }
   svg.cols .hit { fill: transparent; cursor: pointer; }
   svg.cols .hit:hover { fill: rgba(11, 92, 173, .06); }
-  #tip { position: fixed; pointer-events: none; z-index: 10; background: #1b1f24; color: #fff; font-size: 12px; padding: 7px 10px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: none; max-width: 260px; }
+  #tip { position: fixed; pointer-events: none; z-index: 10; background: var(--tip); color: #fff; font-size: 12px; padding: 7px 10px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: none; max-width: 260px; }
   #tip b { display: block; margin-bottom: 3px; }
   #tip .row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
   #tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
@@ -347,6 +412,7 @@
     <button id="navDash" onclick="showDashboard()">Deals</button>
     <button id="navTime" onclick="showTime()">DS Time</button>
     <button id="navCal" onclick="showCalendar()">Time Entry</button>
+    <button id="navTes" onclick="showTes()">TES</button>
     <button id="navAccts" onclick="showMain()">Accounts</button>
   <div class="hdr-right">
     <span id="who"></span>
@@ -388,21 +454,16 @@ let boatFilter = 'mine', teamFilter = 'mine', acctFilters = null;
 // The sales reps the BOAT and team filters leave on the Accounts and Deals tabs: { key, reps }.
 let repChoices = null;
 // The account list shows ACCT_PAGE accounts at a time, with paging controls above and below when there are more.
-const ACCT_PAGE = 200, ACCT_MAX = 5000;
+const ACCT_PAGE = 100, ACCT_MAX = 5000;
 let acctPage = 0;
 let savedRepName = ''; // the picked rep's name from the saved filters, until the rep choices load
 
-// Each launch starts on My BOAT(s) (All BOATs if mine can't be found), My Accounts and All sales reps
-// (and My Time on the My Time tab); the picks then carry across the tabs. The sort, grouping and "Show hidden" are kept in SF Desk's local
-// database, so they survive a restart.
+// Each launch starts on My BOAT(s), My Accounts and All sales reps (and My Time on the DS Time tab); the
+// picks then carry across the tabs. With no BOAT of mine to be found, My BOAT(s) covers every BOAT.
+// The sort, grouping and "Show hidden" are kept in SF Desk's local database, so they survive a restart.
 async function loadAcctPrefs() {
   boatFilter = 'mine'; teamFilter = 'mine'; repFilter = ''; savedRepName = '';
-  // When my BOAT can't be found (no BOAT field, none of my accounts has one, or Salesforce can't be
-  // reached), start on All BOATs instead.
-  try {
-    await ensureAcctFilters();
-    if (!acctFilters.boat || !acctFilters.myBoats?.length) boatFilter = 'all';
-  } catch { boatFilter = 'all'; }
+  await ensureAcctFilters().catch(() => {});
   try {
     const p = await api('/prefs/accounts');
     sortRecent = !!p.sortRecent; groupByRep = !!p.groupByRep; showHiddenAccts = !!p.showHidden;
@@ -646,8 +707,26 @@ function showConnect(message) {
   app.replaceChildren(el('div', { class: 'center' }, el('div', { class: 'card' },
     el('h2', {}, 'Connect to Salesforce'),
     el('p', {}, message || 'Sign in with your Salesforce account. The app only sees what your user can see, and only saves when you click Save.'),
-    el('a', { class: 'btn primary', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Connect'),
+    // With the Salesforce CLI login, connecting failed most likely because that login is missing or expired.
+    me?.cli && message ? el('p', {}, el('button', { class: 'primary', onclick: cliSignIn }, 'Sign in to Salesforce'), ' ',
+      el('a', { class: 'btn', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Try again'))
+      : el('a', { class: 'btn primary', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Connect'),
   )));
+}
+
+// Sign in to the Salesforce CLI in the browser (the server runs "sf org login web"), then connect.
+async function cliSignIn(e) {
+  const b = e.currentTarget;
+  if (b.disabled) return;
+  b.disabled = true;
+  b.replaceChildren(el('span', { class: 'spin', 'aria-hidden': 'true' }), 'Waiting for you to sign in…');
+  b.parentNode.after(el('p', { class: 'sub', role: 'status' }, 'Your browser opened the Salesforce login. Sign in with SSO as usual, then come back here.'));
+  try {
+    await api('/cli-login', { method: 'POST' });
+    location.assign(IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login');
+  } catch (err) {
+    showConnect(err.message);
+  }
 }
 
 // Connecting can take a while before anything comes back: show it was clicked, and don't start it twice.
@@ -673,7 +752,27 @@ function setNav(which) {
   document.getElementById('navDash').classList.toggle('on', which === 'dash');
   document.getElementById('navTime').classList.toggle('on', which === 'time');
   document.getElementById('navCal').classList.toggle('on', which === 'cal');
+  document.getElementById('navTes').classList.toggle('on', which === 'tes');
   document.getElementById('navAccts').classList.toggle('on', which === 'accts');
+}
+
+// Settings (the app's Settings... menu, or #settings): Display Mode, saved in this browser.
+function showSettings() {
+  if (me?.connected) { setNav('settings'); current = null; }
+  const modes = [['light', 'Light'], ['dark', 'Dark'], ['system', 'System Auto']];
+  const pick = themePick();
+  const choice = ([value, text]) => el('label', { class: 'choice' },
+    el('input', { type: 'radio', name: 'theme', value, checked: pick === value, onchange: () => {
+      try { localStorage.setItem(THEME_KEY, value); } catch {}
+      applyTheme();
+    } }), text);
+  document.getElementById('app').replaceChildren(el('div', { class: 'settings' },
+    el('h2', {}, 'Settings'),
+    el('section', {},
+      el('fieldset', {}, el('legend', {}, 'Display Mode'), modes.map(choice)),
+      el('div', { class: 'sub', style: 'margin:10px 0 0' }, 'System Auto follows your computer\'s light or dark appearance.')),
+    me?.connected ? null : el('button', { onclick: () => showConnect() }, '← Back'),
+  ));
 }
 
 function showMain() {
@@ -700,7 +799,7 @@ function showMain() {
   // selected-accounts controls stay at the top of the list.
   app.replaceChildren(el('div', { class: 'acct-page' },
     el('div', { class: 'dash-head acct-bar' },
-      el('h2', {}, 'Accounts'),
+      el('h2', {}, 'Accounts', el('span', { id: 'acctCount', class: 'count' })),
       el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep, sort),
       el('label', {}, group, 'Group by sales rep'),
       el('label', {}, showHidden, el('span', { id: 'hiddenAcctLabel' }, 'Show hidden'))),
@@ -753,6 +852,12 @@ function renderList() {
   const hiddenCount = accounts.filter((a) => isHidden(a.Id)).length;
   document.getElementById('hiddenAcctLabel').textContent = `Show hidden (${hiddenCount})`;
   const shown = shownAccounts();
+  const more = accounts.length >= ACCT_MAX ? '+' : '';
+  const count = document.getElementById('acctCount');
+  if (count) {
+    count.textContent = ` (${shown.length.toLocaleString()}${more})`;
+    count.title = more ? `Only the first ${ACCT_MAX.toLocaleString()} are loaded; narrow the filters or search to see the rest` : '';
+  }
   for (const id of [...pickedAccts]) if (!shown.some((a) => a.Id === id)) pickedAccts.delete(id);
   renderAcctSelbar();
   renderReps();
@@ -785,7 +890,7 @@ function renderList() {
   const pager = () => pages > 1 ? el('div', { class: 'pager' },
     el('button', { disabled: acctPage === 0, onclick: () => { acctPage--; renderList(); box.scrollTop = 0; } }, '‹ Prev'),
     el('span', {}, `${(acctPage * ACCT_PAGE + 1).toLocaleString()}–${(acctPage * ACCT_PAGE + pageRows.length).toLocaleString()} of ` +
-      `${shown.length.toLocaleString()}${accounts.length >= ACCT_MAX ? '+' : ''}`),
+      `${shown.length.toLocaleString()}${more}`),
     el('button', { disabled: acctPage >= pages - 1, onclick: () => { acctPage++; renderList(); box.scrollTop = 0; } }, 'Next ›')) : null;
   if (!groupByRep) return box.replaceChildren(...[pager(), ...pageRows.map(row), pager()].filter(Boolean));
   // A heading before each rep's rows on this page, with the rep's count across all pages.
@@ -1285,6 +1390,16 @@ function renderSub() {
     (current.opportunities.some((o) => isHidden(o.Id)) ? ' (hidden ones not counted)' : '');
 }
 
+// The account's SailPoint BOAT as a read-only field, or null when the account filters have no BOAT field.
+function boatField(a) {
+  const b = acctFilters?.boat;
+  if (!b) return null;
+  const v = a[b.name];
+  return el('label', { title: `${b.label} (${b.name})` }, el('span', {}, 'SailPoint BOAT'),
+    el('input', { type: 'text', disabled: true, 'aria-label': 'SailPoint BOAT',
+      value: v == null || v === '' ? '' : b.options.find((o) => o.value === String(v))?.label || String(v) }));
+}
+
 function renderAccountForm() {
   const a = current.account;
   const sec = document.getElementById('acctSection');
@@ -1298,13 +1413,7 @@ function renderAccountForm() {
     form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null },
       el('span', {}, label(def[0])), field(def, a[def[0]], meta.editable.Account.includes(def[0]), onChange)));
     // SailPoint BOAT (read-only) right after Billing state.
-    const b = acctFilters?.boat;
-    if (def[0] === 'BillingState' && b) {
-      const v = a[b.name];
-      form.append(el('label', { title: `${b.label} (${b.name})` }, el('span', {}, 'SailPoint BOAT'),
-        el('input', { type: 'text', disabled: true, 'aria-label': 'SailPoint BOAT',
-          value: v == null || v === '' ? '' : b.options.find((o) => o.value === String(v))?.label || String(v) })));
-    }
+    if (def[0] === 'BillingState') form.append(boatField(a) || '');
   }
   revert.addEventListener('click', renderAccountForm);
   save.addEventListener('click', async () => {
@@ -1431,7 +1540,7 @@ function openOpportunity(id) {
       el('h2', {}, o.Name),
       el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
     ),
-    el('div', { class: 'sub' }, [a.Name, o.StageName, money(o.Amount), o.CloseDate && `closes ${o.CloseDate}`, `Owner: ${o.Owner?.Name || '—'}`].filter(Boolean).join(' · ')),
+    oppSub(a, o, openOpportunity),
     el('section', { id: 'focusOpp' }),
     el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
   );
@@ -1449,40 +1558,84 @@ function teamRow(roles, value) {
   }));
 }
 
+// The line under the opportunity's name: its account (opens the account pop-up) and sales rep.
+// openOpp(id) shows another opportunity picked in that pop-up.
+const oppSub = (a, o, openOpp) => el('div', { class: 'sub opp-sub' },
+  el('a', { href: '#', title: `Show ${a.Name}`, onclick: (ev) => { ev.preventDefault(); openAcctPopup(openOpp); } }, a.Name),
+  ` · Rep: ${o.Owner?.Name || '—'}`);
+
+// The current account, read-only, in a pop-up over the opportunity: its fields, opportunities and Deal Supports.
+function openAcctPopup(openOpp) {
+  const a = current.account;
+  const dlg = el('dialog', { class: 'popup', 'aria-label': 'Account' });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });
+
+  const form = el('div', { class: 'grid readonly' });
+  for (const def of ACCOUNT_UI) {
+    if (def[0] === 'Description' && current.team) form.append(teamRow(current.team.roles, (r) => ({ name: current.team.account[r] })));
+    form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null }, el('span', {}, label(def[0])), field(def, a[def[0]], false, () => {})));
+    if (def[0] === 'BillingState') form.append(boatField(a) || '');
+  }
+
+  let withClosed = false;
+  const oppSec = el('section');
+  const renderOppList = () => {
+    const all = current.opportunities.filter((o) => !isHidden(o.Id));
+    const closed = all.filter((o) => o.IsClosed).length;
+    const list = (withClosed ? all : all.filter((o) => !o.IsClosed))
+      .sort((x, y) => (x.IsClosed - y.IsClosed) || String(x.CloseDate || '').localeCompare(String(y.CloseDate || '')));
+    const toggle = el('input', { type: 'checkbox', checked: withClosed, onchange: (e) => { withClosed = e.target.checked; renderOppList(); } });
+    const pick = (o) => el('a', { href: '#', onclick: (ev) => { ev.preventDefault(); dlg.close(); openOpp(o.Id); } }, o.Name);
+    oppSec.replaceChildren(
+      el('h3', {}, withClosed ? `Opportunities (${list.length})` : `Open opportunities (${list.length})`, el('span', { class: 'spacer' }),
+        closed ? el('label', { class: 'selbar' }, toggle, `Show closed (${closed})`) : null),
+      el('div', { class: 'tablewrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, ['Name', 'Stage', 'Amount', 'Close date', 'Probability', 'Owner'].map((t) => el('th', {}, t)))),
+        el('tbody', {}, list.length ? list.map((o) => el('tr', { class: o.IsClosed ? 'closed' : null },
+          el('td', {}, pick(o)), el('td', {}, o.StageName || ''), el('td', { class: 'n' }, money(o.Amount)),
+          el('td', {}, o.CloseDate || ''), el('td', { class: 'n' }, o.Probability == null ? '' : o.Probability + '%'), el('td', {}, o.Owner?.Name || '')))
+          : el('tr', {}, el('td', { colspan: 6, class: 'empty' }, all.length ? 'No open opportunities.' : 'No opportunities on this account.'))))),
+    );
+  };
+  renderOppList();
+
+  const openOpps = current.opportunities.filter((o) => !o.IsClosed && !isHidden(o.Id));
+  dlg.append(
+    el('div', { class: 'title-row' },
+      el('h2', {}, a.Name),
+      el('span', { class: 'rep-pill', title: 'Sales rep (account owner)' }, el('span', { class: 'k' }, 'Sales rep'), a.Owner?.Name || '—'),
+      el('a', { href: `${me.instanceUrl}/${a.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
+    el('div', { class: 'sub' }, `${openOpps.length} open opportunities · ${money(openOpps.reduce((s, o) => s + (o.Amount || 0), 0))} open pipeline`),
+    el('section', {}, el('h3', {}, 'Account'), form),
+    oppSec,
+    el('section', { id: 'acctDs' }),
+  );
+  document.body.append(dlg);
+  dlg.showModal();
+  loadAccountDealSupports(a.Id);
+}
+
+// Read-only: changes to the opportunity itself are made in Salesforce.
 function renderFocusOpp(o) {
   const sec = document.getElementById('focusOpp');
-  const form = el('div', { class: 'grid' });
-  const save = el('button', { class: 'primary', disabled: true }, 'Save opportunity');
-  const revert = el('button', { disabled: true }, 'Revert');
-  const onChange = () => { const dirty = Object.keys(changes(form, o)).length > 0; save.disabled = revert.disabled = !dirty; };
+  const form = el('div', { class: 'grid readonly' });
+  const show = (def) => el('label', { class: def[1] === 'textarea' ? 'wide' : null }, el('span', {}, label(def[0])), field(def, o[def[0]], false, () => {}));
   // The opportunity's own fields make one row, so the team row below it is the second row.
   const first = el('div', { class: 'wide opp-row1' });
   form.append(first);
   for (const def of OPP_FOCUS_UI) {
-    if (def[1] !== 'textarea') {
-      first.append(el('label', {}, el('span', {}, label(def[0])), field(def, o[def[0]], meta.editable.Opportunity.includes(def[0]), onChange)));
-      continue;
-    }
+    if (def[1] !== 'textarea') { first.append(show(def)); continue; }
     if (def[0] === 'Description' && current.team) {
       const own = current.team.opportunities[o.Id];
       form.append(teamRow(current.team.roles, (r) => own?.[r] || { name: current.team.account[r], fromAccount: true }));
     }
-    form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null },
-      el('span', {}, label(def[0])), field(def, o[def[0]], meta.editable.Opportunity.includes(def[0]), onChange)));
+    form.append(show(def));
   }
-  revert.addEventListener('click', () => renderFocusOpp(o));
-  save.addEventListener('click', async () => {
-    save.disabled = true;
-    try {
-      const rec = await api('/opportunities/' + o.Id, { method: 'PATCH', body: { fields: changes(form, o), lastModified: o.LastModifiedDate } });
-      const i = current.opportunities.findIndex((x) => x.Id === o.Id);
-      current.opportunities[i] = rec;
-      document.querySelector('.title-row h2').textContent = rec.Name;
-      renderFocusOpp(rec);
-      toast(`Saved "${rec.Name}" to Salesforce`, 'ok');
-    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
-  });
-  sec.replaceChildren(el('h3', {}, 'Opportunity', el('span', { class: 'spacer' }), revert, save), form);
+  sec.replaceChildren(el('h3', {}, 'Opportunity', el('span', { class: 'spacer' }),
+    el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Edit in Salesforce ↗')), form);
 }
 
 // The open edit form on the opportunity's Deal Supports list, and on the account's Deal Supports panel.
@@ -1784,7 +1937,7 @@ const weighted = (list) => list.reduce((s, o) => s + amt(o) * (Number(o.Probabil
 const compact = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n >= 1e6 ? 1 : 0 });
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-const dash = { all: [], view: 'month', fy: null, pick: null, filters: null, loads: 0 };
+const dash = { all: [], view: 'month', page: 0, pick: null, filters: null, loads: 0 };
 
 async function showDashboard() {
   setNav('dash');
@@ -1846,7 +1999,6 @@ function renderDashboard() {
   const opps = inRep.filter((o) => !isHidden(o.Id) && !isHidden(o.AccountId));
   const hiddenCount = inRep.length - opps.length;
   const today = todayStr(), now = fiscal(today);
-  dash.fy ??= now.fy;
   document.getElementById('dashSub').textContent =
     `${plural(opps.length, 'open opportunity', 'open opportunities')} · ${filterText(dash.filters)}` +
     (hiddenCount ? `, not counting ${hiddenCount} hidden` : '') +
@@ -1908,29 +2060,28 @@ function renderStageChart(opps) {
 function renderForecastChart(opps, now, today) {
   const sec = document.getElementById('forecastChart');
   const view = dash.view;
-  const fys = opps.map((o) => fiscal(o.CloseDate).fy);
-  const minFy = Math.min(now.fy, ...fys), maxFy = Math.max(now.fy, ...fys);
-  dash.fy = Math.min(maxFy, Math.max(minFy, dash.fy));
 
-  // The periods to show, in order.
+  // The periods to show, in order: from the current one (earlier close dates are counted in "Past
+  // close date") through the last one with a close date. Months come 12 at a time.
+  const end = fiscal(opps.reduce((m, o) => (o.CloseDate > m ? o.CloseDate : m), today));
   let periods = [];
   if (view === 'month') {
-    for (let i = 0; i < 12; i++) {
-      const m = (FY_START + i) % 12, y = dash.fy - 1 + (FY_START + i >= 12 ? 1 : 0);
-      periods.push({ key: periodKey('month', { y, m }), label: MONTHS[m], long: `${MONTHS[m]} ${y} (${fyName(dash.fy)})` });
+    for (let i = now.y * 12 + now.m; i <= end.y * 12 + end.m; i++) {
+      const y = Math.floor(i / 12), m = i % 12, fy = m >= FY_START ? y + 1 : y;
+      const label = i === now.y * 12 + now.m || m === 0 ? `${MONTHS[m]} ${String(y % 100).padStart(2, '0')}` : MONTHS[m];
+      periods.push({ key: periodKey('month', { y, m }), label, long: `${MONTHS[m]} ${y} (${fyName(fy)})`, y, m });
     }
   } else {
-    const lo = Math.min(...(opps.length ? fys : [now.fy])), hi = Math.max(now.fy, ...fys);
-    for (let fy = Math.min(lo, now.fy); fy <= hi; fy++) {
+    for (let fy = now.fy; fy <= end.fy; fy++) {
       if (view === 'year') periods.push({ key: fyName(fy), label: fyName(fy), long: `${fyName(fy)} (Feb ${fy - 1} – Jan ${fy})` });
-      else for (let q = 1; q <= 4; q++) periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}` });
+      else for (let q = fy === now.fy ? now.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
+        periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}` });
+      }
     }
-    // Drop empty quarters at either end, but keep the current one.
-    const nowKey = periodKey(view, now);
-    const has = new Set(opps.map((o) => periodKey(view, fiscal(o.CloseDate))));
-    while (periods.length > 1 && !has.has(periods[0].key) && periods[0].key !== nowKey) periods.shift();
-    while (periods.length > 1 && !has.has(periods.at(-1).key) && periods.at(-1).key !== nowKey) periods.pop();
   }
+  const pages = view === 'month' ? Math.ceil(periods.length / 12) : 1;
+  dash.page = Math.min(pages - 1, Math.max(0, dash.page));
+  if (view === 'month') periods = periods.slice(dash.page * 12, dash.page * 12 + 12);
   const byKey = new Map(periods.map((p) => [p.key, []]));
   for (const o of opps) byKey.get(periodKey(view, fiscal(o.CloseDate)))?.push(o);
   const nowKey = periodKey(view, now);
@@ -1944,10 +2095,11 @@ function renderForecastChart(opps, now, today) {
 
   const seg = el('div', { class: 'seg' }, [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']].map(([v, t]) =>
     el('button', { class: view === v ? 'on' : null, onclick: () => { dash.view = v; dash.pick = null; renderDashboard(); } }, t)));
-  const fynav = view === 'month' ? el('span', { class: 'fynav' },
-    el('button', { disabled: dash.fy <= minFy, onclick: () => { dash.fy--; dash.pick = null; renderDashboard(); }, 'aria-label': 'Previous fiscal year' }, '‹'),
-    fyName(dash.fy),
-    el('button', { disabled: dash.fy >= maxFy, onclick: () => { dash.fy++; dash.pick = null; renderDashboard(); }, 'aria-label': 'Next fiscal year' }, '›')) : null;
+  const monthName = (p) => `${MONTHS[p.m]} ${p.y}`;
+  const fynav = view === 'month' && pages > 1 ? el('span', { class: 'fynav' },
+    el('button', { disabled: dash.page <= 0, onclick: () => { dash.page--; dash.pick = null; renderDashboard(); }, 'aria-label': 'Earlier 12 months' }, '‹'),
+    periods.length > 1 ? `${monthName(periods[0])} – ${monthName(periods.at(-1))}` : monthName(periods[0]),
+    el('button', { disabled: dash.page >= pages - 1, onclick: () => { dash.page++; dash.pick = null; renderDashboard(); }, 'aria-label': 'Later 12 months' }, '›')) : null;
   const legend = cats.length > 1 ? el('div', { class: 'legend' },
     cats.map(([c, color]) => el('span', {}, el('i', { style: `background:${color}` }), c))) : null;
   const box = el('div');
@@ -1960,7 +2112,7 @@ function renderForecastChart(opps, now, today) {
   const ymax = ticks.at(-1), plotH = H - top - bottom;
   const y = (v) => top + plotH - (v / ymax) * plotH;
   const slot = (W - left - right) / periods.length;
-  const bw = Math.min(24, slot * 0.6);
+  const bw = Math.min(140, slot * 0.75);
   const pick = dash.pick?.kind === 'period' ? dash.pick.key : null;
   const g = svgEl('svg', { class: 'cols', viewBox: `0 0 ${W} ${H}`, height: H, role: 'img',
     'aria-label': 'Open pipeline by close date' });
@@ -2094,6 +2246,337 @@ async function openDeal(o) {
   showMain();
   await openAccount(o.AccountId);
   if (current?.opportunities.some((x) => x.Id === o.Id)) openOpportunity(o.Id);
+}
+
+// ---------- TES ----------
+// TES Requests (the Deal Supports of record type "TES Request") where I, my team or one of them is the
+// Opportunity Lead SE or Assigned SE, grouped by TES Stage, then by customer A–Z, newest first within each.
+// `open` holds the rows showing their status updates; `updates` the updates fetched, by request Id.
+// Completed and Cancelled requests show for the last `days[stage]` days (TES_CLOSED_DAYS to start; each
+// "Show more" adds that much), and never once they're over TES_CLOSED_MAX days old.
+const TES_CLOSED = ['completed', 'cancelled'];
+const TES_CLOSED_DAYS = 90, TES_CLOSED_MAX = 365;
+// `collapsed` holds the collapsed stages, `page` each stage's page (from 0); both start over for each team filter.
+const TES_COLLAPSE_OVER = 100, TES_PAGE = 50;
+const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), days: {},
+  collapsed: new Set(), page: {}, collapsedFor: null };
+const tesOpp = (r) => r[tes.data.oppRel] || null;
+const tesAcct = (r) => tesOpp(r)?.Account || null;
+// These stages first, in this order; any others follow A–Z, then requests with no stage.
+const TES_STAGES = ['Requested', 'Planning', 'Active', 'Stalled', 'Completed', 'Cancelled'];
+const tesStage = (r) => String((tes.data.fields.stage && r[tes.data.fields.stage.name]) || '');
+const tesStageRank = (s) => {
+  const i = TES_STAGES.findIndex((x) => x.toLowerCase() === s.toLowerCase());
+  return i >= 0 ? i : s ? TES_STAGES.length : TES_STAGES.length + 1;
+};
+// A TES Status (Green, Yellow or Red) in its color.
+const tesChip = (v) => v ? el('span', { class: 'tes-chip ' + ({ green: 'g', yellow: 'y', red: 'r' }[String(v).toLowerCase()] || '') }, v) : '—';
+// A TES Request's date: its Date of Activity, else its Date Requested, else the day it was created.
+const tesDate = (r) => {
+  const { activityDate: a, requestDate: q } = tes.data.fields;
+  if (a && r[a.name]) return { value: r[a.name], from: a.label };
+  if (q && r[q.name]) return { value: r[q.name], from: q.label };
+  return { value: String(r.CreatedDate || '').slice(0, 10), from: 'Created Date' };
+};
+const tesClosed = (r) => TES_CLOSED.includes(tesStage(r).toLowerCase());
+const tesDays = (stage) => tes.days[stage.toLowerCase()] || TES_CLOSED_DAYS;
+// When a Completed or Cancelled request finished: Date TES Completed, else TES End Date, else Last TES Stage, else its date.
+const tesClosedOn = (r) => {
+  const f = tes.data.fields;
+  const x = [f.completedDate, f.endDate, f.stageDate].find((y) => y && r[y.name]);
+  return x ? r[x.name] : tesDate(r).value;
+};
+
+function showTes() {
+  setNav('tes');
+  current = null;
+  tes.days = {};
+  tes.collapsedFor = null;
+  // The team filter of the other tabs (and saved with them), matching the request's Opportunity Lead SE or
+  // Assigned SE. The BOAT and sales rep filters don't apply here, and their picks stay as they are.
+  const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => {} });
+  const off = (s, text, what) => {
+    s.replaceChildren(el('option', { value: '' }, text));
+    s.disabled = true;
+    s.title = `The ${what} filter doesn't apply to TES Requests.`;
+  };
+  const seTitle = () => { filters.team.title = 'TES Requests where you (My Accounts), you or anyone on your team (My Team), or that person is the Opportunity Lead SE or Assigned SE'; };
+  off(filters.boat, 'All BOATs', 'BOAT'); off(filters.rep, 'All sales reps', 'sales rep'); seTitle();
+  ensureAcctFilters().then(() => {
+    const before = teamFilter;
+    fillTeamSelect(filters); seTitle();
+    if (teamFilter !== before) loadTes();
+  }).catch(() => {});
+  document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
+    el('div', { class: 'dash-head' },
+      el('h2', {}, 'TES'),
+      el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('span', { id: 'tesNew' }),
+      el('button', { onclick: loadTes }, 'Reload'),
+    ),
+    el('div', { class: 'sub', id: 'tesSub' }, 'Loading…'),
+    el('section', { id: 'tesRequests' }, el('h3', {}, 'TES Requests')),
+  ));
+  loadTes();
+}
+
+async function loadTes() {
+  const seq = ++tes.loads;
+  const sub = document.getElementById('tesSub');
+  if (sub && tes.data) sub.textContent = 'Loading…';
+  try {
+    const [data] = await Promise.all([api('/tes?' + new URLSearchParams({ team: teamFilter })),
+      dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
+    if (seq !== tes.loads) return; // a newer filter choice is loading
+    tes.data = data;
+    if (document.getElementById('tesRequests')) renderTes();
+  } catch (e) {
+    const sub = document.getElementById('tesSub');
+    if (sub) sub.textContent = e.message;
+  }
+}
+
+function renderTes() {
+  const d = tes.data, f = tes.filters;
+  // Salesforce's own "New <Deal Support>: TES Request" page.
+  document.getElementById('tesNew')?.replaceChildren(d.canCreate && d.recordTypeId ? el('a', { class: 'btn primary', target: '_blank', rel: 'noopener',
+    href: `${me.instanceUrl}/lightning/o/${d.object}/new?recordTypeId=${d.recordTypeId}`, title: `New ${d.label}: ${d.recordType}, in Salesforce` },
+    'Add TES Request ↗') : '');
+  const customer = (r) => tesAcct(r)?.Name || '';
+  const list = d.records.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
+    .sort((x, y) => (tesStageRank(tesStage(x)) - tesStageRank(tesStage(y))) || tesStage(x).localeCompare(tesStage(y))
+      || (!customer(x) - !customer(y)) || customer(x).localeCompare(customer(y))
+      || String(tesOpp(x)?.AccountId).localeCompare(String(tesOpp(y)?.AccountId))
+      || tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
+  const hiddenCount = d.records.length - list.length;
+  const today = todayStr(), yearAgo = addDays(today, -TES_CLOSED_MAX);
+  const recent = list.filter((r) => !tesClosed(r) || tesClosedOn(r) >= yearAgo);
+  const shown = recent.filter((r) => !tesClosed(r) || tesClosedOn(r) >= addDays(today, -tesDays(tesStage(r))));
+  const t = (s) => s.options[s.selectedIndex]?.textContent || '';
+  const who = d.team === 'all' ? '' : d.team === 'mine' ? 'you are' : d.team === 'team' ? 'you or someone on your team is' : `${t(f.team)} is`;
+  const se = [d.fields.leadSe?.label, d.fields.assignedSe?.label].filter(Boolean).join(' or ');
+  document.getElementById('tesSub').textContent =
+    `${plural(recent.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}` +
+    (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
+    (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
+    (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '') +
+    ` · Completed and Cancelled ones from the last ${TES_CLOSED_DAYS} days to start, up to a year with Show more`;
+  renderTesRequests(shown, recent.filter((r) => !shown.includes(r)));
+}
+
+// Shown like the opportunity's Deal Supports list, with the date, Most Recent TES Status and opportunity
+// added, under a heading row per TES Stage and per customer. Click a row for its status updates and to add
+// one. `older` holds the Completed and Cancelled requests left out for finishing before their stage's window.
+function renderTesRequests(list, older = []) {
+  const sec = document.getElementById('tesRequests');
+  const d = tes.data, f = d.fields;
+  const dates = [f.activityDate, f.requestDate].filter(Boolean);
+  const nameField = dsMeta.fields.find((x) => x.name === 'Name');
+  // Last Update Date, Assigned SE and Lead SE, each when the field is there: [heading, field].
+  const cols = [['Last Update Date', f.lastStatus], ['Assigned SE', f.assignedSe], ['Lead SE', f.leadSe]].filter(([, x]) => x);
+  const dateHead = el('th', { class: 'tes-date', title: `${[...dates.map((x) => x.label), 'Created Date'].join(', else ')}; hover a date to see which` },
+    f.activityDate?.label || 'Date');
+  const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity',
+    ...cols.map(([h, x]) => el('th', { title: x.label, class: x === f.lastStatus ? 'tes-date' : null }, h)), 'Created by', 'Created'].filter(Boolean);
+  const ncols = heads.length;
+  const tbody = el('tbody');
+  // Rows come sorted by stage, then customer, so each group's requests are together. A Completed or
+  // Cancelled stage with only older requests still gets its heading, for its Show more link.
+  const groups = [];
+  for (const r of list) {
+    if (groups.at(-1)?.stage !== tesStage(r)) groups.push({ stage: tesStage(r), rows: [] });
+    groups.at(-1).rows.push(r);
+  }
+  for (const r of older) if (!groups.some((g) => g.stage === tesStage(r))) groups.push({ stage: tesStage(r), rows: [] });
+  groups.sort((x, y) => (tesStageRank(x.stage) - tesStageRank(y.stage)) || x.stage.localeCompare(y.stage));
+  // Over TES_COLLAPSE_OVER requests, every stage starts collapsed (again whenever the team filter changes).
+  if (tes.collapsedFor !== d.team) {
+    tes.collapsedFor = d.team;
+    tes.collapsed = new Set(list.length > TES_COLLAPSE_OVER ? groups.map((g) => g.stage) : []);
+    tes.page = {};
+  }
+  for (const { stage, rows } of groups) {
+    const closed = TES_CLOSED.includes(stage.toLowerCase());
+    const shut = tes.collapsed.has(stage);
+    const toggle = () => { shut ? tes.collapsed.delete(stage) : tes.collapsed.add(stage); renderTes(); };
+    tbody.append(el('tr', { class: 'tes-stage', onclick: toggle, title: shut ? 'Expand' : 'Collapse' }, el('td', { colspan: ncols },
+      el('span', { class: 'tes-twisty', 'aria-hidden': 'true' }, shut ? '▸' : '▾'),
+      stage.toLowerCase() === 'stalled' ? el('span', { class: 'tes-stalled' }, stage) : stage || `(No ${f.stage?.label || 'TES Stage'})`,
+      ` (${rows.length})` + (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
+    if (shut) continue;
+    // Over TES_PAGE requests, the stage shows a page at a time, with paging controls above and below.
+    const pages = Math.ceil(rows.length / TES_PAGE);
+    const p = tes.page[stage] = Math.max(0, Math.min(tes.page[stage] || 0, pages - 1));
+    const pager = () => el('tr', { class: 'nolink tes-pager' }, el('td', { colspan: ncols },
+      el('button', { disabled: p === 0, onclick: () => { tes.page[stage] = p - 1; renderTes(); } }, '‹ Previous'),
+      el('span', {}, `Page ${p + 1} of ${pages} · ${(p * TES_PAGE + 1).toLocaleString()}–${Math.min(rows.length, (p + 1) * TES_PAGE).toLocaleString()} of ${rows.length.toLocaleString()}`),
+      el('button', { disabled: p >= pages - 1, onclick: () => { tes.page[stage] = p + 1; renderTes(); } }, 'Next ›')));
+    if (pages > 1) tbody.append(pager());
+    let acct = null;
+    for (const r of rows.slice(p * TES_PAGE, (p + 1) * TES_PAGE)) {
+      const a = tesOpp(r)?.AccountId || '';
+      if (a !== acct) {
+        acct = a;
+        tbody.append(el('tr', { class: 'ds-group' }, el('td', { colspan: ncols },
+          `${tesAcct(r)?.Name || '(No account)'} (${rows.filter((x) => (tesOpp(x)?.AccountId || '') === a).length})`)));
+      }
+      tbody.append(...tesRow(r, ncols, cols));
+    }
+    if (pages > 1) tbody.append(pager());
+    // Each click reaches back another TES_CLOSED_DAYS, at least to the newest one left out, and at most a year.
+    const more = closed ? older.filter((r) => tesStage(r) === stage) : [];
+    if (more.length) {
+      tbody.append(el('tr', { class: 'nolink' }, el('td', { colspan: ncols, style: 'text-align:center' }, el('a', { href: '#', onclick: (ev) => {
+        ev.preventDefault();
+        const toNewest = Math.ceil((Date.parse(todayStr()) - Date.parse(more.map(tesClosedOn).sort().at(-1))) / 864e5);
+        tes.days[stage.toLowerCase()] = Math.min(TES_CLOSED_MAX, Math.max(tesDays(stage) + TES_CLOSED_DAYS, toNewest));
+        renderTes();
+      } }, `Show more ${stage} (${more.length.toLocaleString()} more in the last year)`))));
+    }
+  }
+  if (!list.length && !older.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
+  sec.replaceChildren(
+    el('h3', {}, `TES Requests (${list.length})`),
+    el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
+      tbody,
+    )),
+  );
+}
+
+// The Last Update Date, in yellow once it's over TES_STALE_YELLOW days old and red over TES_STALE_RED
+// (not on Completed or Cancelled requests, which get no more updates).
+const TES_STALE_YELLOW = 10, TES_STALE_RED = 15;
+function tesLastUpdateCell(r) {
+  const x = tes.data.fields.lastStatus, v = r[x.name];
+  if (!v) return el('td', { class: 'tes-date' }, '—');
+  const age = Math.floor((Date.parse(todayStr()) - Date.parse(String(v).slice(0, 10))) / 864e5);
+  const tone = tesClosed(r) ? '' : age > TES_STALE_RED ? 'r' : age > TES_STALE_YELLOW ? 'y' : '';
+  return el('td', { class: 'tes-date', title: tone ? `${age} days since the last update` : null },
+    tone ? el('span', { class: 'tes-chip ' + tone }, dsText(x, v)) : dsText(x, v));
+}
+
+// One TES Request's row and, under it, its status-updates panel (shown when the row is open).
+function tesRow(r, ncols, cols) {
+  const d = tes.data, f = d.fields;
+  {
+    const more = el('tr', { class: 'ds-more', hidden: !tes.open.has(r.Id) }, el('td', { colspan: ncols }));
+    if (tes.open.has(r.Id)) renderTesPanel(r, more.firstChild);
+    const toggle = () => {
+      if (tes.open.delete(r.Id)) { more.hidden = true; return; }
+      tes.open.add(r.Id);
+      more.hidden = false;
+      renderTesPanel(r, more.firstChild);
+    };
+    const opp = tesOpp(r), oppId = r[d.oppField];
+    return [
+      el('tr', { class: 'ds-row', onclick: toggle },
+        dsNameCell(r.Name),
+        (({ value, from }) => el('td', { class: 'tes-date', title: from }, value || '—'))(tesDate(r)),
+        f.tesStatus ? el('td', {}, tesChip(r[f.tesStatus.name])) : null,
+        el('td', { class: 'tes-opp' }, oppId ? [
+          el('a', { href: '#', title: 'Show this opportunity', onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openOppPopup(oppId, opp?.AccountId); } },
+            opp?.Name || oppId),
+          ' ',
+          el('a', { href: `${me.instanceUrl}/${oppId}`, target: '_blank', rel: 'noopener', title: 'Open the opportunity in Salesforce',
+            onclick: (ev) => ev.stopPropagation() }, '↗'),
+        ] : '—'),
+        cols.map(([, x]) => x === f.lastStatus ? tesLastUpdateCell(r)
+          : el('td', {}, (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—')),
+        el('td', {}, r.CreatedBy?.Name || ''),
+        el('td', {}, shortDate(r.CreatedDate)),
+      ),
+      more,
+    ];
+  }
+}
+
+// Under a clicked TES Request: its status updates (newest first, with who entered each), a form to add
+// one, and every field of the request.
+function renderTesPanel(r, box) {
+  const d = tes.data, u = d.updates, f = d.fields;
+  const extra = Object.values(f).filter((x) => !dsMeta.fields.some((y) => y.name === x.name));
+  const details = [
+    ...dsMeta.fields.filter((x) => x.type !== 'reference').map((x) => [x.label, dsText(x, r[x.name])]),
+    ...extra.map((x) => [x.label, x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])]),
+  ].filter(([, v]) => v);
+  const history = el('div', {}, el('div', { class: 'empty' }, 'Loading…'));
+  let form = null;
+  if (u?.canCreate) {
+    const rank = (o) => ['green', 'yellow', 'red'].indexOf(o.toLowerCase()) + 1 || 9;
+    const status = el('select', { 'aria-label': 'TES Status' },
+      [...u.options].sort((x, y) => rank(x) - rank(y)).map((o) => el('option', { value: o }, o)));
+    status.value = u.options.includes(r[f.tesStatus?.name]) ? r[f.tesStatus.name] : status.options[0]?.value || '';
+    const notes = el('textarea', { rows: 3, 'aria-label': 'Notes', placeholder: `What's happened since the last update?` });
+    const save = el('button', { class: 'primary' }, 'Add update');
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        const res = await api(`/tes/${r.Id}/updates`, { method: 'POST', body: { status: status.value, notes: notes.value } });
+        tes.updates.set(r.Id, Promise.resolve(res));
+        toast(res.warning || `Added a ${u.label} update to ${r.Name}`, res.warning ? 'err' : 'ok');
+        await loadTes();
+      } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+    });
+    form = el('div', { class: 'tes-update' },
+      el('label', {}, el('span', {}, 'TES Status'), status),
+      el('label', { class: 'wide' }, el('span', {}, f.statusNotes?.label || 'Notes'), notes),
+      el('div', { class: 'form-actions' }, save));
+  }
+  box.replaceChildren(
+    el('h4', {}, `${u?.label || 'TES Status'} updates`),
+    form,
+    history,
+    el('details', {}, el('summary', {}, 'All fields'),
+      el('dl', {}, details.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
+    el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+  );
+  if (!u) return history.replaceChildren(el('div', { class: 'empty' }, 'No TES Status object found, so updates can\'t be shown here.'));
+  if (!tes.updates.has(r.Id)) tes.updates.set(r.Id, api(`/tes/${r.Id}/updates`).catch((e) => { tes.updates.delete(r.Id); throw e; }));
+  tes.updates.get(r.Id).then(({ records }) => {
+    history.replaceChildren(records.length ? el('table', { class: 'tes-history' },
+      el('thead', {}, el('tr', {}, el('th', {}, 'Entered'), el('th', {}, 'TES Status'), el('th', {}, 'Notes'), el('th', {}, 'Entered by'))),
+      el('tbody', {}, records.map((x) => el('tr', {},
+        el('td', {}, new Date(String(x.CreatedDate).replace(/\+0000$/, 'Z')).toLocaleString()),
+        el('td', {}, tesChip(x[u.status])),
+        el('td', { class: 'tes-notes' }, u.notes ? x[u.notes] || '' : ''),
+        el('td', {}, x.CreatedBy?.Name || ''))))) : el('div', { class: 'empty' }, 'No status updates yet.'));
+  }, (e) => history.replaceChildren(el('div', { class: 'empty' }, e.message)));
+}
+
+// The opportunity as on the Accounts tab (its fields and Deal Supports), in a pop-up over this page.
+async function openOppPopup(oppId, accountId) {
+  const body = el('div', {}, el('div', { class: 'empty' }, 'Loading…'));
+  const dlg = el('dialog', { class: 'popup', 'aria-label': 'Opportunity' }, body);
+  dlg.addEventListener('close', () => { dlg.remove(); current = null; });
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });
+  document.body.append(dlg);
+  dlg.showModal();
+  const closeBtn = el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close');
+  try {
+    if (!accountId) throw new Error("This request's opportunity has no account.");
+    const [detail, team] = await Promise.all([api('/accounts/' + accountId), api(`/accounts/${accountId}/team`).catch(() => null)]);
+    const o = detail.opportunities.find((x) => x.Id === oppId);
+    if (!o) throw new Error("That opportunity wasn't found on its account.");
+    if (!dlg.open) return;
+    current = { ...detail, team };
+    const a = current.account;
+    body.replaceChildren(
+      el('div', { class: 'title-row' },
+        el('h2', {}, o.Name),
+        el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+        el('span', { class: 'spacer', style: 'flex:1' }),
+        closeBtn),
+      oppSub(a, o, (id) => { dlg.close(); openOppPopup(id, a.Id); }),
+      el('section', { id: 'focusOpp' }),
+      el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
+    );
+    renderFocusOpp(o);
+    loadDealSupports(o);
+  } catch (e) {
+    body.replaceChildren(el('div', { class: 'title-row' }, el('span', { class: 'spacer', style: 'flex:1' }), closeBtn), el('div', { class: 'empty' }, e.message));
+  }
 }
 
 // ---------- My Time ----------
@@ -3088,7 +3571,16 @@ window.addEventListener('resize', () => {
 });
 
 // ---------- boot ----------
+// Why this window doesn't connect by itself on opening: 'off' after Disconnect, 'tried' once it has
+// tried. noAutoConnect() reads it, noAutoConnect(v) sets it, and null clears it.
+function noAutoConnect(v) {
+  try {
+    if (v === undefined) return sessionStorage.getItem('sfdesk.noAutoConnect');
+    v === null ? sessionStorage.removeItem('sfdesk.noAutoConnect') : sessionStorage.setItem('sfdesk.noAutoConnect', v);
+  } catch { return 'off'; }
+}
 document.getElementById('logout').addEventListener('click', async () => {
+  noAutoConnect('off');
   await api('/logout', { method: 'POST' }).catch(() => {});
   current = null; dsMeta = null;
   showConnect('Disconnected.');
@@ -3232,17 +3724,31 @@ function renderOutlookPane(e, reload) {
     }
     return;
   }
+  // Opened from the app's Settings... menu: show Settings instead of the Deals tab.
+  const settings = location.hash === '#settings';
+  if (settings) history.replaceState(null, '', location.pathname + location.search);
   try {
     me = await api('/me');
     if (me.version) document.getElementById('ver').textContent = `SF Desk v${me.version}`;
+    if (!me.connected && settings) return showSettings();
+    // With the Salesforce CLI login, connecting needs no clicks: do it on opening, once, unless Disconnect
+    // was clicked in this window. A failure shows Connect with what went wrong.
+    if (!me.connected && me.cli && !noAutoConnect()) {
+      noAutoConnect('tried');
+      showLoading('Connecting to Salesforce…');
+      const r = await fetch('/login').catch((e) => ({ ok: false, text: async () => e.message }));
+      if (r.ok) return location.reload();
+      return showConnect(await r.text());
+    }
     if (!me.connected) return showConnect();
+    noAutoConnect(null);
     showLoading('Loading your Salesforce data…');
     document.getElementById('who').textContent = me.user?.username || me.user?.name || '';
     document.getElementById('logout').hidden = false;
     meta = await api('/meta');
     await loadHidden();
     await loadAcctPrefs();
-    showDashboard();
+    if (settings) showSettings(); else showDashboard();
   } catch (e) {
     if (e.status !== 401) toast(e.message, 'err');
   }

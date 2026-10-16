@@ -1,5 +1,6 @@
 # Installs (or updates) SF Desk on Windows for the current user, from the unzipped SF-Desk-windows.zip.
-# Run by "Install SF Desk.cmd" next to the app and runtime folders. No admin rights needed.
+# Run by "Install SF Desk.cmd" next to the app and runtime folders. No admin rights needed. One download
+# serves Intel/AMD and ARM PCs.
 # The app goes to %LOCALAPPDATA%\Programs\SF Desk, with SF Desk shortcuts in the Start menu and on the
 # Desktop. Settings and data stay in %LOCALAPPDATA%\SF Desk, so updating keeps them.
 
@@ -13,12 +14,21 @@ function Die($text) { Write-Host "`n$text`n" -ForegroundColor Red; exit 1 }
 if (-not (Test-Path (Join-Path $From 'app\src\server.js'))) {
   Die 'Can''t find the app folder next to the installer. Unzip the whole download first, then run "Install SF Desk" from the unzipped folder.'
 }
-# SF-Desk-windows.zip is for Intel/AMD PCs and SF-Desk-windows-arm64.zip for ARM ones (e.g. Snapdragon).
-# ARM PCs can run either; an Intel/AMD PC can't run the ARM one.
-$version = ''
-try { $version = & (Join-Path $From 'runtime\node.exe') -v 2>$null } catch {}
-if (-not $version) {
-  Die 'This download''s Node.js doesn''t run on this PC. Use SF-Desk-windows.zip on Intel or AMD PCs and SF-Desk-windows-arm64.zip on ARM PCs.'
+# The download has Node.js for Intel/AMD PCs (runtime\x64) and ARM ones (runtime\arm64, e.g. Snapdragon).
+# Install the one built for this PC, else the Intel one, which ARM PCs on Windows 11 can also run.
+$osArch = ''
+try { $osArch = [string][Runtime.InteropServices.RuntimeInformation]::OSArchitecture } catch {}
+if (-not $osArch) { $osArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+$arches = if ($osArch -match 'arm64') { 'arm64', 'x64' } else { 'x64' }
+$runtime = $null
+foreach ($arch in $arches) {
+  $dir = Join-Path $From "runtime\$arch"
+  $version = ''
+  try { $version = & (Join-Path $dir 'node.exe') -v 2>$null } catch {}
+  if ($version) { $runtime = $dir; break }
+}
+if (-not $runtime) {
+  Die 'The Node.js in this download doesn''t run on this PC. SF Desk needs 64-bit Windows 10 or 11.'
 }
 Write-Host "`nInstalling SF Desk into $dest" -ForegroundColor Cyan
 
@@ -31,16 +41,17 @@ Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.
   Stop-Process -Force -ErrorAction SilentlyContinue
 if ($running.Count) { Say 'Stopped the running SF Desk.'; Start-Sleep -Seconds 2 }
 
-# 2. Copy the app and Node.js, replacing an earlier version.
+# 2. Copy the app and this PC's Node.js (as runtime\node.exe), replacing an earlier version.
 New-Item -ItemType Directory -Force $dest | Out-Null
 foreach ($name in 'app', 'runtime') {
   $target = Join-Path $dest $name
   if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-  Copy-Item -Recurse (Join-Path $From $name) $target
 }
+Copy-Item -Recurse (Join-Path $From 'app') (Join-Path $dest 'app')
+Copy-Item -Recurse $runtime (Join-Path $dest 'runtime')
 # Files from a browser download carry a "from the internet" mark that makes Windows warn about each one.
 Get-ChildItem -Recurse -File $dest | Unblock-File
-Say "Copied $((Get-Content (Join-Path $dest 'app\VERSION.txt') -ErrorAction SilentlyContinue) -join ' ')."
+Say "Copied $((Get-Content (Join-Path $dest 'app\VERSION.txt') -ErrorAction SilentlyContinue) -join ' ') (Node.js $version for $(Split-Path -Leaf $runtime))."
 
 # 3. Shortcuts that start SF Desk (windows/SFDesk.ps1) without a console window.
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'

@@ -2,8 +2,8 @@ SF Desk for Windows
 ===================
 
 You need:
-  - Windows 10 or 11, 64-bit. SF-Desk-windows.zip is for Intel and AMD PCs, SF-Desk-windows-arm64.zip
-    for ARM PCs (Snapdragon, e.g. Surface Pro or Copilot+ PCs). Settings > System > About shows which.
+  - Windows 10 or 11, 64-bit, on an Intel, AMD or ARM (Snapdragon) PC. The installer picks the right
+    version for your PC.
   - For your meetings in Time Entry, one of:
       - Microsoft 365: works with the new Outlook. Pick "Sign in to read your Microsoft 365 calendar"
         in Time Entry's calendar list, open the page it shows and enter the code. Your organization may

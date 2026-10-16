@@ -79,20 +79,21 @@ SF Desk.app (source in `mac/app`, built by `scripts/build-mac-app.sh`; see
 shows SF Desk in its own window. On first launch it downloads the Salesforce CLI if you don't have one and
 signs you in (Option A below), so the setup steps that follow are only for running from a checkout.
 
-- **Settings:** the `.env` settings below live in `~/Library/Application Support/SF Desk/.env`. Open it
-  with **SF Desk > Edit Settings...**, then **File > Restart Server**.
+- **Settings:** **SF Desk > Settings...** (⌘,) picks the Display Mode: Light, Dark or System Auto. The `.env`
+  settings below live in `~/Library/Application Support/SF Desk/.env` (**Help > Show Data Folder**); edit it
+  in a text editor, then **File > Restart Server**.
 - **Data:** the same folder holds `data/` (the local copy), `certs/` (the Outlook certificate) and `sf-cli/`
   if the app downloaded the CLI. Updating the app keeps all of it. The first launch copies these from
   `~/SF-Desk` or a Git checkout.
 - **Running:** closing the window keeps SF Desk running in the background (for the Outlook add-in); click
   the Dock icon to get it back, and quit to stop it. **File > Open in Browser** opens the same SF Desk in
-  your browser. If SF Desk is already running (e.g. `npm start` in a checkout), the app shows that one.
+  your browser. The app runs its own server, so stop any `npm start` in a checkout on the same port first.
 - **Logs:** `~/Library/Logs/SF Desk/server.log` (**Help > Show Server Log**).
 
 ## Windows
 
 SF Desk also runs on Windows 10 and 11 (source in `windows/`, packaged by `scripts/build-windows-package.sh`;
-see [INSTALL.md](INSTALL.md#windows)). `SF-Desk-windows.zip` holds the app, Node.js for Windows (Intel/AMD, or ARM64 in `SF-Desk-windows-arm64.zip`) and an
+see [INSTALL.md](INSTALL.md#windows)). `SF-Desk-windows.zip` holds the app, Node.js for Windows on Intel/AMD and ARM PCs (the installer picks the PC's) and an
 **Install SF Desk** script that needs no admin rights. SF Desk opens in an Edge window of its own and keeps an
 icon by the clock to reopen it, edit settings, restart the server, see the log or quit.
 

@@ -38,6 +38,8 @@ const DB_FILE = process.env.SF_DESK_DB || path.join(ROOT, 'data', 'sf-desk.db');
 const USE_CLI = !CLIENT_ID;
 const SF_CLI = process.env.SF_CLI_PATH || 'sf';
 const SF_TARGET_ORG = process.env.SF_TARGET_ORG || '';
+// Where the CLI's browser sign-in goes (My Domain, for SSO), as in the desktop apps.
+const CLI_INSTANCE_URL = process.env.SF_INSTANCE_URL || 'https://sailpoint.my.salesforce.com';
 
 // Fields the app reads and is allowed to write. Edit these lists to add more.
 const ACCOUNT_FIELDS = ['Name', 'Type', 'Industry', 'Phone', 'Website', 'AnnualRevenue',
@@ -122,10 +124,11 @@ const { SF_API_VERSION: _apiVersion, ...CLI_ENV } = process.env;
 const winQuote = (a) => (/^[\w.:\\/@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '')}"`);
 
 // Run an sf CLI command with --json and return its parsed output (errors become HttpErrors).
-function runCli(args) {
-  const target = SF_TARGET_ORG ? ['--target-org', SF_TARGET_ORG] : [];
+// `targetOrg: false` leaves out --target-org, for commands that don't take it.
+function runCli(args, { targetOrg = true, timeout = 60_000 } = {}) {
+  const target = targetOrg && SF_TARGET_ORG ? ['--target-org', SF_TARGET_ORG] : [];
   const all = [...args, '--json', ...target];
-  const opts = { timeout: 60_000, maxBuffer: 1024 * 1024, env: CLI_ENV, windowsHide: true };
+  const opts = { timeout, maxBuffer: 1024 * 1024, env: CLI_ENV, windowsHide: true };
   return new Promise((resolve, reject) => {
     const done = (err, stdout) => {
       // cmd.exe reports a missing sf as "not recognized" (exit code 1) rather than ENOENT.
@@ -604,6 +607,17 @@ api.post('/logout', wrap(async (req, res) => {
     }).catch(() => {});
   }
   req.session.destroy(() => res.json({ ok: true }));
+}));
+
+// The CLI's browser sign-in, for when connecting finds no CLI login (or an expired one). It opens the
+// Salesforce login in the browser and returns once the user has signed in; one at a time.
+let cliSignIn = null;
+api.post('/cli-login', wrap(async (req, res) => {
+  if (!USE_CLI) throw new HttpError(400, 'SF Desk signs in with its own Salesforce connected app here, not the Salesforce CLI.');
+  cliSignIn ||= runCli(['org', 'login', 'web', '--instance-url', CLI_INSTANCE_URL, ...(SF_TARGET_ORG ? ['--alias', SF_TARGET_ORG] : ['--set-default'])],
+    { targetOrg: false, timeout: 15 * 60_000 }).finally(() => { cliSignIn = null; });
+  try { await cliSignIn; } catch (e) { throw new HttpError(400, `Salesforce sign-in didn't finish: ${e.message}`); }
+  res.json({ ok: true });
 }));
 
 api.use((req, res, next) => (req.session.sf ? next() : next(new HttpError(401, 'Not connected to Salesforce'))));
@@ -1491,6 +1505,168 @@ api.get('/my-time', wrap(async (req, res) => {
   }));
 }));
 
+// ---------- TES ----------
+
+// TES Requests are the Deal Supports of this record type.
+const TES_RECORD_TYPE = 'TES Request';
+const TES_MAX = 5000;
+// The Deal Support fields the TES tab uses: [key, label, API name when no field has that label].
+// TES Requests are dated by Date of Activity, else Date Requested (TES Requests rarely have the first).
+const TES_FIELDS = [
+  ['activityDate', 'Date of Activity', 'Date_of_Sales_Activity__c'],
+  ['requestDate', 'Date Requested', 'Date_Requested__c'],
+  ['type', 'TES Type', 'TES_Offering__c'],
+  ['stage', 'TES Stage', 'Stage__c'],
+  ['leadSe', 'Opportunity Lead SE', 'Opportunity_Lead_SE__c'],
+  ['assignedSe', 'Assigned SE', 'Regional_SE_IDN__c'],
+  ['tesStatus', 'Most Recent TES Status', 'TES_Status__c'],
+  ['status', 'Status', 'Status__c'],
+  ['statusNotes', 'Most Recent TES Status Notes', 'Most_Recent_TES_Status_Notes__c'],
+  ['lastStatus', 'Last TES Status', 'Last_TES_Status__c'],
+  ['notes', 'Notes', 'RFP_Notes__c'],
+  // When a Completed request finished: the first of these it has.
+  ['completedDate', 'Date TES Completed', 'Date_TES_Complete_T80__c'],
+  ['endDate', 'TES End Date', 'TES_End_Date__c'],
+  ['stageDate', 'Last TES Stage', 'Last_TES_Stage__c'],
+];
+const lower = (s) => String(s ?? '').trim().toLowerCase();
+
+async function tesMeta(req) {
+  if (req.session.tesMeta?.v === 5) return req.session.tesMeta;
+  const ds = await dealSupportMeta(req);
+  if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
+  const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
+  const rt = (d.recordTypeInfos || []).find((r) => lower(r.name) === lower(TES_RECORD_TYPE));
+  if (!rt) throw new HttpError(404, `${d.label} has no "${TES_RECORD_TYPE}" record type, or your user can't see it.`);
+  const fields = {}, missing = [];
+  for (const [key, label, name] of TES_FIELDS) {
+    const f = d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name);
+    if (f) {
+      fields[key] = { name: f.name, label: f.label, type: f.type, rel: f.type === 'reference' ? f.relationshipName || null : null,
+        isUser: isUserRef(f) };
+    } else missing.push(label);
+  }
+  req.session.tesMeta = { v: 5, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
+    recordTypeId: rt.available ? rt.recordTypeId : null, canCreate: !!d.createable,
+    fields, missing, updates: await tesUpdatesMeta(req, d) };
+  return req.session.tesMeta;
+}
+
+// TES Status updates: the "TES Status" records under a TES Request, each a status and notes; Salesforce
+// keeps who entered it as its Created By. Null when the org (or the user) has no such object.
+async function tesUpdatesMeta(req, dsDescribe) {
+  for (const rel of dsDescribe.childRelationships || []) {
+    if (!/tes_?status/i.test(rel.childSObject)) continue;
+    const c = await sf(req, 'GET', `/services/data/${API}/sobjects/${rel.childSObject}/describe`).catch((err) => {
+      if (err.status === 401 || err.status >= 502) throw err;
+      return null;
+    });
+    if (!c || lower(c.label) !== 'tes status') continue;
+    const status = c.fields.find((f) => f.type === 'picklist' && lower(f.label) === 'tes status');
+    const notes = c.fields.find((f) => f.type === 'textarea' && lower(f.label) === 'notes');
+    if (!status) continue;
+    return {
+      object: c.name, label: c.label, labelPlural: pluralLabel(c), parentField: rel.field,
+      status: status.name, notes: notes?.name || null,
+      options: (status.picklistValues || []).filter((v) => v.active).map((v) => v.value),
+      canCreate: !!c.createable && !!status.createable,
+    };
+  }
+  return null;
+}
+
+async function tesUpdatesOrFail(req) {
+  const u = (await tesMeta(req)).updates;
+  if (!u) throw new HttpError(404, 'No "TES Status" object under TES Requests was found, or your user can\'t see it.');
+  return u;
+}
+const listTesUpdates = (req, u, id) => query(req, `SELECT Id, Name, ${u.status}${u.notes ? `, ${u.notes}` : ''}, CreatedBy.Name, CreatedDate ` +
+  `FROM ${u.object} WHERE ${u.parentField} = '${id}' ORDER BY CreatedDate DESC`, 500);
+
+// A TES Request's status updates, newest first.
+api.get('/tes/:id/updates', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const u = await tesUpdatesOrFail(req);
+  res.json({ records: await listTesUpdates(req, u, id) });
+}));
+
+// Add a status update. The TES Request's Most Recent TES Status, its notes and Last TES Status date
+// follow the newest update; when no automation in the org has set them, they're set here.
+api.post('/tes/:id/updates', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const u = await tesUpdatesOrFail(req);
+  if (!u.canCreate) throw new HttpError(403, `Your user can't create ${u.labelPlural}.`);
+  const status = String(req.body?.status || '');
+  if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
+  const notes = String(req.body?.notes ?? '').trim();
+  await sf(req, 'POST', `/services/data/${API}/sobjects/${u.object}`,
+    { body: { [u.parentField]: id, [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
+  const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
+  const latest = [[f.tesStatus, status], [f.statusNotes, notes || null], [f.lastStatus, new Date().toLocaleDateString('en-CA')]]
+    .filter(([x]) => x?.name);
+  let warning = null;
+  if (latest.length) {
+    const [rec] = await query(req, `SELECT ${latest.map(([x]) => x.name).join(', ')} FROM ${ds.object} WHERE Id = '${id}'`);
+    const same = (a, b) => String(a ?? '').replace(/\r\n/g, '\n').trim() === String(b ?? '').replace(/\r\n/g, '\n').trim();
+    if (latest.some(([x, v]) => x !== f.lastStatus && !same(rec?.[x.name], v))) {
+      try {
+        await sf(req, 'PATCH', `/services/data/${API}/sobjects/${ds.object}/${id}`,
+          { body: Object.fromEntries(latest.map(([x, v]) => [x.name, v])) });
+      } catch (err) {
+        if (err.status === 401 || err.status >= 502) throw err;
+        warning = `The update was saved, but the ${ds.label}'s ${f.tesStatus?.label || 'status'} couldn't be set: ${err.message}`;
+      }
+    }
+  }
+  res.json({ records: await listTesUpdates(req, u, id), warning });
+}));
+
+// Every TES Request, newest first. team = mine (the default; I'm its Opportunity Lead SE or Assigned
+// SE), team (me or anyone on my team is), a team member's User Id (they are), or all. There is no
+// BOAT filter here; the page applies the sales rep filter.
+api.get('/tes', wrap(async (req, res) => {
+  const ds = await dealSupportMeta(req);
+  const team = String(req.query.team || 'mine').slice(0, 20);
+  const kind = `tes:${team}`;
+  res.json(await withCacheFallback(req, res, async () => {
+    const tm = await tesMeta(req), f = tm.fields, o = ds.oppRel;
+    const where = [`RecordType.Name = ${soqlStr(TES_RECORD_TYPE)}`];
+    if (team !== 'all') {
+      const se = [f.leadSe, f.assignedSe].filter((x) => x?.isUser);
+      if (!se.length) throw new HttpError(400, `No Opportunity Lead SE or Assigned SE user field found on ${ds.label}.`);
+      const self = req.session.sf.user.id;
+      let people = [self];
+      if (team !== 'mine') {
+        const { members } = await myTeam(req).catch(() => ({ members: [] }));
+        people = team === 'team' ? [self, ...members.map((m) => m.id)] : members.filter((m) => m.id === team).map((m) => m.id);
+        if (!people.length) throw new HttpError(400, "That person isn't on your team any more. Pick another.");
+      }
+      const ids = people.map((id) => `'${sfId(id)}'`).join(', ');
+      where.push(`(${se.map((x) => `${x.name} IN (${ids})`).join(' OR ')})`);
+    }
+    const fields = [...dsReadFields(ds), 'Name', ds.oppField, `${o}.Name`, `${o}.AccountId`, `${o}.Account.Name`,
+      `${o}.Account.OwnerId`, `${o}.Account.Owner.Name`, ...Object.values(f).flatMap((x) => [x.name, ...(x.rel ? [`${x.rel}.Name`] : [])])]
+      .filter((x, i, all) => all.indexOf(x) === i);
+    const order = [...[f.activityDate, f.requestDate].filter(Boolean).map((x) => `${x.name} DESC NULLS LAST`), 'CreatedDate DESC'].join(', ');
+    const run = (cols) => query(req, `SELECT ${cols.join(', ')} FROM ${ds.object} ` +
+      `WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ${TES_MAX}`, TES_MAX);
+    let records;
+    try {
+      records = await run(fields);
+    } catch (err) {
+      // Not every custom object has an owner; retry without it.
+      if (err.status !== 400) throw err;
+      records = await run(fields.filter((x) => x !== 'Owner.Name'));
+    }
+    const out = { ...tm, oppField: ds.oppField, oppRel: o, team, truncated: records.length >= TES_MAX, records };
+    store.saveSetting(orgOf(req), kind, out);
+    return out;
+  }, () => {
+    const saved = store.getSetting(orgOf(req), kind);
+    return saved && { data: saved };
+  }));
+}));
+
 // ---------- My Calendar ----------
 
 // Your Salesforce calendar (Event records you own; invitees get their own copy) for a date range,
@@ -2118,6 +2294,8 @@ if (process.env.SF_DESK_APP) process.stdin.on('end', () => process.exit(0)).on('
 app.listen(PORT, 'localhost', () => {
   console.log(`SF Desk running at http://localhost:${PORT}`);
   if (USE_CLI) console.log(`No SF_CLIENT_ID set: signing in with the Salesforce CLI login${SF_TARGET_ORG ? ` for "${SF_TARGET_ORG}"` : ' (default org)'}.`);
+  // The desktop apps open their window once this file appears.
+  if (process.env.SF_DESK_READY) fs.writeFileSync(process.env.SF_DESK_READY, String(PORT));
 });
 
 // HTTPS for the Outlook add-in, only when its certificate has been made (scripts/outlook-cert.sh).
