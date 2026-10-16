@@ -2118,10 +2118,8 @@ async function openDeal(o) {
 // Opportunity Lead SE or Assigned SE, grouped by TES Stage, then by customer A–Z, newest first within each.
 // `open` holds the rows showing their status updates; `updates` the updates fetched, by request Id.
 // Completed requests show for the last `completedDays` days; "Show more" adds TES_COMPLETED_DAYS at a time.
-// `focus` is the request whose update form to bring into view.
 const TES_COMPLETED_DAYS = 90;
-const tes = { data: null, filters: null, editing: null, loads: 0, open: new Set(), updates: new Map(),
-  completedDays: TES_COMPLETED_DAYS, focus: null };
+const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), completedDays: TES_COMPLETED_DAYS };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
 // These stages first, in this order; any others follow A–Z, then requests with no stage.
@@ -2151,18 +2149,17 @@ const tesCompletedOn = (r) => {
 function showTes() {
   setNav('tes');
   current = null;
-  tes.editing = null;
   tes.completedDays = TES_COMPLETED_DAYS;
-  // The team and sales rep filters of the other tabs (and saved with them); the team pick matches the
-  // request's Opportunity Lead SE or Assigned SE, the rep its account owner. BOAT doesn't apply here.
-  const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => renderTes() });
-  const noBoat = () => {
-    filters.boat.replaceChildren(el('option', { value: 'all' }, 'All BOATs'));
-    filters.boat.disabled = true;
-    filters.boat.title = 'The BOAT filter doesn\'t apply to TES Requests.';
+  // The team filter of the other tabs (and saved with them), matching the request's Opportunity Lead SE or
+  // Assigned SE. The BOAT and sales rep filters don't apply here, and their picks stay as they are.
+  const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => {} });
+  const off = (s, text, what) => {
+    s.replaceChildren(el('option', { value: '' }, text));
+    s.disabled = true;
+    s.title = `The ${what} filter doesn't apply to TES Requests.`;
   };
   const seTitle = () => { filters.team.title = 'TES Requests where you (My Accounts), you or anyone on your team (My Team), or that person is the Opportunity Lead SE or Assigned SE'; };
-  noBoat(); seTitle();
+  off(filters.boat, 'All BOATs', 'BOAT'); off(filters.rep, 'All sales reps', 'sales rep'); seTitle();
   ensureAcctFilters().then(() => {
     const before = teamFilter;
     fillTeamSelect(filters); seTitle();
@@ -2199,22 +2196,18 @@ async function loadTes() {
 
 function renderTes() {
   const d = tes.data, f = tes.filters;
-  // The sales rep choices: the account owners of the requests loaded (a saved pick stays listed).
-  const owners = new Map(d.records.map(tesAcct).filter((a) => a?.OwnerId).map((a) => [a.OwnerId, a.Owner?.Name || a.OwnerId]));
-  fillRepSelect(f, [...owners].map(([value, label]) => ({ value, label })), true);
-  const inRep = d.records.filter((r) => !repFilter || tesAcct(r)?.OwnerId === repFilter);
   const customer = (r) => tesAcct(r)?.Name || '';
-  const list = inRep.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
+  const list = d.records.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
     .sort((x, y) => (tesStageRank(tesStage(x)) - tesStageRank(tesStage(y))) || tesStage(x).localeCompare(tesStage(y))
       || (!customer(x) - !customer(y)) || customer(x).localeCompare(customer(y))
       || String(tesOpp(x)?.AccountId).localeCompare(String(tesOpp(y)?.AccountId))
       || tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
-  const hiddenCount = inRep.length - list.length;
+  const hiddenCount = d.records.length - list.length;
   const t = (s) => s.options[s.selectedIndex]?.textContent || '';
   const who = d.team === 'all' ? '' : d.team === 'mine' ? 'you are' : d.team === 'team' ? 'you or someone on your team is' : `${t(f.team)} is`;
   const se = [d.fields.leadSe?.label, d.fields.assignedSe?.label].filter(Boolean).join(' or ');
   document.getElementById('tesSub').textContent =
-    `${plural(list.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}${repFilter ? ` · Sales rep: ${t(f.rep)}` : ''}` +
+    `${plural(list.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}` +
     (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
     (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
     (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '') +
@@ -2224,12 +2217,12 @@ function renderTes() {
   renderTesRequests(shown, list.filter((r) => !shown.includes(r)));
 }
 
-// Shown like the opportunity's Deal Supports list (✎ to edit), with the date, Most Recent TES Status and
-// opportunity added, under a heading row per TES Stage and per customer. Click a row for its status updates,
-// or + to add one. `older` holds the Completed requests left out for finishing before the window.
+// Shown like the opportunity's Deal Supports list, with the date, Most Recent TES Status and opportunity
+// added, under a heading row per TES Stage and per customer. Click a row for its status updates and to add
+// one. `older` holds the Completed requests left out for finishing before the window.
 function renderTesRequests(list, older = []) {
   const sec = document.getElementById('tesRequests');
-  const d = tes.data, canEdit = dsMeta.canUpdate, f = d.fields, canAdd = !!d.updates?.canCreate;
+  const d = tes.data, f = d.fields;
   const dates = [f.activityDate, f.requestDate].filter(Boolean);
   const nameField = dsMeta.fields.find((x) => x.name === 'Name');
   const rest = dsColumns().filter((x) => x.name !== 'Name' && ![...dates, f.stage, f.tesStatus].some((y) => y?.name === x.name));
@@ -2237,14 +2230,7 @@ function renderTesRequests(list, older = []) {
     f.activityDate?.label || 'Date');
   const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity', ...rest.map((x) => x.label), 'Created by', 'Created']
     .filter(Boolean);
-  const ncols = heads.length + (canEdit ? 1 : 0) + (canAdd ? 1 : 0);
-  const edit = (r) => editDealSupport(r.Id, tes, renderTes, loadTes);
-  const addUpdate = (r, more) => {
-    tes.open.add(r.Id);
-    tes.focus = r.Id;
-    more.hidden = false;
-    renderTesPanel(r, more.firstChild);
-  };
+  const ncols = heads.length;
   const tbody = el('tbody');
   // Rows come sorted by stage, then customer, so each group's requests are together.
   let stage = null, acct = null;
@@ -2272,10 +2258,7 @@ function renderTesRequests(list, older = []) {
     };
     const opp = tesOpp(r), oppId = r[d.oppField];
     tbody.append(
-      el('tr', { class: 'ds-row' + (tes.editing?.id === r.Id ? ' sel' : ''), onclick: toggle },
-        canAdd ? el('td', { class: 'edit-cell' }, el('button', { class: 'icon-btn', title: `Add a TES Status update to ${r.Name || 'this request'}`,
-          'aria-label': `Add a TES Status update to ${r.Name || 'this request'}`, onclick: (ev) => { ev.stopPropagation(); addUpdate(r, more); } }, '+')) : null,
-        canEdit ? editPencil(r.Name, () => edit(r)) : null,
+      el('tr', { class: 'ds-row', onclick: toggle },
         dsNameCell(r.Name),
         (({ value, from }) => el('td', { title: from }, value || '—'))(tesDate(r)),
         f.tesStatus ? el('td', {}, tesChip(r[f.tesStatus.name])) : null,
@@ -2305,10 +2288,8 @@ function renderTesRequests(list, older = []) {
   }, `Show more Completed (${older.length.toLocaleString()} older)`)) : null;
   sec.replaceChildren(
     el('h3', {}, `TES Requests (${list.length})`),
-    tes.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, canAdd ? el('th', { 'aria-label': 'Add update' }) : null, canEdit ? el('th', { 'aria-label': 'Edit' }) : null,
-        heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
+      el('thead', {}, el('tr', {}, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
       tbody,
     )),
     showMore,
@@ -2346,10 +2327,6 @@ function renderTesPanel(r, box) {
       el('label', {}, el('span', {}, 'TES Status'), status),
       el('label', { class: 'wide' }, el('span', {}, f.statusNotes?.label || 'Notes'), notes),
       el('div', { class: 'form-actions' }, save));
-    if (tes.focus === r.Id) {
-      tes.focus = null;
-      requestAnimationFrame(() => { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); notes.focus(); });
-    }
   }
   box.replaceChildren(
     el('h4', {}, `${u?.label || 'TES Status'} updates`),
