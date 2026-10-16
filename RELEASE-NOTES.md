@@ -1,5 +1,31 @@
 # SF Desk release notes
 
+## 1.3.0 (October 15, 2026)
+
+- **TES tab:** the TES Requests where you (My Accounts), your team or one team member is the Opportunity Lead
+  SE or Assigned SE, grouped by TES Stage (Requested, Planning, Active, Stalled, Completed, Cancelled) and then
+  by customer. Most Recent TES Status shows in green, yellow or red; Stalled is in red; a Last Update Date
+  over 10 days old turns yellow, and over 15 days red. Click a request for its TES Status updates (who
+  entered each) and to add one. Completed and Cancelled requests show for the last 90 days, with Show more
+  reaching back a year. Over 100 requests, the stages start collapsed, and a stage over 50 shows them a page
+  at a time. **Add TES Request** opens Salesforce's New Deal Support: TES Request.
+- **Opportunity view:** read-only (change opportunities in Salesforce), with the account and sales rep in
+  larger type. Click the account for a pop-up of its details, opportunities and Deal Supports. From the TES
+  tab, the opportunity opens in a pop-up too.
+- **Settings:** SF Desk > Settings... (the tray icon's Settings... on Windows) sets Display Mode to Light,
+  Dark or System Auto. It replaces Edit Settings; `.env` is in the data folder (Help > Show Data Folder).
+- **Starts connected:** SF Desk connects to Salesforce on opening, with no Connect click. If your
+  Salesforce CLI login is missing or expired, **Sign in to Salesforce** opens the Salesforce login in your
+  browser and connects once you're done.
+- **Faster start on Windows:** the window opens without waiting for the Salesforce login check, and the
+  apps open as soon as their server is ready.
+- **One Windows download** (`SF-Desk-windows.zip`) for Intel, AMD and ARM PCs: the installer picks the
+  Node.js for the PC.
+- **Accounts:** the list's count is in the heading, and it pages at 100. Each launch opens on My BOAT(s),
+  My Accounts and All sales reps.
+- **Deals:** the Forecast by close date chart starts at the current month, quarter or year, with wider bars.
+- Text boxes and dropdowns line up at one height.
+
 ## 1.2.1 (October 14, 2026)
 
 - The server code now lives in a `src` folder. Nothing changes in how SF Desk looks or works.
