@@ -114,10 +114,17 @@ git push origin "$TAG"
 
 # 5. The builds, from main.
 echo "Building $NAME ($(git describe --always --dirty)) with Node.js $NODE_VERSION..."
+# The Windows download builds alongside the Mac ones (they share no files); the Mac app is made from the
+# Mac installer zip, so those two go in turn. The Windows output is shown once it's done.
+WIN_LOG="$(mktemp)"
+scripts/build-windows-package.sh "$NODE_VERSION" > "$WIN_LOG" 2>&1 &
+WIN_PID=$!
 scripts/build-mac-package.sh "$NODE_VERSION"
-scripts/build-windows-package.sh "$NODE_VERSION"
-rm -f dist/SF-Desk-windows-arm64.zip dist/VERSION-windows-*.txt # from before one download served both
 scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip
+WIN_OK=0; wait "$WIN_PID" || WIN_OK=$?
+cat "$WIN_LOG"; rm -f "$WIN_LOG"
+[ "$WIN_OK" = 0 ] || die "The Windows download didn't build (above)."
+rm -f dist/SF-Desk-windows-arm64.zip dist/VERSION-windows-*.txt # from before one download served both
 
 echo
 echo "Built $NAME ($TAG, merged in pull request #$PR) in $ROOT/dist:"
