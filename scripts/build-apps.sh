@@ -6,8 +6,7 @@
 #   4. tags main v<version>-build.<build> and pushes the tag;
 #   5. builds from main, so each build names that tag:
 #        dist/SF-Desk-mac.zip            the Mac Terminal installer (also what the Mac app is made from)
-#        dist/SF-Desk-windows.zip        Windows on Intel/AMD
-#        dist/SF-Desk-windows-arm64.zip  Windows on ARM
+#        dist/SF-Desk-windows.zip        Windows, on Intel/AMD and ARM PCs
 #        dist/SF Desk.app, dist/SF-Desk-app.zip and dist/SF-Desk.dmg   the Mac app
 # A new version (package.json "version") is a separate, deliberate change; this only counts builds.
 #
@@ -116,12 +115,12 @@ git push origin "$TAG"
 # 5. The builds, from main.
 echo "Building $NAME ($(git describe --always --dirty)) with Node.js $NODE_VERSION..."
 scripts/build-mac-package.sh "$NODE_VERSION"
-scripts/build-windows-package.sh --arch x64 "$NODE_VERSION"
-scripts/build-windows-package.sh --arch arm64 "$NODE_VERSION"
+scripts/build-windows-package.sh "$NODE_VERSION"
+rm -f dist/SF-Desk-windows-arm64.zip dist/VERSION-windows-*.txt # from before one download served both
 scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip
 
 echo
 echo "Built $NAME ($TAG, merged in pull request #$PR) in $ROOT/dist:"
-for f in "SF-Desk.dmg" "SF-Desk-app.zip" "SF-Desk-mac.zip" "SF-Desk-windows.zip" "SF-Desk-windows-arm64.zip"; do
+for f in "SF-Desk.dmg" "SF-Desk-app.zip" "SF-Desk-mac.zip" "SF-Desk-windows.zip"; do
   printf '  %-26s %s\n' "$f" "$(du -h "dist/$f" | cut -f1 | tr -d ' ')"
 done

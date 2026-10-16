@@ -281,8 +281,8 @@ Calendars**, turn on **Terminal**, then stop SF Desk with Ctrl+C, run `npm start
 
 ## Windows
 
-SF Desk for Windows comes as `SF-Desk-windows.zip` for Intel and AMD PCs, or `SF-Desk-windows-arm64.zip` for ARM PCs
-(Snapdragon; **Settings > System > About** shows which). You need Windows 10 or 11 (64-bit), Microsoft Edge (built
+SF Desk for Windows comes as `SF-Desk-windows.zip`, one download for Intel, AMD and ARM (Snapdragon) PCs: the
+installer puts in the Node.js built for the PC. You need Windows 10 or 11 (64-bit), Microsoft Edge (built
 in) and **classic Outlook** signed in to your SailPoint mailbox; the new Outlook doesn't let other apps read its
 calendar, so turn off the **New Outlook** toggle if it's on.
 
@@ -313,7 +313,7 @@ normally (not as administrator).
 ### Building the Windows download
 
 Anywhere npm and nodejs.org are reachable (e.g. in the cloud), `scripts/build-windows-package.sh` writes
-`dist/SF-Desk-windows.zip`; with `--arch arm64` it writes `dist/SF-Desk-windows-arm64.zip`. Running from a Git checkout on Windows also works: `npm start` uses Outlook the
+`dist/SF-Desk-windows.zip`, with Node.js for both x64 and arm64. Running from a Git checkout on Windows also works: `npm start` uses Outlook the
 same way, with `sf` from your PATH.
 
 ## Optional: the Outlook add-in
