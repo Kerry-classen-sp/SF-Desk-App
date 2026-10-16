@@ -92,6 +92,7 @@ darkQuery.addEventListener('change', applyTheme);
     color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); }
   .pager button { width: auto; padding: 4px 10px; white-space: nowrap; }
   .pager span { white-space: nowrap; }
+  .acct-bar h2 .count { color: var(--muted); font-weight: 500; }
   .pager:last-child { border-bottom: 0; border-top: 1px solid var(--line); }
   .acct { padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
   .acct:hover { background: var(--bg); }
@@ -453,7 +454,7 @@ let boatFilter = 'mine', teamFilter = 'mine', acctFilters = null;
 // The sales reps the BOAT and team filters leave on the Accounts and Deals tabs: { key, reps }.
 let repChoices = null;
 // The account list shows ACCT_PAGE accounts at a time, with paging controls above and below when there are more.
-const ACCT_PAGE = 200, ACCT_MAX = 5000;
+const ACCT_PAGE = 100, ACCT_MAX = 5000;
 let acctPage = 0;
 let savedRepName = ''; // the picked rep's name from the saved filters, until the rep choices load
 
@@ -780,7 +781,7 @@ function showMain() {
   // selected-accounts controls stay at the top of the list.
   app.replaceChildren(el('div', { class: 'acct-page' },
     el('div', { class: 'dash-head acct-bar' },
-      el('h2', {}, 'Accounts'),
+      el('h2', {}, 'Accounts', el('span', { id: 'acctCount', class: 'count' })),
       el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep, sort),
       el('label', {}, group, 'Group by sales rep'),
       el('label', {}, showHidden, el('span', { id: 'hiddenAcctLabel' }, 'Show hidden'))),
@@ -833,6 +834,12 @@ function renderList() {
   const hiddenCount = accounts.filter((a) => isHidden(a.Id)).length;
   document.getElementById('hiddenAcctLabel').textContent = `Show hidden (${hiddenCount})`;
   const shown = shownAccounts();
+  const more = accounts.length >= ACCT_MAX ? '+' : '';
+  const count = document.getElementById('acctCount');
+  if (count) {
+    count.textContent = ` (${shown.length.toLocaleString()}${more})`;
+    count.title = more ? `Only the first ${ACCT_MAX.toLocaleString()} are loaded; narrow the filters or search to see the rest` : '';
+  }
   for (const id of [...pickedAccts]) if (!shown.some((a) => a.Id === id)) pickedAccts.delete(id);
   renderAcctSelbar();
   renderReps();
@@ -865,7 +872,7 @@ function renderList() {
   const pager = () => pages > 1 ? el('div', { class: 'pager' },
     el('button', { disabled: acctPage === 0, onclick: () => { acctPage--; renderList(); box.scrollTop = 0; } }, '‹ Prev'),
     el('span', {}, `${(acctPage * ACCT_PAGE + 1).toLocaleString()}–${(acctPage * ACCT_PAGE + pageRows.length).toLocaleString()} of ` +
-      `${shown.length.toLocaleString()}${accounts.length >= ACCT_MAX ? '+' : ''}`),
+      `${shown.length.toLocaleString()}${more}`),
     el('button', { disabled: acctPage >= pages - 1, onclick: () => { acctPage++; renderList(); box.scrollTop = 0; } }, 'Next ›')) : null;
   if (!groupByRep) return box.replaceChildren(...[pager(), ...pageRows.map(row), pager()].filter(Boolean));
   // A heading before each rep's rows on this page, with the rep's count across all pages.
