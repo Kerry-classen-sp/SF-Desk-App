@@ -153,6 +153,10 @@ darkQuery.addEventListener('change', applyTheme);
   tr.ds-group td:first-child { padding-left: 18px; }
   tr.tes-stage td { font-weight: 700; font-size: 13px; background: var(--accent-soft); color: var(--accent); }
   tr.tes-stage .tes-stalled { color: var(--err); }
+  tr.tes-stage { cursor: pointer; } tr.tes-stage:hover td { filter: brightness(.97); }
+  .tes-twisty { display: inline-block; width: 1.2em; }
+  tr.tes-pager td { text-align: center; } tr.tes-pager td > * { margin: 0 6px; vertical-align: middle; }
+  tr.tes-pager button { padding: 2px 10px; }
   .tes-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--bg); }
   .tes-chip.g { background: #dcf3e4; color: #17703a; } .tes-chip.y { background: #fff1c2; color: #7a5600; } .tes-chip.r { background: #fde0de; color: #b42318; }
   .ds-more h4 { margin: 4px 0 8px; font-size: 13px; }
@@ -2225,7 +2229,10 @@ async function openDeal(o) {
 // "Show more" adds that much), and never once they're over TES_CLOSED_MAX days old.
 const TES_CLOSED = ['completed', 'cancelled'];
 const TES_CLOSED_DAYS = 90, TES_CLOSED_MAX = 365;
-const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), days: {} };
+// `collapsed` holds the collapsed stages, `page` each stage's page (from 0); both start over for each team filter.
+const TES_COLLAPSE_OVER = 100, TES_PAGE = 50;
+const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), days: {},
+  collapsed: new Set(), page: {}, collapsedFor: null };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
 // These stages first, in this order; any others follow A–Z, then requests with no stage.
@@ -2257,6 +2264,7 @@ function showTes() {
   setNav('tes');
   current = null;
   tes.days = {};
+  tes.collapsedFor = null;
   // The team filter of the other tabs (and saved with them), matching the request's Opportunity Lead SE or
   // Assigned SE. The BOAT and sales rep filters don't apply here, and their picks stay as they are.
   const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => {} });
@@ -2355,13 +2363,31 @@ function renderTesRequests(list, older = []) {
   }
   for (const r of older) if (!groups.some((g) => g.stage === tesStage(r))) groups.push({ stage: tesStage(r), rows: [] });
   groups.sort((x, y) => (tesStageRank(x.stage) - tesStageRank(y.stage)) || x.stage.localeCompare(y.stage));
+  // Over TES_COLLAPSE_OVER requests, every stage starts collapsed (again whenever the team filter changes).
+  if (tes.collapsedFor !== d.team) {
+    tes.collapsedFor = d.team;
+    tes.collapsed = new Set(list.length > TES_COLLAPSE_OVER ? groups.map((g) => g.stage) : []);
+    tes.page = {};
+  }
   for (const { stage, rows } of groups) {
     const closed = TES_CLOSED.includes(stage.toLowerCase());
-    tbody.append(el('tr', { class: 'tes-stage' }, el('td', { colspan: ncols },
+    const shut = tes.collapsed.has(stage);
+    const toggle = () => { shut ? tes.collapsed.delete(stage) : tes.collapsed.add(stage); renderTes(); };
+    tbody.append(el('tr', { class: 'tes-stage', onclick: toggle, title: shut ? 'Expand' : 'Collapse' }, el('td', { colspan: ncols },
+      el('span', { class: 'tes-twisty', 'aria-hidden': 'true' }, shut ? '▸' : '▾'),
       stage.toLowerCase() === 'stalled' ? el('span', { class: 'tes-stalled' }, stage) : stage || `(No ${f.stage?.label || 'TES Stage'})`,
       ` (${rows.length})` + (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
+    if (shut) continue;
+    // Over TES_PAGE requests, the stage shows a page at a time, with paging controls above and below.
+    const pages = Math.ceil(rows.length / TES_PAGE);
+    const p = tes.page[stage] = Math.max(0, Math.min(tes.page[stage] || 0, pages - 1));
+    const pager = () => el('tr', { class: 'nolink tes-pager' }, el('td', { colspan: ncols },
+      el('button', { disabled: p === 0, onclick: () => { tes.page[stage] = p - 1; renderTes(); } }, '‹ Previous'),
+      el('span', {}, `Page ${p + 1} of ${pages} · ${(p * TES_PAGE + 1).toLocaleString()}–${Math.min(rows.length, (p + 1) * TES_PAGE).toLocaleString()} of ${rows.length.toLocaleString()}`),
+      el('button', { disabled: p >= pages - 1, onclick: () => { tes.page[stage] = p + 1; renderTes(); } }, 'Next ›')));
+    if (pages > 1) tbody.append(pager());
     let acct = null;
-    for (const r of rows) {
+    for (const r of rows.slice(p * TES_PAGE, (p + 1) * TES_PAGE)) {
       const a = tesOpp(r)?.AccountId || '';
       if (a !== acct) {
         acct = a;
@@ -2370,6 +2396,7 @@ function renderTesRequests(list, older = []) {
       }
       tbody.append(...tesRow(r, ncols, cols));
     }
+    if (pages > 1) tbody.append(pager());
     // Each click reaches back another TES_CLOSED_DAYS, at least to the newest one left out, and at most a year.
     const more = closed ? older.filter((r) => tesStage(r) === stage) : [];
     if (more.length) {
