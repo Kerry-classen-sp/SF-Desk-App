@@ -202,6 +202,19 @@ final class Server: @unchecked Sendable {
             supportDir.appendingPathComponent("sf-cli/bin/sf").path].compactMap { $0 }.first(where: isExecutable)
   }
 
+  func findBrew() -> String? {
+    [which("brew", in: path), "/opt/homebrew/bin/brew", "/usr/local/bin/brew"].compactMap { $0 }.first(where: isExecutable)
+  }
+
+  // Homebrew's sf formula, which then updates with the rest of brew. sf goes next to brew.
+  func brewInstallSf(_ brew: String) -> String? {
+    ui.status("Installing the Salesforce CLI with Homebrew...")
+    let env = ProcessInfo.processInfo.environment.merging(["PATH": path, "HOMEBREW_NO_ENV_HINTS": "1"]) { $1 }
+    let r = run(brew, ["install", "sf"], env: env, timeout: 1800)
+    let sf = URL(fileURLWithPath: brew).deletingLastPathComponent().appendingPathComponent("sf").path
+    return r.status == 0 && isExecutable(sf) ? sf : nil
+  }
+
   // Salesforce's own build of the CLI, into the support folder: no admin rights, no npm.
   func downloadSf() throws -> String {
     ui.status("Downloading the Salesforce CLI from Salesforce...")
@@ -224,12 +237,16 @@ final class Server: @unchecked Sendable {
   func salesforceLogin(target: String) throws {
     var sf = findSf()
     if sf == nil {
+      let brew = findBrew()
       guard ui.ask("SF Desk needs the Salesforce CLI",
-                   "SF Desk signs in to Salesforce with it. Download Salesforce's own copy now? No admin rights are needed.",
-                   "Download") else {
+                   brew != nil
+                     ? "SF Desk signs in to Salesforce with it. Install it with Homebrew now (brew install sf)?"
+                     : "SF Desk signs in to Salesforce with it. Download Salesforce's own copy now? No admin rights are needed.",
+                   brew != nil ? "Install" : "Download") else {
         throw Failure(message: "SF Desk needs the Salesforce CLI. Install it from https://developer.salesforce.com/tools/salesforcecli, then open SF Desk again.")
       }
-      sf = try downloadSf()
+      if let brew { sf = brewInstallSf(brew) }
+      if sf == nil { sf = try downloadSf() }
     }
     guard let sf else { return }
     if readEnv()["SF_CLI_PATH"] != sf { setEnv("SF_CLI_PATH", sf) }
