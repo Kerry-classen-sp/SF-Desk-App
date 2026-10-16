@@ -22,8 +22,20 @@ $logFile = Join-Path $logDir 'server.log'
 $icon = Join-Path $PSScriptRoot 'SFDesk.ico'
 $sfInstance = 'https://sailpoint.my.salesforce.com'
 $sfAlias = 'sailpoint'
-$sfTarball = 'https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-win32-x64.tar.gz'
 $env:SF_AUTOUPDATE_DISABLE = 'true'
+
+# The PC's own architecture, 'arm64' or 'x64'. The registry has it even when this runs emulated, where
+# PROCESSOR_ARCHITECTURE says AMD64 on an ARM PC.
+function Get-OsArch {
+  $arch = ''
+  try { $arch = [string](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name PROCESSOR_ARCHITECTURE).PROCESSOR_ARCHITECTURE } catch {}
+  if (-not $arch) { $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+  if ($arch -match 'arm64') { return 'arm64' }
+  return 'x64'
+}
+$osArch = Get-OsArch
+# Salesforce builds the CLI, with its own node.exe, for each: the x64 one hangs on ARM PCs.
+$sfTarball = "https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-win32-$osArch.tar.gz"
 
 # The build (from VERSION.txt, written by scripts/build-windows-package.sh), shown on errors.
 $build = ''
@@ -154,16 +166,44 @@ function Get-LogTail {
 
 # ---------- Salesforce CLI ----------
 
+$ownSf = Join-Path $dataDir 'sf-cli\bin\sf.cmd'
+
+# 'arm64' or 'x64' from an .exe's PE header, or '' if it can't tell.
+function Get-ExeArch($path) {
+  $stream = $null
+  try {
+    $stream = [IO.File]::OpenRead($path)
+    $reader = New-Object IO.BinaryReader $stream
+    $stream.Position = 0x3C
+    $stream.Position = $reader.ReadInt32() + 4
+    $machine = $reader.ReadUInt16()
+    if ($machine -eq 0xAA64) { return 'arm64' }
+    if ($machine -eq 0x8664) { return 'x64' }
+  } catch {} finally { if ($stream) { $stream.Dispose() } }
+  return ''
+}
+
+# The CLI an earlier SF Desk downloaded for the wrong kind of PC (always x64), which gets downloaded again.
+function Test-OwnSfWrongArch {
+  $arch = Get-ExeArch (Join-Path $dataDir 'sf-cli\bin\node.exe')
+  return [bool]($arch -and $arch -ne $osArch)
+}
+
 function Find-Sf {
+  $skipOwn = Test-OwnSfWrongArch
   $configured = Get-Setting 'SF_CLI_PATH'
-  if ($configured -and (Test-Path $configured)) { return $configured }
   $cmd = Get-Command sf.cmd -ErrorAction SilentlyContinue
   $candidates = @(
+    $configured,
     $(if ($cmd) { $cmd.Source }),
     (Join-Path $env:ProgramFiles 'sf\bin\sf.cmd'),
     (Join-Path $env:LOCALAPPDATA 'sf\bin\sf.cmd'),
-    (Join-Path $dataDir 'sf-cli\bin\sf.cmd'))
-  foreach ($c in $candidates) { if ($c -and (Test-Path $c)) { return $c } }
+    $ownSf)
+  foreach ($c in $candidates) {
+    if (-not $c -or -not (Test-Path $c)) { continue }
+    if ($skipOwn -and $c -eq $ownSf) { continue }
+    return $c
+  }
   return $null
 }
 
@@ -181,7 +221,7 @@ function Get-Sf {
     $dest = Join-Path $dataDir 'sf-cli'
     if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
     Move-Item (Join-Path $tmp 'sf') $dest -ErrorAction Stop
-    return (Join-Path $dest 'bin\sf.cmd')
+    return $ownSf
   } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
   }
