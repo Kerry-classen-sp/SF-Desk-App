@@ -3553,7 +3553,16 @@ window.addEventListener('resize', () => {
 });
 
 // ---------- boot ----------
+// Why this window doesn't connect by itself on opening: 'off' after Disconnect, 'tried' once it has
+// tried. noAutoConnect() reads it, noAutoConnect(v) sets it, and null clears it.
+function noAutoConnect(v) {
+  try {
+    if (v === undefined) return sessionStorage.getItem('sfdesk.noAutoConnect');
+    v === null ? sessionStorage.removeItem('sfdesk.noAutoConnect') : sessionStorage.setItem('sfdesk.noAutoConnect', v);
+  } catch { return 'off'; }
+}
 document.getElementById('logout').addEventListener('click', async () => {
+  noAutoConnect('off');
   await api('/logout', { method: 'POST' }).catch(() => {});
   current = null; dsMeta = null;
   showConnect('Disconnected.');
@@ -3703,7 +3712,18 @@ function renderOutlookPane(e, reload) {
   try {
     me = await api('/me');
     if (me.version) document.getElementById('ver').textContent = `SF Desk v${me.version}`;
-    if (!me.connected) return settings ? showSettings() : showConnect();
+    if (!me.connected && settings) return showSettings();
+    // With the Salesforce CLI login, connecting needs no clicks: do it on opening, once, unless Disconnect
+    // was clicked in this window. A failure shows Connect with what went wrong.
+    if (!me.connected && me.cli && !noAutoConnect()) {
+      noAutoConnect('tried');
+      showLoading('Connecting to Salesforce…');
+      const r = await fetch('/login').catch((e) => ({ ok: false, text: async () => e.message }));
+      if (r.ok) return location.reload();
+      return showConnect(await r.text());
+    }
+    if (!me.connected) return showConnect();
+    noAutoConnect(null);
     showLoading('Loading your Salesforce data…');
     document.getElementById('who').textContent = me.user?.username || me.user?.name || '';
     document.getElementById('logout').hidden = false;
