@@ -1514,7 +1514,7 @@ const TES_FIELDS = [
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 2) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 3) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
@@ -1529,9 +1529,78 @@ async function tesMeta(req) {
         isUser: isUserRef(f) };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 2, recordType: TES_RECORD_TYPE, fields, missing };
+  req.session.tesMeta = { v: 3, recordType: TES_RECORD_TYPE, fields, missing, updates: await tesUpdatesMeta(req, d) };
   return req.session.tesMeta;
 }
+
+// TES Status updates: the "TES Status" records under a TES Request, each a status and notes; Salesforce
+// keeps who entered it as its Created By. Null when the org (or the user) has no such object.
+async function tesUpdatesMeta(req, dsDescribe) {
+  for (const rel of dsDescribe.childRelationships || []) {
+    if (!/tes_?status/i.test(rel.childSObject)) continue;
+    const c = await sf(req, 'GET', `/services/data/${API}/sobjects/${rel.childSObject}/describe`).catch((err) => {
+      if (err.status === 401 || err.status >= 502) throw err;
+      return null;
+    });
+    if (!c || lower(c.label) !== 'tes status') continue;
+    const status = c.fields.find((f) => f.type === 'picklist' && lower(f.label) === 'tes status');
+    const notes = c.fields.find((f) => f.type === 'textarea' && lower(f.label) === 'notes');
+    if (!status) continue;
+    return {
+      object: c.name, label: c.label, labelPlural: pluralLabel(c), parentField: rel.field,
+      status: status.name, notes: notes?.name || null,
+      options: (status.picklistValues || []).filter((v) => v.active).map((v) => v.value),
+      canCreate: !!c.createable && !!status.createable,
+    };
+  }
+  return null;
+}
+
+async function tesUpdatesOrFail(req) {
+  const u = (await tesMeta(req)).updates;
+  if (!u) throw new HttpError(404, 'No "TES Status" object under TES Requests was found, or your user can\'t see it.');
+  return u;
+}
+const listTesUpdates = (req, u, id) => query(req, `SELECT Id, Name, ${u.status}${u.notes ? `, ${u.notes}` : ''}, CreatedBy.Name, CreatedDate ` +
+  `FROM ${u.object} WHERE ${u.parentField} = '${id}' ORDER BY CreatedDate DESC`, 500);
+
+// A TES Request's status updates, newest first.
+api.get('/tes/:id/updates', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const u = await tesUpdatesOrFail(req);
+  res.json({ records: await listTesUpdates(req, u, id) });
+}));
+
+// Add a status update. The TES Request's Most Recent TES Status, its notes and Last TES Status date
+// follow the newest update; when no automation in the org has set them, they're set here.
+api.post('/tes/:id/updates', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const u = await tesUpdatesOrFail(req);
+  if (!u.canCreate) throw new HttpError(403, `Your user can't create ${u.labelPlural}.`);
+  const status = String(req.body?.status || '');
+  if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
+  const notes = String(req.body?.notes ?? '').trim();
+  await sf(req, 'POST', `/services/data/${API}/sobjects/${u.object}`,
+    { body: { [u.parentField]: id, [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
+  const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
+  const latest = [[f.tesStatus, status], [f.statusNotes, notes || null], [f.lastStatus, new Date().toLocaleDateString('en-CA')]]
+    .filter(([x]) => x?.name);
+  let warning = null;
+  if (latest.length) {
+    const [rec] = await query(req, `SELECT ${latest.map(([x]) => x.name).join(', ')} FROM ${ds.object} WHERE Id = '${id}'`);
+    const same = (a, b) => String(a ?? '').replace(/\r\n/g, '\n').trim() === String(b ?? '').replace(/\r\n/g, '\n').trim();
+    if (latest.some(([x, v]) => x !== f.lastStatus && !same(rec?.[x.name], v))) {
+      try {
+        await sf(req, 'PATCH', `/services/data/${API}/sobjects/${ds.object}/${id}`,
+          { body: Object.fromEntries(latest.map(([x, v]) => [x.name, v])) });
+      } catch (err) {
+        if (err.status === 401 || err.status >= 502) throw err;
+        warning = `The update was saved, but the ${ds.label}'s ${f.tesStatus?.label || 'status'} couldn't be set: ${err.message}`;
+      }
+    }
+  }
+  res.json({ records: await listTesUpdates(req, u, id), warning });
+}));
 
 // Every TES Request, newest first. team = mine (the default; I'm its Opportunity Lead SE or Assigned
 // SE), team (me or anyone on my team is), a team member's User Id (they are), or all. There is no
