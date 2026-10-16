@@ -16,8 +16,10 @@ if (-not (Test-Path (Join-Path $From 'app\src\server.js'))) {
 }
 # The download has Node.js for Intel/AMD PCs (runtime\x64) and ARM ones (runtime\arm64, e.g. Snapdragon).
 # Install the one built for this PC, else the Intel one, which ARM PCs on Windows 11 can also run.
+# The registry has the PC's own architecture even when this runs emulated.
 $osArch = ''
-try { $osArch = [string][Runtime.InteropServices.RuntimeInformation]::OSArchitecture } catch {}
+try { $osArch = [string](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name PROCESSOR_ARCHITECTURE).PROCESSOR_ARCHITECTURE } catch {}
+if (-not $osArch) { try { $osArch = [string][Runtime.InteropServices.RuntimeInformation]::OSArchitecture } catch {} }
 if (-not $osArch) { $osArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
 $arches = if ($osArch -match 'arm64') { 'arm64', 'x64' } else { 'x64' }
 $runtime = $null
