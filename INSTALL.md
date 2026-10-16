@@ -22,7 +22,8 @@ for calendar access.
    right-click > **Open** > **Open** works too.) You only do this once per new version.
 4. **Follow its prompts.** The first time, SF Desk:
    - copies your settings and data from an earlier install (`~/SF-Desk`) or Git checkout, if you have one;
-   - offers to download the Salesforce CLI if it can't find one (no admin rights needed);
+   - offers to install the Salesforce CLI if it can't find one: with Homebrew (`brew install sf`) if you
+     have it, else Salesforce's own download (no admin rights needed);
    - opens your browser to sign in to `sailpoint.my.salesforce.com` with SSO, if the CLI isn't signed in.
 5. **Click Connect**, then open **Time Entry**. When macOS asks whether **SF Desk** may access your
    calendars, choose **Allow Full Access**.
@@ -93,8 +94,8 @@ block doesn't matter.
 3. **Follow the Terminal window.** The installer:
    - copies SF Desk into `~/SF-Desk`;
    - asks to install the Xcode Command Line Tools if they're missing (click **Install**);
-   - downloads the Salesforce CLI from Salesforce into `~/SF-Desk/sf-cli` if you don't have it (no
-     admin rights needed);
+   - installs the Salesforce CLI if you don't have it: with Homebrew (`brew install sf`) if you have it,
+     else downloaded from Salesforce into `~/SF-Desk/sf-cli` (no admin rights needed);
    - opens your browser to sign in to `sailpoint.my.salesforce.com` with SSO, once;
    - offers to open Internet Accounts so you can check the calendar;
    - puts **Start SF Desk** on your Desktop and starts SF Desk.
@@ -155,7 +156,8 @@ node -v    # v22.0.0 or newer
 
 #### Salesforce CLI
 
-Download the macOS installer (`.pkg`) from https://developer.salesforce.com/tools/salesforcecli and run it.
+With Homebrew, `brew install sf`. Otherwise download the macOS installer (`.pkg`) from
+https://developer.salesforce.com/tools/salesforcecli and run it.
 
 Don't use `npm install -g @salesforce/cli`. Cisco Umbrella on SailPoint Macs blocks the npm registry
 (`registry.npmjs.org`), so that fails.

@@ -74,13 +74,26 @@ if ! xcode-select -p >/dev/null 2>&1; then
   xcode-select --install 2>/dev/null || true
 fi
 
-# 4. Salesforce CLI. Use one already installed, else download Salesforce's own build into
-#    ~/SF-Desk/sf-cli (no admin rights needed, and no npm).
+# 4. Salesforce CLI. Use one already installed, else install Homebrew's (brew install sf) if there's
+#    Homebrew, else download Salesforce's own build into ~/SF-Desk/sf-cli (no admin rights needed, and
+#    no npm).
 bold "Salesforce CLI"
 SF=""
 for candidate in "$(command -v sf || true)" /usr/local/bin/sf /opt/homebrew/bin/sf "$DEST/sf-cli/bin/sf"; do
   if [ -n "$candidate" ] && [ -x "$candidate" ]; then SF="$candidate"; break; fi
 done
+BREW=""
+for candidate in "$(command -v brew || true)" /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then BREW="$candidate"; break; fi
+done
+if [ -z "$SF" ] && [ -n "$BREW" ]; then
+  note "Installing the Salesforce CLI with Homebrew (brew install sf)..."
+  if "$BREW" install sf && [ -x "$(dirname "$BREW")/sf" ]; then
+    SF="$(dirname "$BREW")/sf"
+  else
+    note "Homebrew couldn't install it, so downloading it from Salesforce instead."
+  fi
+fi
 if [ -z "$SF" ]; then
   case "$ARCH" in arm64) SF_FILE="sf-darwin-arm64.tar.xz" ;; *) SF_FILE="sf-darwin-x64.tar.xz" ;; esac
   note "Downloading the Salesforce CLI from Salesforce..."
