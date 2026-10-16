@@ -152,6 +152,7 @@ darkQuery.addEventListener('change', applyTheme);
   tr.ds-group td { font-weight: 600; background: var(--bg); }
   tr.ds-group td:first-child { padding-left: 18px; }
   tr.tes-stage td { font-weight: 700; font-size: 13px; background: var(--accent-soft); color: var(--accent); }
+  tr.tes-stage .tes-stalled { color: var(--err); }
   .tes-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--bg); }
   .tes-chip.g { background: #dcf3e4; color: #17703a; } .tes-chip.y { background: #fff1c2; color: #7a5600; } .tes-chip.r { background: #fde0de; color: #b42318; }
   .ds-more h4 { margin: 4px 0 8px; font-size: 13px; }
@@ -2352,8 +2353,8 @@ function renderTesRequests(list, older = []) {
   for (const { stage, rows } of groups) {
     const closed = TES_CLOSED.includes(stage.toLowerCase());
     tbody.append(el('tr', { class: 'tes-stage' }, el('td', { colspan: ncols },
-      `${stage || `(No ${f.stage?.label || 'TES Stage'})`} (${rows.length})` +
-      (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
+      stage.toLowerCase() === 'stalled' ? el('span', { class: 'tes-stalled' }, stage) : stage || `(No ${f.stage?.label || 'TES Stage'})`,
+      ` (${rows.length})` + (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
     let acct = null;
     for (const r of rows) {
       const a = tesOpp(r)?.AccountId || '';
@@ -2385,6 +2386,18 @@ function renderTesRequests(list, older = []) {
   );
 }
 
+// The Last Update Date, in yellow once it's over TES_STALE_YELLOW days old and red over TES_STALE_RED
+// (not on Completed or Cancelled requests, which get no more updates).
+const TES_STALE_YELLOW = 10, TES_STALE_RED = 15;
+function tesLastUpdateCell(r) {
+  const x = tes.data.fields.lastStatus, v = r[x.name];
+  if (!v) return el('td', {}, '—');
+  const age = Math.floor((Date.parse(todayStr()) - Date.parse(String(v).slice(0, 10))) / 864e5);
+  const tone = tesClosed(r) ? '' : age > TES_STALE_RED ? 'r' : age > TES_STALE_YELLOW ? 'y' : '';
+  return el('td', { title: tone ? `${age} days since the last update` : null },
+    tone ? el('span', { class: 'tes-chip ' + tone }, dsText(x, v)) : dsText(x, v));
+}
+
 // One TES Request's row and, under it, its status-updates panel (shown when the row is open).
 function tesRow(r, ncols, cols) {
   const d = tes.data, f = d.fields;
@@ -2410,7 +2423,8 @@ function tesRow(r, ncols, cols) {
           el('a', { href: `${me.instanceUrl}/${oppId}`, target: '_blank', rel: 'noopener', title: 'Open the opportunity in Salesforce',
             onclick: (ev) => ev.stopPropagation() }, '↗'),
         ] : '—'),
-        cols.map(([, x]) => el('td', {}, (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—')),
+        cols.map(([, x]) => x === f.lastStatus ? tesLastUpdateCell(r)
+          : el('td', {}, (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—')),
         el('td', {}, r.CreatedBy?.Name || ''),
         el('td', {}, shortDate(r.CreatedDate)),
       ),
