@@ -38,6 +38,8 @@ const DB_FILE = process.env.SF_DESK_DB || path.join(ROOT, 'data', 'sf-desk.db');
 const USE_CLI = !CLIENT_ID;
 const SF_CLI = process.env.SF_CLI_PATH || 'sf';
 const SF_TARGET_ORG = process.env.SF_TARGET_ORG || '';
+// Where the CLI's browser sign-in goes (My Domain, for SSO), as in the desktop apps.
+const CLI_INSTANCE_URL = process.env.SF_INSTANCE_URL || 'https://sailpoint.my.salesforce.com';
 
 // Fields the app reads and is allowed to write. Edit these lists to add more.
 const ACCOUNT_FIELDS = ['Name', 'Type', 'Industry', 'Phone', 'Website', 'AnnualRevenue',
@@ -122,10 +124,11 @@ const { SF_API_VERSION: _apiVersion, ...CLI_ENV } = process.env;
 const winQuote = (a) => (/^[\w.:\\/@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '')}"`);
 
 // Run an sf CLI command with --json and return its parsed output (errors become HttpErrors).
-function runCli(args) {
-  const target = SF_TARGET_ORG ? ['--target-org', SF_TARGET_ORG] : [];
+// `targetOrg: false` leaves out --target-org, for commands that don't take it.
+function runCli(args, { targetOrg = true, timeout = 60_000 } = {}) {
+  const target = targetOrg && SF_TARGET_ORG ? ['--target-org', SF_TARGET_ORG] : [];
   const all = [...args, '--json', ...target];
-  const opts = { timeout: 60_000, maxBuffer: 1024 * 1024, env: CLI_ENV, windowsHide: true };
+  const opts = { timeout, maxBuffer: 1024 * 1024, env: CLI_ENV, windowsHide: true };
   return new Promise((resolve, reject) => {
     const done = (err, stdout) => {
       // cmd.exe reports a missing sf as "not recognized" (exit code 1) rather than ENOENT.
@@ -604,6 +607,17 @@ api.post('/logout', wrap(async (req, res) => {
     }).catch(() => {});
   }
   req.session.destroy(() => res.json({ ok: true }));
+}));
+
+// The CLI's browser sign-in, for when connecting finds no CLI login (or an expired one). It opens the
+// Salesforce login in the browser and returns once the user has signed in; one at a time.
+let cliSignIn = null;
+api.post('/cli-login', wrap(async (req, res) => {
+  if (!USE_CLI) throw new HttpError(400, 'SF Desk signs in with its own Salesforce connected app here, not the Salesforce CLI.');
+  cliSignIn ||= runCli(['org', 'login', 'web', '--instance-url', CLI_INSTANCE_URL, ...(SF_TARGET_ORG ? ['--alias', SF_TARGET_ORG] : ['--set-default'])],
+    { targetOrg: false, timeout: 15 * 60_000 }).finally(() => { cliSignIn = null; });
+  try { await cliSignIn; } catch (e) { throw new HttpError(400, `Salesforce sign-in didn't finish: ${e.message}`); }
+  res.json({ ok: true });
 }));
 
 api.use((req, res, next) => (req.session.sf ? next() : next(new HttpError(401, 'Not connected to Salesforce'))));

@@ -707,8 +707,26 @@ function showConnect(message) {
   app.replaceChildren(el('div', { class: 'center' }, el('div', { class: 'card' },
     el('h2', {}, 'Connect to Salesforce'),
     el('p', {}, message || 'Sign in with your Salesforce account. The app only sees what your user can see, and only saves when you click Save.'),
-    el('a', { class: 'btn primary', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Connect'),
+    // With the Salesforce CLI login, connecting failed most likely because that login is missing or expired.
+    me?.cli && message ? el('p', {}, el('button', { class: 'primary', onclick: cliSignIn }, 'Sign in to Salesforce'), ' ',
+      el('a', { class: 'btn', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Try again'))
+      : el('a', { class: 'btn primary', href: IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login', onclick: connecting }, 'Connect'),
   )));
+}
+
+// Sign in to the Salesforce CLI in the browser (the server runs "sf org login web"), then connect.
+async function cliSignIn(e) {
+  const b = e.currentTarget;
+  if (b.disabled) return;
+  b.disabled = true;
+  b.replaceChildren(el('span', { class: 'spin', 'aria-hidden': 'true' }), 'Waiting for you to sign in…');
+  b.parentNode.after(el('p', { class: 'sub', role: 'status' }, 'Your browser opened the Salesforce login. Sign in with SSO as usual, then come back here.'));
+  try {
+    await api('/cli-login', { method: 'POST' });
+    location.assign(IN_OUTLOOK ? '/login?next=/outlook/pane' : '/login');
+  } catch (err) {
+    showConnect(err.message);
+  }
 }
 
 // Connecting can take a while before anything comes back: show it was clicked, and don't start it twice.
