@@ -155,6 +155,8 @@ darkQuery.addEventListener('change', applyTheme);
   tr.tes-stage .tes-stalled { color: var(--err); }
   tr.tes-stage { cursor: pointer; } tr.tes-stage:hover td { filter: brightness(.97); }
   .tes-twisty { display: inline-block; width: 1.2em; }
+  .tes-last { white-space: nowrap; min-width: 112px; }
+  td.tes-opp { white-space: normal; max-width: 260px; overflow-wrap: anywhere; }
   tr.tes-pager td { text-align: center; } tr.tes-pager td > * { margin: 0 6px; vertical-align: middle; }
   tr.tes-pager button { padding: 2px 10px; }
   .tes-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--bg); }
@@ -2351,7 +2353,7 @@ function renderTesRequests(list, older = []) {
   const dateHead = el('th', { title: `${[...dates.map((x) => x.label), 'Created Date'].join(', else ')}; hover a date to see which` },
     f.activityDate?.label || 'Date');
   const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity',
-    ...cols.map(([h, x]) => el('th', { title: x.label }, h)), 'Created by', 'Created'].filter(Boolean);
+    ...cols.map(([h, x]) => el('th', { title: x.label, class: x === f.lastStatus ? 'tes-last' : null }, h)), 'Created by', 'Created'].filter(Boolean);
   const ncols = heads.length;
   const tbody = el('tbody');
   // Rows come sorted by stage, then customer, so each group's requests are together. A Completed or
@@ -2423,10 +2425,10 @@ function renderTesRequests(list, older = []) {
 const TES_STALE_YELLOW = 10, TES_STALE_RED = 15;
 function tesLastUpdateCell(r) {
   const x = tes.data.fields.lastStatus, v = r[x.name];
-  if (!v) return el('td', {}, '—');
+  if (!v) return el('td', { class: 'tes-last' }, '—');
   const age = Math.floor((Date.parse(todayStr()) - Date.parse(String(v).slice(0, 10))) / 864e5);
   const tone = tesClosed(r) ? '' : age > TES_STALE_RED ? 'r' : age > TES_STALE_YELLOW ? 'y' : '';
-  return el('td', { title: tone ? `${age} days since the last update` : null },
+  return el('td', { class: 'tes-last', title: tone ? `${age} days since the last update` : null },
     tone ? el('span', { class: 'tes-chip ' + tone }, dsText(x, v)) : dsText(x, v));
 }
 
@@ -2448,7 +2450,7 @@ function tesRow(r, ncols, cols) {
         dsNameCell(r.Name),
         (({ value, from }) => el('td', { title: from }, value || '—'))(tesDate(r)),
         f.tesStatus ? el('td', {}, tesChip(r[f.tesStatus.name])) : null,
-        el('td', {}, oppId ? [
+        el('td', { class: 'tes-opp' }, oppId ? [
           el('a', { href: '#', title: 'Show this opportunity', onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openOppPopup(oppId, opp?.AccountId); } },
             opp?.Name || oppId),
           ' ',
