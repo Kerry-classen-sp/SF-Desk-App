@@ -74,6 +74,8 @@ darkQuery.addEventListener('change', applyTheme);
   /* Text boxes, number and date boxes and dropdowns all draw at one height, so a row of them lines up. */
   select:not([multiple]), input:not([type=checkbox]):not([type=radio]) { box-sizing: border-box; height: 34px; vertical-align: middle; }
   input:disabled, select:disabled, textarea:disabled { background: var(--bg); color: var(--muted); }
+  .grid.readonly :disabled { color: var(--ink); opacity: 1; -webkit-text-fill-color: var(--ink); }
+  .sub.opp-sub { font-size: 15px; color: var(--ink); }
   .dirty { background: var(--dirty); border-color: #e6b94a; }
 
   main { display: grid; grid-template-columns: clamp(280px, 20vw, 380px) minmax(0, 1fr); height: calc(100vh - var(--chrome)); height: calc(100dvh - var(--chrome)); }
@@ -1502,7 +1504,7 @@ function openOpportunity(id) {
       el('h2', {}, o.Name),
       el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
     ),
-    el('div', { class: 'sub' }, [a.Name, o.StageName, money(o.Amount), o.CloseDate && `closes ${o.CloseDate}`, `Owner: ${o.Owner?.Name || '—'}`].filter(Boolean).join(' · ')),
+    oppSub(a, o),
     el('section', { id: 'focusOpp' }),
     el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
   );
@@ -1520,40 +1522,27 @@ function teamRow(roles, value) {
   }));
 }
 
+// The line under the opportunity's name: its account and sales rep.
+const oppSub = (a, o) => el('div', { class: 'sub opp-sub' }, `${a.Name} · Rep: ${o.Owner?.Name || '—'}`);
+
+// Read-only: changes to the opportunity itself are made in Salesforce.
 function renderFocusOpp(o) {
   const sec = document.getElementById('focusOpp');
-  const form = el('div', { class: 'grid' });
-  const save = el('button', { class: 'primary', disabled: true }, 'Save opportunity');
-  const revert = el('button', { disabled: true }, 'Revert');
-  const onChange = () => { const dirty = Object.keys(changes(form, o)).length > 0; save.disabled = revert.disabled = !dirty; };
+  const form = el('div', { class: 'grid readonly' });
+  const show = (def) => el('label', { class: def[1] === 'textarea' ? 'wide' : null }, el('span', {}, label(def[0])), field(def, o[def[0]], false, () => {}));
   // The opportunity's own fields make one row, so the team row below it is the second row.
   const first = el('div', { class: 'wide opp-row1' });
   form.append(first);
   for (const def of OPP_FOCUS_UI) {
-    if (def[1] !== 'textarea') {
-      first.append(el('label', {}, el('span', {}, label(def[0])), field(def, o[def[0]], meta.editable.Opportunity.includes(def[0]), onChange)));
-      continue;
-    }
+    if (def[1] !== 'textarea') { first.append(show(def)); continue; }
     if (def[0] === 'Description' && current.team) {
       const own = current.team.opportunities[o.Id];
       form.append(teamRow(current.team.roles, (r) => own?.[r] || { name: current.team.account[r], fromAccount: true }));
     }
-    form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null },
-      el('span', {}, label(def[0])), field(def, o[def[0]], meta.editable.Opportunity.includes(def[0]), onChange)));
+    form.append(show(def));
   }
-  revert.addEventListener('click', () => renderFocusOpp(o));
-  save.addEventListener('click', async () => {
-    save.disabled = true;
-    try {
-      const rec = await api('/opportunities/' + o.Id, { method: 'PATCH', body: { fields: changes(form, o), lastModified: o.LastModifiedDate } });
-      const i = current.opportunities.findIndex((x) => x.Id === o.Id);
-      current.opportunities[i] = rec;
-      document.querySelector('.title-row h2').textContent = rec.Name;
-      renderFocusOpp(rec);
-      toast(`Saved "${rec.Name}" to Salesforce`, 'ok');
-    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
-  });
-  sec.replaceChildren(el('h3', {}, 'Opportunity', el('span', { class: 'spacer' }), revert, save), form);
+  sec.replaceChildren(el('h3', {}, 'Opportunity', el('span', { class: 'spacer' }),
+    el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Edit in Salesforce ↗')), form);
 }
 
 // The open edit form on the opportunity's Deal Supports list, and on the account's Deal Supports panel.
@@ -2426,7 +2415,7 @@ async function openOppPopup(oppId, accountId) {
         el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
         el('span', { class: 'spacer', style: 'flex:1' }),
         closeBtn),
-      el('div', { class: 'sub' }, [a.Name, o.StageName, money(o.Amount), o.CloseDate && `closes ${o.CloseDate}`, `Owner: ${o.Owner?.Name || '—'}`].filter(Boolean).join(' · ')),
+      oppSub(a, o),
       el('section', { id: 'focusOpp' }),
       el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
     );
