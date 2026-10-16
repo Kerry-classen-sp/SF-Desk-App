@@ -159,8 +159,8 @@ darkQuery.addEventListener('change', applyTheme);
   td.tes-notes { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 240px; }
   .tes-update { display: grid; grid-template-columns: 160px 1fr; gap: 8px 14px; align-items: start; margin: 4px 0 10px; }
   .tes-update label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .tes-update textarea { min-height: calc(3lh + 14px); resize: vertical; }
   .tes-update .form-actions { grid-column: 1 / -1; margin-top: 0; }
-  .tes-more { display: flex; justify-content: center; margin-top: 12px; }
   .ds-more details { margin: 6px 0; } .ds-more details summary { cursor: pointer; color: var(--accent); }
   dialog.popup { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 22px;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
@@ -2220,13 +2220,15 @@ async function openDeal(o) {
 // TES Requests (the Deal Supports of record type "TES Request") where I, my team or one of them is the
 // Opportunity Lead SE or Assigned SE, grouped by TES Stage, then by customer A–Z, newest first within each.
 // `open` holds the rows showing their status updates; `updates` the updates fetched, by request Id.
-// Completed requests show for the last `completedDays` days; "Show more" adds TES_COMPLETED_DAYS at a time.
-const TES_COMPLETED_DAYS = 90;
-const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), completedDays: TES_COMPLETED_DAYS };
+// Completed and Cancelled requests show for the last `days[stage]` days (TES_CLOSED_DAYS to start; each
+// "Show more" adds that much), and never once they're over TES_CLOSED_MAX days old.
+const TES_CLOSED = ['completed', 'cancelled'];
+const TES_CLOSED_DAYS = 90, TES_CLOSED_MAX = 365;
+const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), days: {} };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
 // These stages first, in this order; any others follow A–Z, then requests with no stage.
-const TES_STAGES = ['Requested', 'Planning', 'Active', 'Stalled', 'Completed'];
+const TES_STAGES = ['Requested', 'Planning', 'Active', 'Stalled', 'Completed', 'Cancelled'];
 const tesStage = (r) => String((tes.data.fields.stage && r[tes.data.fields.stage.name]) || '');
 const tesStageRank = (s) => {
   const i = TES_STAGES.findIndex((x) => x.toLowerCase() === s.toLowerCase());
@@ -2241,9 +2243,10 @@ const tesDate = (r) => {
   if (q && r[q.name]) return { value: r[q.name], from: q.label };
   return { value: String(r.CreatedDate || '').slice(0, 10), from: 'Created Date' };
 };
-const tesCompleted = (r) => tesStage(r).toLowerCase() === 'completed';
-// When a Completed request finished: Date TES Completed, else TES End Date, else Last TES Stage, else its date.
-const tesCompletedOn = (r) => {
+const tesClosed = (r) => TES_CLOSED.includes(tesStage(r).toLowerCase());
+const tesDays = (stage) => tes.days[stage.toLowerCase()] || TES_CLOSED_DAYS;
+// When a Completed or Cancelled request finished: Date TES Completed, else TES End Date, else Last TES Stage, else its date.
+const tesClosedOn = (r) => {
   const f = tes.data.fields;
   const x = [f.completedDate, f.endDate, f.stageDate].find((y) => y && r[y.name]);
   return x ? r[x.name] : tesDate(r).value;
@@ -2252,7 +2255,7 @@ const tesCompletedOn = (r) => {
 function showTes() {
   setNav('tes');
   current = null;
-  tes.completedDays = TES_COMPLETED_DAYS;
+  tes.days = {};
   // The team filter of the other tabs (and saved with them), matching the request's Opportunity Lead SE or
   // Assigned SE. The BOAT and sales rep filters don't apply here, and their picks stay as they are.
   const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => {} });
@@ -2306,23 +2309,24 @@ function renderTes() {
       || String(tesOpp(x)?.AccountId).localeCompare(String(tesOpp(y)?.AccountId))
       || tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
   const hiddenCount = d.records.length - list.length;
+  const today = todayStr(), yearAgo = addDays(today, -TES_CLOSED_MAX);
+  const recent = list.filter((r) => !tesClosed(r) || tesClosedOn(r) >= yearAgo);
+  const shown = recent.filter((r) => !tesClosed(r) || tesClosedOn(r) >= addDays(today, -tesDays(tesStage(r))));
   const t = (s) => s.options[s.selectedIndex]?.textContent || '';
   const who = d.team === 'all' ? '' : d.team === 'mine' ? 'you are' : d.team === 'team' ? 'you or someone on your team is' : `${t(f.team)} is`;
   const se = [d.fields.leadSe?.label, d.fields.assignedSe?.label].filter(Boolean).join(' or ');
   document.getElementById('tesSub').textContent =
-    `${plural(list.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}` +
+    `${plural(recent.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}` +
     (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
     (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
     (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '') +
-    ` · Completed ones from the last ${tes.completedDays} days`;
-  const since = addDays(todayStr(), -tes.completedDays);
-  const shown = list.filter((r) => !tesCompleted(r) || tesCompletedOn(r) >= since);
-  renderTesRequests(shown, list.filter((r) => !shown.includes(r)));
+    ` · Completed and Cancelled ones from the last ${TES_CLOSED_DAYS} days to start, up to a year with Show more`;
+  renderTesRequests(shown, recent.filter((r) => !shown.includes(r)));
 }
 
 // Shown like the opportunity's Deal Supports list, with the date, Most Recent TES Status and opportunity
 // added, under a heading row per TES Stage and per customer. Click a row for its status updates and to add
-// one. `older` holds the Completed requests left out for finishing before the window.
+// one. `older` holds the Completed and Cancelled requests left out for finishing before their stage's window.
 function renderTesRequests(list, older = []) {
   const sec = document.getElementById('tesRequests');
   const d = tes.data, f = d.fields;
@@ -2336,22 +2340,55 @@ function renderTesRequests(list, older = []) {
     ...cols.map(([h, x]) => el('th', { title: x.label }, h)), 'Created by', 'Created'].filter(Boolean);
   const ncols = heads.length;
   const tbody = el('tbody');
-  // Rows come sorted by stage, then customer, so each group's requests are together.
-  let stage = null, acct = null;
-  const count = (test) => list.filter(test).length;
+  // Rows come sorted by stage, then customer, so each group's requests are together. A Completed or
+  // Cancelled stage with only older requests still gets its heading, for its Show more link.
+  const groups = [];
   for (const r of list) {
-    if (tesStage(r) !== stage) {
-      stage = tesStage(r); acct = null;
-      tbody.append(el('tr', { class: 'tes-stage' }, el('td', { colspan: ncols },
-        `${stage || `(No ${f.stage?.label || 'TES Stage'})`} (${count((x) => tesStage(x) === stage)})` +
-        (tesCompleted(r) ? ` · finished in the last ${tes.completedDays} days` : ''))));
+    if (groups.at(-1)?.stage !== tesStage(r)) groups.push({ stage: tesStage(r), rows: [] });
+    groups.at(-1).rows.push(r);
+  }
+  for (const r of older) if (!groups.some((g) => g.stage === tesStage(r))) groups.push({ stage: tesStage(r), rows: [] });
+  groups.sort((x, y) => (tesStageRank(x.stage) - tesStageRank(y.stage)) || x.stage.localeCompare(y.stage));
+  for (const { stage, rows } of groups) {
+    const closed = TES_CLOSED.includes(stage.toLowerCase());
+    tbody.append(el('tr', { class: 'tes-stage' }, el('td', { colspan: ncols },
+      `${stage || `(No ${f.stage?.label || 'TES Stage'})`} (${rows.length})` +
+      (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
+    let acct = null;
+    for (const r of rows) {
+      const a = tesOpp(r)?.AccountId || '';
+      if (a !== acct) {
+        acct = a;
+        tbody.append(el('tr', { class: 'ds-group' }, el('td', { colspan: ncols },
+          `${tesAcct(r)?.Name || '(No account)'} (${rows.filter((x) => (tesOpp(x)?.AccountId || '') === a).length})`)));
+      }
+      tbody.append(...tesRow(r, ncols, cols));
     }
-    const a = tesOpp(r)?.AccountId || '';
-    if (a !== acct) {
-      acct = a;
-      tbody.append(el('tr', { class: 'ds-group' }, el('td', { colspan: ncols },
-        `${tesAcct(r)?.Name || '(No account)'} (${count((x) => tesStage(x) === stage && (tesOpp(x)?.AccountId || '') === a)})`)));
+    // Each click reaches back another TES_CLOSED_DAYS, at least to the newest one left out, and at most a year.
+    const more = closed ? older.filter((r) => tesStage(r) === stage) : [];
+    if (more.length) {
+      tbody.append(el('tr', { class: 'nolink' }, el('td', { colspan: ncols, style: 'text-align:center' }, el('a', { href: '#', onclick: (ev) => {
+        ev.preventDefault();
+        const toNewest = Math.ceil((Date.parse(todayStr()) - Date.parse(more.map(tesClosedOn).sort().at(-1))) / 864e5);
+        tes.days[stage.toLowerCase()] = Math.min(TES_CLOSED_MAX, Math.max(tesDays(stage) + TES_CLOSED_DAYS, toNewest));
+        renderTes();
+      } }, `Show more ${stage} (${more.length.toLocaleString()} more in the last year)`))));
     }
+  }
+  if (!list.length && !older.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
+  sec.replaceChildren(
+    el('h3', {}, `TES Requests (${list.length})`),
+    el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
+      tbody,
+    )),
+  );
+}
+
+// One TES Request's row and, under it, its status-updates panel (shown when the row is open).
+function tesRow(r, ncols, cols) {
+  const d = tes.data, f = d.fields;
+  {
     const more = el('tr', { class: 'ds-more', hidden: !tes.open.has(r.Id) }, el('td', { colspan: ncols }));
     if (tes.open.has(r.Id)) renderTesPanel(r, more.firstChild);
     const toggle = () => {
@@ -2361,7 +2398,7 @@ function renderTesRequests(list, older = []) {
       renderTesPanel(r, more.firstChild);
     };
     const opp = tesOpp(r), oppId = r[d.oppField];
-    tbody.append(
+    return [
       el('tr', { class: 'ds-row', onclick: toggle },
         dsNameCell(r.Name),
         (({ value, from }) => el('td', { title: from }, value || '—'))(tesDate(r)),
@@ -2378,26 +2415,8 @@ function renderTesRequests(list, older = []) {
         el('td', {}, shortDate(r.CreatedDate)),
       ),
       more,
-    );
+    ];
   }
-  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
-  // Each click reaches back another TES_COMPLETED_DAYS, and always at least to the newest one left out.
-  const showMore = older.length ? el('div', { class: 'tes-more' }, el('button', {
-    onclick: () => {
-      const newest = older.map(tesCompletedOn).sort().at(-1);
-      const toNewest = Math.ceil((Date.parse(todayStr()) - Date.parse(newest)) / 864e5);
-      tes.completedDays = Math.max(tes.completedDays + TES_COMPLETED_DAYS, toNewest);
-      renderTes();
-    },
-  }, `Show more Completed (${older.length.toLocaleString()} older)`)) : null;
-  sec.replaceChildren(
-    el('h3', {}, `TES Requests (${list.length})`),
-    el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
-      tbody,
-    )),
-    showMore,
-  );
 }
 
 // Under a clicked TES Request: its status updates (newest first, with who entered each), a form to add
