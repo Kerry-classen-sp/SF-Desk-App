@@ -1358,6 +1358,16 @@ function renderSub() {
     (current.opportunities.some((o) => isHidden(o.Id)) ? ' (hidden ones not counted)' : '');
 }
 
+// The account's SailPoint BOAT as a read-only field, or null when the account filters have no BOAT field.
+function boatField(a) {
+  const b = acctFilters?.boat;
+  if (!b) return null;
+  const v = a[b.name];
+  return el('label', { title: `${b.label} (${b.name})` }, el('span', {}, 'SailPoint BOAT'),
+    el('input', { type: 'text', disabled: true, 'aria-label': 'SailPoint BOAT',
+      value: v == null || v === '' ? '' : b.options.find((o) => o.value === String(v))?.label || String(v) }));
+}
+
 function renderAccountForm() {
   const a = current.account;
   const sec = document.getElementById('acctSection');
@@ -1371,13 +1381,7 @@ function renderAccountForm() {
     form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null },
       el('span', {}, label(def[0])), field(def, a[def[0]], meta.editable.Account.includes(def[0]), onChange)));
     // SailPoint BOAT (read-only) right after Billing state.
-    const b = acctFilters?.boat;
-    if (def[0] === 'BillingState' && b) {
-      const v = a[b.name];
-      form.append(el('label', { title: `${b.label} (${b.name})` }, el('span', {}, 'SailPoint BOAT'),
-        el('input', { type: 'text', disabled: true, 'aria-label': 'SailPoint BOAT',
-          value: v == null || v === '' ? '' : b.options.find((o) => o.value === String(v))?.label || String(v) })));
-    }
+    if (def[0] === 'BillingState') form.append(boatField(a) || '');
   }
   revert.addEventListener('click', renderAccountForm);
   save.addEventListener('click', async () => {
@@ -1504,7 +1508,7 @@ function openOpportunity(id) {
       el('h2', {}, o.Name),
       el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
     ),
-    oppSub(a, o),
+    oppSub(a, o, openOpportunity),
     el('section', { id: 'focusOpp' }),
     el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
   );
@@ -1522,8 +1526,65 @@ function teamRow(roles, value) {
   }));
 }
 
-// The line under the opportunity's name: its account and sales rep.
-const oppSub = (a, o) => el('div', { class: 'sub opp-sub' }, `${a.Name} · Rep: ${o.Owner?.Name || '—'}`);
+// The line under the opportunity's name: its account (opens the account pop-up) and sales rep.
+// openOpp(id) shows another opportunity picked in that pop-up.
+const oppSub = (a, o, openOpp) => el('div', { class: 'sub opp-sub' },
+  el('a', { href: '#', title: `Show ${a.Name}`, onclick: (ev) => { ev.preventDefault(); openAcctPopup(openOpp); } }, a.Name),
+  ` · Rep: ${o.Owner?.Name || '—'}`);
+
+// The current account, read-only, in a pop-up over the opportunity: its fields, opportunities and Deal Supports.
+function openAcctPopup(openOpp) {
+  const a = current.account;
+  const dlg = el('dialog', { class: 'popup', 'aria-label': 'Account' });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });
+
+  const form = el('div', { class: 'grid readonly' });
+  for (const def of ACCOUNT_UI) {
+    if (def[0] === 'Description' && current.team) form.append(teamRow(current.team.roles, (r) => ({ name: current.team.account[r] })));
+    form.append(el('label', { class: def[1] === 'textarea' ? 'wide' : null }, el('span', {}, label(def[0])), field(def, a[def[0]], false, () => {})));
+    if (def[0] === 'BillingState') form.append(boatField(a) || '');
+  }
+
+  let withClosed = false;
+  const oppSec = el('section');
+  const renderOppList = () => {
+    const all = current.opportunities.filter((o) => !isHidden(o.Id));
+    const closed = all.filter((o) => o.IsClosed).length;
+    const list = (withClosed ? all : all.filter((o) => !o.IsClosed))
+      .sort((x, y) => (x.IsClosed - y.IsClosed) || String(x.CloseDate || '').localeCompare(String(y.CloseDate || '')));
+    const toggle = el('input', { type: 'checkbox', checked: withClosed, onchange: (e) => { withClosed = e.target.checked; renderOppList(); } });
+    const pick = (o) => el('a', { href: '#', onclick: (ev) => { ev.preventDefault(); dlg.close(); openOpp(o.Id); } }, o.Name);
+    oppSec.replaceChildren(
+      el('h3', {}, withClosed ? `Opportunities (${list.length})` : `Open opportunities (${list.length})`, el('span', { class: 'spacer' }),
+        closed ? el('label', { class: 'selbar' }, toggle, `Show closed (${closed})`) : null),
+      el('div', { class: 'tablewrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, ['Name', 'Stage', 'Amount', 'Close date', 'Probability', 'Owner'].map((t) => el('th', {}, t)))),
+        el('tbody', {}, list.length ? list.map((o) => el('tr', { class: o.IsClosed ? 'closed' : null },
+          el('td', {}, pick(o)), el('td', {}, o.StageName || ''), el('td', { class: 'n' }, money(o.Amount)),
+          el('td', {}, o.CloseDate || ''), el('td', { class: 'n' }, o.Probability == null ? '' : o.Probability + '%'), el('td', {}, o.Owner?.Name || '')))
+          : el('tr', {}, el('td', { colspan: 6, class: 'empty' }, all.length ? 'No open opportunities.' : 'No opportunities on this account.'))))),
+    );
+  };
+  renderOppList();
+
+  const openOpps = current.opportunities.filter((o) => !o.IsClosed && !isHidden(o.Id));
+  dlg.append(
+    el('div', { class: 'title-row' },
+      el('h2', {}, a.Name),
+      el('span', { class: 'rep-pill', title: 'Sales rep (account owner)' }, el('span', { class: 'k' }, 'Sales rep'), a.Owner?.Name || '—'),
+      el('a', { href: `${me.instanceUrl}/${a.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
+    el('div', { class: 'sub' }, `${openOpps.length} open opportunities · ${money(openOpps.reduce((s, o) => s + (o.Amount || 0), 0))} open pipeline`),
+    el('section', {}, el('h3', {}, 'Account'), form),
+    oppSec,
+    el('section', { id: 'acctDs' }),
+  );
+  document.body.append(dlg);
+  dlg.showModal();
+  loadAccountDealSupports(a.Id);
+}
 
 // Read-only: changes to the opportunity itself are made in Salesforce.
 function renderFocusOpp(o) {
@@ -2415,7 +2476,7 @@ async function openOppPopup(oppId, accountId) {
         el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
         el('span', { class: 'spacer', style: 'flex:1' }),
         closeBtn),
-      oppSub(a, o),
+      oppSub(a, o, (id) => { dlg.close(); openOppPopup(id, a.Id); }),
       el('section', { id: 'focusOpp' }),
       el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
     );
