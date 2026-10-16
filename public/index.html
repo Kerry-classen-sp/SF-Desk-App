@@ -34,6 +34,8 @@
   button.danger { color: #b42318; border-color: #f0b4ae; }
   button.danger:hover:not(:disabled) { background: #b42318; border-color: #b42318; color: #fff; }
   input, select, textarea { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  /* Text boxes, number and date boxes and dropdowns all draw at one height, so a row of them lines up. */
+  select:not([multiple]), input:not([type=checkbox]):not([type=radio]) { box-sizing: border-box; height: 34px; vertical-align: middle; }
   input:disabled, select:disabled, textarea:disabled { background: var(--bg); color: var(--muted); }
   .dirty { background: var(--dirty); border-color: #e6b94a; }
 
