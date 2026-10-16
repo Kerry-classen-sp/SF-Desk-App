@@ -89,18 +89,21 @@ function Get-Url {
   return "http://localhost:$port"
 }
 
+# Whether the server is listening: a TCP connect to each loopback address (the server listens on
+# "localhost", which can be either) with a short timeout, since Windows takes about 2 seconds to give up
+# on a refused connection.
 function Test-Answers($url) {
-  try {
-    $req = [Net.HttpWebRequest]::Create($url)
-    $req.Proxy = $null
-    $req.Timeout = 2000
-    $req.GetResponse().Close()
-    return $true
-  } catch [Net.WebException] {
-    return $null -ne $_.Exception.Response # any HTTP answer means it's up
-  } catch {
-    return $false
+  $port = ([Uri]$url).Port
+  foreach ($addr in [Net.IPAddress]::IPv6Loopback, [Net.IPAddress]::Loopback) {
+    $client = New-Object Net.Sockets.TcpClient($addr.AddressFamily)
+    try {
+      if ($client.ConnectAsync($addr, $port).Wait(250) -and $client.Connected) { return $true }
+    } catch {
+    } finally {
+      $client.Close()
+    }
   }
+  return $false
 }
 
 function Find-Node {
@@ -138,10 +141,11 @@ function Start-Server {
   $script:server = [Diagnostics.Process]::Start($psi)
 
   $url = Get-Url
-  for ($i = 0; $i -lt 120; $i++) {
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline) {
     if ($script:server.HasExited) { throw "The SF Desk server stopped while starting.`n`n$(Get-LogTail)" }
     if (Test-Answers $url) { return }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 100
   }
   throw "The SF Desk server didn't answer at $url.`n`n$(Get-LogTail)"
 }
@@ -216,13 +220,46 @@ function Connect-Salesforce($target) {
   $targetArgs = @(); if ($target) { $targetArgs = @('--target-org', $target) }
   $shown = (& $sf org display --json @targetArgs 2>$null) -join "`n"
   if ($shown -match '"status":\s*0') { return }
+  [void](Invoke-SignIn $sf $target)
+}
 
-  if (-not (Ask 'Sign in to Salesforce' 'Your browser will open the Salesforce login. Sign in with SSO as usual, then come back to SF Desk.')) { return }
+# Run the CLI's browser sign-in, if the user agrees. Returns whether they signed in.
+function Invoke-SignIn($sf, $target) {
+  $ErrorActionPreference = 'Continue'
+  if (-not (Ask 'Sign in to Salesforce' 'Your browser will open the Salesforce login. Sign in with SSO as usual, then come back to SF Desk.')) { return $false }
   Show-Status 'Waiting for you to sign in to Salesforce in your browser...'
   $alias = $target; if (-not $alias) { $alias = $sfAlias }
   $login = (& $sf org login web --instance-url $sfInstance --alias $alias 2>&1) -join "`n"
   if ($LASTEXITCODE -ne 0) { throw "Salesforce sign-in didn't finish. Quit SF Desk and open it again to retry.`n`n$login" }
   if (-not $target) { Save-Setting 'SF_TARGET_ORG' $alias }
+  return $true
+}
+
+# Once the CLI is installed, its login is checked while the server starts and the window opens, instead
+# of before (sf takes several seconds to start). The timer below picks up the result.
+$script:loginCheck = $null
+function Start-LoginCheck($sf, $target) {
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $env:ComSpec
+  $targetArg = ''; if ($target) { $targetArg = ' --target-org "' + $target + '"' }
+  $psi.Arguments = '/d /s /c ""' + $sf + '" org display --json' + $targetArg + ' 2>nul"'
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $p = [Diagnostics.Process]::Start($psi)
+  $script:loginCheck = @{ sf = $sf; target = $target; output = $p.StandardOutput.ReadToEndAsync() }
+}
+function Complete-LoginCheck {
+  $c = $script:loginCheck
+  if (-not $c -or -not $c.output.IsCompleted) { return }
+  $script:loginCheck = $null
+  $shown = ''; try { $shown = $c.output.Result } catch {}
+  if ($shown -match '"status":\s*0') { return }
+  try {
+    if (Invoke-SignIn $c.sf $c.target) { Show-Status 'Signed in to Salesforce. Click Connect in the SF Desk window.' }
+  } catch {
+    Show-Error $_.Exception.Message
+  }
 }
 
 # ---------- the window and the tray icon ----------
@@ -309,7 +346,15 @@ try {
   $ownServer = -not (Test-Answers $url) # else already running (a checkout's "npm start", say): just show it
   if ($ownServer) {
     $vars = Read-Env
-    if (-not $vars['SF_CLIENT_ID']) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
+    if (-not $vars['SF_CLIENT_ID']) {
+      # The first time (no CLI yet) get it and sign in first; after that, check the login alongside.
+      $sf = Find-Sf
+      if (-not $sf) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
+      else {
+        if ((Get-Setting 'SF_CLI_PATH') -ne $sf) { Save-Setting 'SF_CLI_PATH' $sf }
+        Start-LoginCheck $sf (Get-Setting 'SF_TARGET_ORG')
+      }
+    }
     Show-Status 'Starting SF Desk...'
     Start-Server
   }
@@ -338,10 +383,11 @@ Add-MenuItem 'Quit SF Desk' { Quit-App }
 $script:tray.ContextMenuStrip = $menu
 $script:tray.add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { Open-Window } })
 
-# Say so if the server stops by itself, and offer to start it again.
+# Finish the login check, and say so if the server stops by itself and offer to start it again.
 $timer = New-Object Windows.Forms.Timer
-$timer.Interval = 2000
+$timer.Interval = 1000
 $timer.add_Tick({
+  Complete-LoginCheck
   $p = $script:server
   if ($script:quitting -or -not $p -or -not $p.HasExited) { return }
   $script:server = $null
