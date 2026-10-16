@@ -109,7 +109,6 @@
   .ds-more dt { font-size: 12px; color: var(--muted); }
   .ds-more dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   tr.ds-group td { font-weight: 600; background: var(--bg); }
-  .deals td.tes-notes { white-space: pre-wrap; min-width: 240px; overflow-wrap: anywhere; }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
@@ -2100,15 +2099,11 @@ async function openDeal(o) {
 }
 
 // ---------- TES ----------
-// TES Requests (the Deal Supports of record type "TES Request") on the accounts the shared filters
-// cover, newest Date of Activity first, grouped by account; and the TES Events among them.
+// TES Requests (the Deal Supports of record type "TES Request") where I, my team or one of them is the
+// Opportunity Lead SE or Assigned SE, grouped by customer A–Z, newest first within each.
 const tes = { data: null, filters: null, editing: null, loads: 0 };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
-const tesText = (r, key) => {
-  const f = tes.data.fields[key];
-  return !f ? '' : f.rel ? r[f.rel]?.Name || '' : dsText(f, r[f.name]);
-};
 // A TES Request's date: its Date of Activity, else its Date Requested, else the day it was created.
 const tesDate = (r) => {
   const { activityDate: a, requestDate: q } = tes.data.fields;
@@ -2121,15 +2116,20 @@ function showTes() {
   setNav('tes');
   current = null;
   tes.editing = null;
-  // The same BOAT, team and sales rep filters as the Accounts and Deals tabs (and saved with them).
-  // The rep filter is applied here, to each request's account owner.
-  const refilter = () => { loadTes(); tesReps(); };
-  const filters = tes.filters = filterSelects({ onBoat: refilter, onTeam: refilter, onRep: () => renderTes() });
+  // The team and sales rep filters of the other tabs (and saved with them); the team pick matches the
+  // request's Opportunity Lead SE or Assigned SE, the rep its account owner. BOAT doesn't apply here.
+  const filters = tes.filters = filterSelects({ onBoat: () => {}, onTeam: loadTes, onRep: () => renderTes() });
+  const noBoat = () => {
+    filters.boat.replaceChildren(el('option', { value: 'all' }, 'All BOATs'));
+    filters.boat.disabled = true;
+    filters.boat.title = 'The BOAT filter doesn\'t apply to TES Requests.';
+  };
+  const seTitle = () => { filters.team.title = 'TES Requests where you (My Accounts), you or anyone on your team (My Team), or that person is the Opportunity Lead SE or Assigned SE'; };
+  noBoat(); seTitle();
   ensureAcctFilters().then(() => {
-    const before = JSON.stringify(filterQuery());
-    fillBoatSelect(filters); fillTeamSelect(filters);
-    if (JSON.stringify(filterQuery()) !== before) loadTes();
-    tesReps();
+    const before = teamFilter;
+    fillTeamSelect(filters); seTitle();
+    if (teamFilter !== before) loadTes();
   }).catch(() => {});
   document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
     el('div', { class: 'dash-head' },
@@ -2140,30 +2140,16 @@ function showTes() {
     ),
     el('div', { class: 'sub', id: 'tesSub' }, 'Loading…'),
     el('section', { id: 'tesRequests' }, el('h3', {}, 'TES Requests')),
-    el('section', { id: 'tesEvents' }, el('h3', {}, 'TES Events')),
   ));
   loadTes();
 }
 
-// The sales rep choices, as on the Deals tab: the owners of the accounts the BOAT and team filters
-// cover, else (offline, or until they load) the account owners of the requests loaded.
-async function tesReps() {
-  const f = tes.filters, key = JSON.stringify(filterQuery());
-  try { await loadRepChoices(); } catch { /* use the requests' owners */ }
-  if (!f?.rep.isConnected || JSON.stringify(filterQuery()) !== key) return;
-  const before = repFilter;
-  if (repChoices?.key === key) fillRepSelect(f, repChoices.reps);
-  else {
-    const byId = new Map((tes.data?.records || []).map(tesAcct).filter((a) => a?.OwnerId).map((a) => [a.OwnerId, a.Owner?.Name || a.OwnerId]));
-    fillRepSelect(f, [...byId].map(([value, label]) => ({ value, label })));
-  }
-  if (repFilter !== before) { saveAcctPrefs(); if (tes.data && document.getElementById('tesRequests')) renderTes(); }
-}
-
 async function loadTes() {
   const seq = ++tes.loads;
+  const sub = document.getElementById('tesSub');
+  if (sub && tes.data) sub.textContent = 'Loading…';
   try {
-    const [data] = await Promise.all([api('/tes?' + new URLSearchParams(filterQuery())),
+    const [data] = await Promise.all([api('/tes?' + new URLSearchParams({ team: teamFilter })),
       dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
     if (seq !== tes.loads) return; // a newer filter choice is loading
     tes.data = data;
@@ -2175,20 +2161,26 @@ async function loadTes() {
 }
 
 function renderTes() {
-  const d = tes.data;
+  const d = tes.data, f = tes.filters;
+  // The sales rep choices: the account owners of the requests loaded (a saved pick stays listed).
+  const owners = new Map(d.records.map(tesAcct).filter((a) => a?.OwnerId).map((a) => [a.OwnerId, a.Owner?.Name || a.OwnerId]));
+  fillRepSelect(f, [...owners].map(([value, label]) => ({ value, label })), true);
   const inRep = d.records.filter((r) => !repFilter || tesAcct(r)?.OwnerId === repFilter);
+  const customer = (r) => tesAcct(r)?.Name || '';
   const list = inRep.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
-    .sort((x, y) => tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
+    .sort((x, y) => (!customer(x) - !customer(y)) || customer(x).localeCompare(customer(y))
+      || String(tesOpp(x)?.AccountId).localeCompare(String(tesOpp(y)?.AccountId))
+      || tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
   const hiddenCount = inRep.length - list.length;
-  const eventIds = new Set(d.eventIds);
-  const events = list.filter((r) => eventIds.has(r.Id));
+  const t = (s) => s.options[s.selectedIndex]?.textContent || '';
+  const who = d.team === 'all' ? '' : d.team === 'mine' ? 'you are' : d.team === 'team' ? 'you or someone on your team is' : `${t(f.team)} is`;
+  const se = [d.fields.leadSe?.label, d.fields.assignedSe?.label].filter(Boolean).join(' or ');
   document.getElementById('tesSub').textContent =
-    `${plural(list.length, 'TES Request')} · ${plural(events.length, 'TES Event')} · ${filterText(tes.filters)}` +
+    `${plural(list.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}${repFilter ? ` · Sales rep: ${t(f.rep)}` : ''}` +
     (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
     (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
     (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '');
   renderTesRequests(list);
-  renderTesEvents(events);
 }
 
 // Shown like the opportunity's Deal Supports list (click a row for every field, ✎ to edit), with the
@@ -2210,7 +2202,7 @@ function renderTesRequests(list) {
   ].filter(([, v]) => v);
   const edit = (r) => editDealSupport(r.Id, tes, renderTes, loadTes);
   const tbody = el('tbody');
-  // Rows come newest first, so each account's group sits where its newest request is.
+  // Rows come sorted by customer, so each account's requests are together.
   const groups = new Map();
   for (const r of list) {
     const k = tesOpp(r)?.AccountId || '';
@@ -2238,43 +2230,12 @@ function renderTesRequests(list) {
       );
     }
   }
-  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests on these accounts.')));
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
   sec.replaceChildren(
     el('h3', {}, `TES Requests (${list.length})`),
     tes.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', {},
       el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
-      tbody,
-    )),
-  );
-}
-
-// The TES Events: one row each; click a row to open its opportunity.
-function renderTesEvents(list) {
-  const sec = document.getElementById('tesEvents');
-  const d = tes.data, f = d.fields;
-  const field = (key, cls) => f[key] && { head: f[key].label, cls, value: (r) => tesText(r, key) };
-  const cols = [
-    { head: 'Opportunity Name', cls: 'wrap', value: (r) => tesOpp(r)?.Name || '' },
-    { head: dsMeta.label, value: (r) => el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener',
-      title: `${r.Name || r.Id} · Open in Salesforce`, onclick: (ev) => ev.stopPropagation() }, r.Name || r.Id) },
-    field('type'), field('leadSe'), field('assignedSe'), field('tesStatus'), field('status'),
-    field('statusNotes', 'tes-notes'), field('lastStatus'),
-    { head: 'Created Date', value: (r) => shortDate(r.CreatedDate) },
-    field('notes', 'tes-notes'),
-  ].filter(Boolean);
-  const criteria = `${f.geo?.label || 'Opportunity Geo'} = ${d.eventGeo} · ${f.stage?.label || 'TES Stage'}: ${listOr(d.eventStages)}`;
-  const tbody = el('tbody', {}, list.map((r) => el('tr', {
-    onclick: () => openDeal({ Id: r[d.oppField], AccountId: tesOpp(r)?.AccountId }), title: 'Open this opportunity' },
-  cols.map((c) => el('td', { class: c.cls || null }, c.value(r))))));
-  const why = !f.geo || !f.stage ? `Can't pick out TES Events: no ${[!f.geo && 'Opportunity Geo', !f.stage && 'TES Stage'].filter(Boolean).join(' or ')} field found.`
-    : 'No TES Events on these accounts.';
-  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: cols.length, class: 'empty' }, why)));
-  sec.replaceChildren(
-    el('h3', {}, `TES Events (${list.length})`),
-    el('div', { class: 'sub' }, criteria),
-    el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
-      el('thead', {}, el('tr', {}, cols.map((c) => el('th', {}, c.head)))),
       tbody,
     )),
   );
