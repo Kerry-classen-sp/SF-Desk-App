@@ -2277,6 +2277,7 @@ function showTes() {
       el('h2', {}, 'TES'),
       el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep),
       el('span', { class: 'spacer', style: 'flex:1' }),
+      el('span', { id: 'tesNew' }),
       el('button', { onclick: loadTes }, 'Reload'),
     ),
     el('div', { class: 'sub', id: 'tesSub' }, 'Loading…'),
@@ -2303,6 +2304,10 @@ async function loadTes() {
 
 function renderTes() {
   const d = tes.data, f = tes.filters;
+  // Salesforce's own "New <Deal Support>: TES Request" page.
+  document.getElementById('tesNew')?.replaceChildren(d.canCreate && d.recordTypeId ? el('a', { class: 'btn primary', target: '_blank', rel: 'noopener',
+    href: `${me.instanceUrl}/lightning/o/${d.object}/new?recordTypeId=${d.recordTypeId}`, title: `New ${d.label}: ${d.recordType}, in Salesforce` },
+    'Add TES Request ↗') : '');
   const customer = (r) => tesAcct(r)?.Name || '';
   const list = d.records.filter((r) => !isHidden(r[d.oppField]) && !isHidden(tesOpp(r)?.AccountId))
     .sort((x, y) => (tesStageRank(tesStage(x)) - tesStageRank(tesStage(y))) || tesStage(x).localeCompare(tesStage(y))

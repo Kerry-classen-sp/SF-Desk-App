@@ -1518,13 +1518,12 @@ const TES_FIELDS = [
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 4) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 5) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
-  if (!(d.recordTypeInfos || []).some((r) => lower(r.name) === lower(TES_RECORD_TYPE))) {
-    throw new HttpError(404, `${d.label} has no "${TES_RECORD_TYPE}" record type, or your user can't see it.`);
-  }
+  const rt = (d.recordTypeInfos || []).find((r) => lower(r.name) === lower(TES_RECORD_TYPE));
+  if (!rt) throw new HttpError(404, `${d.label} has no "${TES_RECORD_TYPE}" record type, or your user can't see it.`);
   const fields = {}, missing = [];
   for (const [key, label, name] of TES_FIELDS) {
     const f = d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name);
@@ -1533,7 +1532,9 @@ async function tesMeta(req) {
         isUser: isUserRef(f) };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 4, recordType: TES_RECORD_TYPE, fields, missing, updates: await tesUpdatesMeta(req, d) };
+  req.session.tesMeta = { v: 5, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
+    recordTypeId: rt.available ? rt.recordTypeId : null, canCreate: !!d.createable,
+    fields, missing, updates: await tesUpdatesMeta(req, d) };
   return req.session.tesMeta;
 }
 
