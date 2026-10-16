@@ -2280,6 +2280,8 @@ if (process.env.SF_DESK_APP) process.stdin.on('end', () => process.exit(0)).on('
 app.listen(PORT, 'localhost', () => {
   console.log(`SF Desk running at http://localhost:${PORT}`);
   if (USE_CLI) console.log(`No SF_CLIENT_ID set: signing in with the Salesforce CLI login${SF_TARGET_ORG ? ` for "${SF_TARGET_ORG}"` : ' (default org)'}.`);
+  // The desktop apps open their window once this file appears.
+  if (process.env.SF_DESK_READY) fs.writeFileSync(process.env.SF_DESK_READY, String(PORT));
 });
 
 // HTTPS for the Outlook add-in, only when its certificate has been made (scripts/outlook-cert.sh).

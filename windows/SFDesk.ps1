@@ -89,23 +89,6 @@ function Get-Url {
   return "http://localhost:$port"
 }
 
-# Whether the server is listening: a TCP connect to each loopback address (the server listens on
-# "localhost", which can be either) with a short timeout, since Windows takes about 2 seconds to give up
-# on a refused connection.
-function Test-Answers($url) {
-  $port = ([Uri]$url).Port
-  foreach ($addr in [Net.IPAddress]::IPv6Loopback, [Net.IPAddress]::Loopback) {
-    $client = New-Object Net.Sockets.TcpClient($addr.AddressFamily)
-    try {
-      if ($client.ConnectAsync($addr, $port).Wait(250) -and $client.Connected) { return $true }
-    } catch {
-    } finally {
-      $client.Close()
-    }
-  }
-  return $false
-}
-
 function Find-Node {
   $bundled = Join-Path (Split-Path -Parent $appDir) 'runtime\node.exe'
   if (Test-Path $bundled) { return $bundled }
@@ -122,6 +105,9 @@ function Start-Server {
   if (-not $node) { throw 'SF Desk can''t find Node.js. Run the SF Desk installer again.' }
   New-Item -ItemType Directory -Force $logDir | Out-Null
   [IO.File]::WriteAllText($logFile, '')
+  # The server writes this once it's listening.
+  $ready = Join-Path $logDir 'server.ready'
+  Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
   $psi = New-Object Diagnostics.ProcessStartInfo
   # cmd.exe only to send the server's output to the log. Our end of its input pipe closes when this
   # launcher quits or dies, and the server then exits (SF_DESK_APP).
@@ -132,6 +118,7 @@ function Start-Server {
   $psi.CreateNoWindow = $true
   $psi.RedirectStandardInput = $true
   $psi.EnvironmentVariables['SF_DESK_APP'] = '1'
+  $psi.EnvironmentVariables['SF_DESK_READY'] = $ready
   $psi.EnvironmentVariables['SF_DESK_DB'] = Join-Path $dataDir 'data\sf-desk.db'
   $psi.EnvironmentVariables['SF_DESK_CERTS'] = Join-Path $dataDir 'certs'
   foreach ($key in 'SF_CLI_PATH', 'SF_TARGET_ORG') {
@@ -140,14 +127,13 @@ function Start-Server {
   }
   $script:server = [Diagnostics.Process]::Start($psi)
 
-  $url = Get-Url
   $deadline = (Get-Date).AddSeconds(60)
   while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $ready) { return }
     if ($script:server.HasExited) { throw "The SF Desk server stopped while starting.`n`n$(Get-LogTail)" }
-    if (Test-Answers $url) { return }
-    Start-Sleep -Milliseconds 100
+    Start-Sleep -Milliseconds 50
   }
-  throw "The SF Desk server didn't answer at $url.`n`n$(Get-LogTail)"
+  throw "The SF Desk server didn't start at $(Get-Url).`n`n$(Get-LogTail)"
 }
 
 function Stop-Server {
@@ -325,7 +311,7 @@ if ($elevated -and -not (Ask 'SF Desk is running as administrator' ("SF Desk was
 $created = $false
 $mutex = New-Object Threading.Mutex($true, 'Local\SFDeskLauncher', [ref]$created)
 if (-not $created) {
-  if (Test-Answers (Get-Url)) { Open-Window }
+  Open-Window
   exit 0
 }
 
@@ -342,22 +328,18 @@ try {
   $script:tray.Text = 'SF Desk'
   $script:tray.Visible = $true
 
-  $url = Get-Url
-  $ownServer = -not (Test-Answers $url) # else already running (a checkout's "npm start", say): just show it
-  if ($ownServer) {
-    $vars = Read-Env
-    if (-not $vars['SF_CLIENT_ID']) {
-      # The first time (no CLI yet) get it and sign in first; after that, check the login alongside.
-      $sf = Find-Sf
-      if (-not $sf) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
-      else {
-        if ((Get-Setting 'SF_CLI_PATH') -ne $sf) { Save-Setting 'SF_CLI_PATH' $sf }
-        Start-LoginCheck $sf (Get-Setting 'SF_TARGET_ORG')
-      }
+  $vars = Read-Env
+  if (-not $vars['SF_CLIENT_ID']) {
+    # The first time (no CLI yet) get it and sign in first; after that, check the login alongside.
+    $sf = Find-Sf
+    if (-not $sf) { Connect-Salesforce (Get-Setting 'SF_TARGET_ORG') }
+    else {
+      if ((Get-Setting 'SF_CLI_PATH') -ne $sf) { Save-Setting 'SF_CLI_PATH' $sf }
+      Start-LoginCheck $sf (Get-Setting 'SF_TARGET_ORG')
     }
-    Show-Status 'Starting SF Desk...'
-    Start-Server
   }
+  Show-Status 'Starting SF Desk...'
+  Start-Server
   $script:tray.Text = 'SF Desk'
 } catch {
   if ($script:tray) { $script:tray.Visible = $false }
@@ -393,7 +375,7 @@ $timer.add_Tick({
   $script:server = $null
   if (Ask 'SF Desk' "The SF Desk server stopped (exit code $($p.ExitCode)). Start it again?`n`n$(Get-LogTail)") { Restart-Server }
 })
-if ($ownServer) { $timer.Start() }
+$timer.Start()
 
 Open-Window
 [Windows.Forms.Application]::Run()

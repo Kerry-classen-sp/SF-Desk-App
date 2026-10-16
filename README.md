@@ -87,7 +87,7 @@ signs you in (Option A below), so the setup steps that follow are only for runni
   `~/SF-Desk` or a Git checkout.
 - **Running:** closing the window keeps SF Desk running in the background (for the Outlook add-in); click
   the Dock icon to get it back, and quit to stop it. **File > Open in Browser** opens the same SF Desk in
-  your browser. If SF Desk is already running (e.g. `npm start` in a checkout), the app shows that one.
+  your browser. The app runs its own server, so stop any `npm start` in a checkout on the same port first.
 - **Logs:** `~/Library/Logs/SF Desk/server.log` (**Help > Show Server Log**).
 
 ## Windows

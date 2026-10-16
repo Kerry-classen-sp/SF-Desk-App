@@ -29,8 +29,8 @@ for calendar access.
 
 Keep SF Desk in the Dock (right-click its icon > **Options > Keep in Dock**). Closing the window keeps it
 running in the background, so the Outlook add-in keeps working; click the Dock icon to bring it back, and
-quit it (**SF Desk > Quit SF Desk**) to stop it. If SF Desk is already running from a Terminal window or a
-checkout, the app shows that one instead of starting another.
+quit it (**SF Desk > Quit SF Desk**) to stop it. The app runs its own server, so stop any SF Desk running
+from a Terminal window or a checkout first; otherwise the app reports that its server couldn't start.
 
 **Your data** lives in `~/Library/Application Support/SF Desk` (**Help > Show Data Folder**): `.env` for
 settings (open it from that folder in a text editor, then **File > Restart Server**), `data/` for the local copy of

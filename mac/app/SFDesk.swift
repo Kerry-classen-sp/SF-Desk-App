@@ -5,8 +5,7 @@
 //
 // On launch it makes the support folder (copying .env, data and certs from ~/SF-Desk or a Git checkout
 // the first time), finds or downloads the Salesforce CLI and signs in to Salesforce if needed, then starts
-// the server (or uses one already answering on the port) and loads it. Quitting stops the server it
-// started. Closing the window keeps it running for the Outlook add-in; click the Dock icon to get it back.
+// its server and loads it. Quitting stops the server. Closing the window keeps it running for the Outlook add-in; click the Dock icon to get it back.
 // macOS asks SF Desk itself, not Terminal, for calendar access.
 
 import AppKit
@@ -96,17 +95,6 @@ func setEnv(_ key: String, _ value: String) {
   try? lines.joined(separator: "\n").write(to: envFile, atomically: true, encoding: .utf8)
 }
 
-// Does the server answer? Any HTTP response counts.
-func answers(_ url: URL) -> Bool {
-  var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 1.5)
-  req.httpMethod = "HEAD"
-  let done = DispatchSemaphore(value: 0)
-  let box = Box(false)
-  URLSession.shared.dataTask(with: req) { _, resp, _ in box.value = resp is HTTPURLResponse; done.signal() }.resume()
-  _ = done.wait(timeout: .now() + 3)
-  return box.value
-}
-
 // GET a URL's body, or nil unless it answers 200.
 func fetch(_ url: URL) -> Data? {
   let done = DispatchSemaphore(value: 0)
@@ -166,7 +154,6 @@ final class Server: @unchecked Sendable {
       }
       let env = readEnv()
       url = URL(string: "http://localhost:\(Int(env["PORT"] ?? "") ?? 3000)")!
-      if answers(url) { return ui.ready(url) } // already running (another copy, or `npm start` in a checkout)
       if (env["SF_CLIENT_ID"] ?? "").isEmpty { try salesforceLogin(target: env["SF_TARGET_ORG"] ?? "") }
       try launch()
     } catch let f as Failure {
@@ -272,6 +259,9 @@ final class Server: @unchecked Sendable {
     ui.status("Starting SF Desk...")
     try Data().write(to: logFile)
     let log = try FileHandle(forWritingTo: logFile)
+    // The server writes this once it's listening.
+    let ready = logDir.appendingPathComponent("server.ready")
+    try? fm.removeItem(at: ready)
 
     let p = Process()
     p.executableURL = URL(fileURLWithPath: node)
@@ -280,6 +270,7 @@ final class Server: @unchecked Sendable {
     p.environment = ProcessInfo.processInfo.environment.merging([
       "PATH": path,
       "SF_DESK_APP": "1",
+      "SF_DESK_READY": ready.path,
       "SF_DESK_DB": supportDir.appendingPathComponent("data/sf-desk.db").path,
       "SF_DESK_CERTS": supportDir.appendingPathComponent("certs").path,
       "SF_DESK_CALENDAR_HELPER": calendarHelper.path,
@@ -292,18 +283,19 @@ final class Server: @unchecked Sendable {
     try p.run()
     lock.lock(); process = p; stdin = pipe; lock.unlock()
 
-    for _ in 0..<120 {
-      guard p.isRunning else { throw Failure(message: "The SF Desk server stopped while starting.\n\n\(tail(logFile))") }
-      if answers(url) {
+    let deadline = Date().addingTimeInterval(60)
+    while Date() < deadline {
+      if fm.fileExists(atPath: ready.path) {
         p.terminationHandler = { [weak self] proc in
           guard let self, !self.quitting else { return }
           self.ui.fail("The SF Desk server stopped (exit code \(proc.terminationStatus)). Choose File > Restart Server to start it again.\n\n\(tail(logFile))")
         }
         return ui.ready(url)
       }
-      Thread.sleep(forTimeInterval: 0.5)
+      guard p.isRunning else { throw Failure(message: "The SF Desk server stopped while starting.\n\n\(tail(logFile))") }
+      Thread.sleep(forTimeInterval: 0.05)
     }
-    throw Failure(message: "The SF Desk server didn't answer at \(url.absoluteString).\n\n\(tail(logFile))")
+    throw Failure(message: "The SF Desk server didn't start at \(url.absoluteString).\n\n\(tail(logFile))")
   }
 
   var running: Bool {
