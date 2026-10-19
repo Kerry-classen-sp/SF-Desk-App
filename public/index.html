@@ -1876,7 +1876,8 @@ function dealSupportForm(o, close, opts = {}) {
   // modules, and kept up to date as they're picked until it's typed in. (The server copies it into Meeting Overview.)
   const shown = (f) => (f ? dsText(f, dsValue(f, inputs.get(f))) : '');
   const propose = () => {
-    const head = [shown(activityF), shown(requestF) && `for ${shown(requestF)}`].filter(Boolean).join(' ');
+    const activity = shown(activityF), request = shown(requestF);
+    const head = activity && request ? `${activity} for ${request}` : activity || request;
     return [head && head + '.', shown(capsF) && `Platform capabilities: ${shown(capsF)}.`,
       shown(modsF) && `Integration modules: ${shown(modsF)}.`].filter(Boolean).join(' ');
   };
