@@ -1961,7 +1961,7 @@ async function showDashboard() {
   document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
     el('div', { class: 'dash-head' },
       el('h2', {}, 'Pipeline'),
-      el('span', { class: 'picks' }, value, filters.boat, filters.team, filters.rep),
+      el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep, value),
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: loadDashboard }, 'Reload'),
     ),
