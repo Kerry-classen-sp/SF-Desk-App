@@ -173,6 +173,12 @@ darkQuery.addEventListener('change', applyTheme);
   dialog.popup { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 22px;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
   dialog.popup::backdrop { background: rgba(0, 0, 0, .35); }
+  dialog.ds-dialog { width: 90vw; height: 90vh; max-width: none; max-height: none; padding: 0; box-sizing: border-box; }
+  dialog.ds-dialog > section { margin: 0; border: 0; border-radius: 0; min-height: 100%; box-sizing: border-box; padding: 18px 22px 0;
+    display: flex; flex-direction: column; }
+  dialog.ds-dialog > section > .form-actions { position: sticky; bottom: 0; margin-top: auto; padding: 12px 0 16px; background: var(--panel); }
+  dialog.ds-dialog .opp-pick { max-height: 180px; }
+  dialog.ds-dialog select[multiple] { min-height: 9em; }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
@@ -1691,11 +1697,13 @@ function renderDealSupports(o, records) {
   }
   if (!records.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, `No ${dsMeta.labelPlural.toLowerCase()} on this opportunity yet.`)));
 
-  const formBox = el('div');
-  const add = dsMeta.canCreate ? el('button', { class: 'primary', onclick: () => {
-    add.hidden = true;
-    formBox.replaceChildren(dealSupportForm(o, () => { add.hidden = false; formBox.replaceChildren(); }));
-  } }, `New ${dsMeta.label}`) : null;
+  const add = dsMeta.canCreate ? el('button', { class: 'primary', onclick: () => formDialog((close) => newDsForm({
+    picked: { Id: o.Id, Name: o.Name },
+    find: { accounts: [o.AccountId].filter(Boolean) },
+    save: (opp, fields) => api(`/opportunities/${opp.Id}/deal-supports`, { method: 'POST', body: { fields } }),
+    onCreated: () => { close(); loadDealSupports(o); },
+    close,
+  })) }, `New ${dsMeta.label}`) : null;
 
   // Move My Time: on a closed opportunity, move my Deal Supports to an open one on the same account.
   const moveBox = el('div');
@@ -1708,7 +1716,6 @@ function renderDealSupports(o, records) {
     el('h3', {}, `${dsMeta.labelPlural} (${records.length})`, el('span', { class: 'spacer' }),
       el('button', { onclick: () => loadDealSupports(o) }, 'Reload'), move, add),
     moveBox,
-    formBox,
     oppDsEdit.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', {},
       el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, cols.map((f) => el('th', {}, f.label)), el('th', {}, 'Created by'), el('th', {}, 'Created'))),
@@ -1797,10 +1804,53 @@ function dsValue(f, n) {
   return n.value;
 }
 
+// A new Deal Support: the opportunity first, then the form. `picked` preselects an opportunity and `find`
+// passes oppCombobox's suggestions; save(opp, fields) creates the record, then onCreated(rec, opp) runs.
+function newDsForm({ picked = null, find = {}, values, descAround, title, save, onCreated, close }) {
+  const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; } });
+  const form = dealSupportForm(null, close, {
+    title: title || `New ${dsMeta.label}`,
+    values,
+    descAround,
+    submit: async (fields) => {
+      if (!picked) throw new Error(`Pick the opportunity this ${dsMeta.label} is for.`);
+      const rec = await save(picked, fields);
+      toast(`Created ${dsMeta.label}${rec?.Name ? ` "${rec.Name}"` : ''} on ${picked.Name}`, 'ok');
+      await onCreated(rec, picked);
+    },
+  });
+  form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
+    el('div', { class: 'grid' }, el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input)),
+    picker.list, picker.status));
+  return form;
+}
+
+// A form in a dialog over the page, about 90% of the window; build(close) makes it. Only Cancel, Esc or
+// a save closes it, so a click outside doesn't lose what's been entered.
+function formDialog(build) {
+  const dlg = el('dialog', { class: 'popup ds-dialog', 'aria-label': `New ${dsMeta.label}` });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.append(build(() => dlg.close()));
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// The fields the form starts with, in this order (by API name, else by label), before Description of Request.
+const DS_ORDER = [
+  ['Date_of_Sales_Activity__c', /^date of activity$/i],
+  ['Requested_SaaS_Activity__c', /^requested activity$/i],
+  ['Role__c', /^role$/i],
+  ['Platform_Request__c', /^platform request$/i],
+  ['IdentityNow_Platform_Modules__c', /^platform capabilities$/i],
+  ['Integration_Modules_for_SaaS__c', /^integration modules$/i],
+];
+const dsOrderField = (fields, [name, re]) => fields.find((f) => f.name === name) || fields.find((f) => re.test(f.label));
+
 // opts.values prefills fields by name; opts.submit(fields) does the create instead of posting to `o`
 // (My Calendar uses both); opts.title replaces the heading. opts.edit makes it an edit form for the
 // record in opts.values: fields Salesforce won't let you change are read-only, and submit gets only
-// the changed fields (null for a cleared one).
+// the changed fields (null for a cleared one). opts.descAround { before, after } puts text (an event's
+// subject and notes) around the description proposed from the picks.
 function dealSupportForm(o, close, opts = {}) {
   const fields = dsMeta.fields.filter((f) => f.createable);
   const inputs = new Map(fields.map((f) => [f, dsInput(f)]));
@@ -1817,19 +1867,32 @@ function dealSupportForm(o, close, opts = {}) {
     else if (f.type === 'datetime') n.value = `${localDay(new Date(v))}T${hhmm24(new Date(v))}`;
     else n.value = v;
   }
-  // opts.derived fills one field from others as they change, e.g. the details from the activity and platform,
-  // until it is typed in.
-  if (opts.derived) {
-    const { field, from, value } = opts.derived;
-    const target = fields.find((f) => f.name === field), srcs = from.map((n) => fields.find((f) => f.name === n)).filter(Boolean);
-    if (target && srcs.length) {
-      const t = inputs.get(target);
-      let typed = false;
-      t.addEventListener('input', () => { typed = true; });
-      const update = () => { if (!typed) t.value = value(srcs.map((f) => dsText(f, dsValue(f, inputs.get(f))))); };
-      for (const f of srcs) for (const ev of ['input', 'change']) inputs.get(f).addEventListener(ev, update);
-      update();
-    }
+  // The record's name is never shown: Salesforce renames each Deal Support itself, but the name can't be
+  // empty, so new ones are sent as "X".
+  const nameF = fields.find((f) => f.name === 'Name');
+  if (nameF && !opts.edit) inputs.get(nameF).value = 'X';
+  const [, activityF, , requestF, capsF, modsF] = DS_ORDER.map((t) => dsOrderField(fields, t));
+  const desc = fields.find((f) => f.upFront);
+  // Description of Request is proposed from the activity, platform request, capabilities and integration
+  // modules, and kept up to date as they're picked until it's typed in. (The server copies it into Meeting Overview.)
+  const shown = (f) => (f ? dsText(f, dsValue(f, inputs.get(f))) : '');
+  const propose = () => {
+    const head = [shown(activityF), shown(requestF) && `for ${shown(requestF)}`].filter(Boolean).join(' ');
+    return [head && head + '.', shown(capsF) && `Platform capabilities: ${shown(capsF)}.`,
+      shown(modsF) && `Integration modules: ${shown(modsF)}.`].filter(Boolean).join(' ');
+  };
+  const around = opts.descAround || {};
+  const proposal = () => [around.before, propose(), around.after].filter(Boolean).join('\n').slice(0, desc.length || 32000);
+  let typed = !!opts.edit;
+  const rewrite = el('button', { type: 'button', class: 'linkish', style: 'display:inline;margin-left:8px' }, 'Write it from the picks');
+  if (desc) {
+    const t = inputs.get(desc);
+    t.rows = 6;
+    t.addEventListener('input', () => { typed = true; });
+    const update = () => { if (!typed) t.value = proposal(); };
+    rewrite.addEventListener('click', (ev) => { ev.preventDefault(); typed = false; update(); t.dispatchEvent(new Event('change')); });
+    for (const f of [activityF, requestF, capsF, modsF].filter(Boolean)) for (const ev of ['input', 'change']) inputs.get(f).addEventListener(ev, update);
+    update();
   }
   const initial = new Map([...inputs].map(([f, n]) => [f, JSON.stringify(dsValue(f, n))]));
   // opts.changes: values put in after loading, so they are saved as edits (e.g. a cleaned-up description).
@@ -1850,12 +1913,14 @@ function dealSupportForm(o, close, opts = {}) {
     return [show, note, n.disabled ? null : change];
   };
   const cell = (f) => el('label', { class: f.type === 'textarea' ? 'wide' : null },
-    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null), inputs.get(f), refName(f));
-  // Shown up front: required fields and Description of Request, then the time fields (customer-facing,
-  // internal, travel) with a live total.
+    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null, f === desc ? rewrite : null), inputs.get(f), refName(f));
+  // Shown up front: the DS_ORDER fields, any other required ones, Description of Request, then the time
+  // fields (customer-facing, internal, travel) with a live total. The rest go under "More fields".
   const time = fields.filter((f) => f.timeEntry);
-  const required = fields.filter((f) => (f.required || f.upFront) && !f.timeEntry);
-  const optional = fields.filter((f) => !f.required && !f.upFront && !f.timeEntry);
+  const first = DS_ORDER.map((t) => dsOrderField(fields, t)).filter((f) => f && !f.timeEntry && f !== desc);
+  const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f));
+  const required = [...first, ...rest.filter((f) => f.required), desc].filter(Boolean);
+  const optional = rest.filter((f) => !f.required);
   const total = el('output', { style: 'display:block;padding:6px 0;font-weight:600' });
   const showTotal = () => {
     const h = time.reduce((s, f) => s + (Number(inputs.get(f).value) || 0), 0);
@@ -1891,6 +1956,7 @@ function dealSupportForm(o, close, opts = {}) {
     const missing = fields.filter((f) => f.required && now.get(f) == null);
     if (missing.length) return toast('Required: ' + missing.map((f) => f.label).join(', '), 'err');
     create.disabled = true;
+    if (nameF && !opts.edit && !body.Name) body.Name = 'X';
     try {
       if (opts.submit) return await opts.submit(body);
       const rec = await api(`/opportunities/${o.Id}/deal-supports`, { method: 'POST', body: { fields: body } });
@@ -3330,7 +3396,6 @@ CAL_NARROW.addEventListener('change', () => { if (cal.data && document.getElemen
 // colleagues do, it goes to internal time and customer-facing time is 0 (Salesforce needs a value).
 function eventPrefill(e) {
   const p = cal.data.prefill, v = {};
-  if (p.nameField) v[p.nameField.name] = dsTitle(e).slice(0, p.nameField.length || 80);
   if (p.dateField) {
     v[p.dateField.name] = p.dateField.type === 'datetime' && !e.allDay
       ? `${e.date}T${hhmm24(evTime(e.start))}` : e.date;
@@ -3351,10 +3416,6 @@ function eventPrefill(e) {
     if (internal) setTime(p.internalField, mins);
     else if (p.hoursField) setTime(p.hoursField, mins);
   }
-  const desc = dsNotes(e);
-  // The details start with the meeting's subject, then what was written about it.
-  // (The server copies the description into Meeting Overview.)
-  if (p.descField) v[p.descField.name] = [dsTitle(e), desc].filter(Boolean).join('\n').slice(0, p.descField.length || 32000);
   if (p.userField?.onForm) v[p.userField.name] = me.user.id;
   return v;
 }
@@ -3425,8 +3486,10 @@ function renderEventPanel() {
     return panel.replaceChildren(...(editing && e.supports.length === 1 ? [editing.box] : [list, editing?.box].filter(Boolean)));
   }
   const formBox = el('div', {}, editing?.box);
-  const create = el('button', { class: 'primary', onclick: () => { evEdit.editing = null; create.hidden = true; formBox.replaceChildren(createFromEvent(e, () => { create.hidden = false; formBox.replaceChildren(); })); } },
-    `Create ${dsMeta.label}`);
+  const create = el('button', { class: 'primary', onclick: () => {
+    if (evEdit.editing) { evEdit.editing = null; formBox.replaceChildren(); }
+    formDialog((close) => createFromEvent(e, close, async () => { close(); await loadCalendar(); }));
+  } }, `Create ${dsMeta.label}`);
   // One Deal Support per event: one that has it offers only editing or removing it.
   if (!dsMeta.canCreate || st === 'covered') create.hidden = true;
 
@@ -3453,22 +3516,13 @@ function renderEventPanel() {
   );
 }
 
-// The "create from event" form: pick an opportunity, then the Deal Support fields, prefilled from the event.
-// With nothing written about the meeting but the invitation, the details default to
-// "<Requested Activity> - <Platform Request>" from the form, kept up to date as those are picked.
-// The fields the default details are made from: the requested activity and the platform request.
+// The fields an edited Deal Support's description falls back to when it held only a meeting invitation:
+// the requested activity and the platform request.
 function descSources(descName) {
   const find = (...tests) => tests.map((t) => dsMeta.fields.find((f) => typeof t === 'string' ? f.name === t : t.test(f.label))).find(Boolean);
   return [find('Requested_SaaS_Activity__c', /requested.*activity/i),
     find('Platform_Request__c', /^platform request$/i, 'IdentityNow_Platform_Modules__c', /platform/i)]
     .filter((f) => f && f.name !== descName);
-}
-function descDefault(e) {
-  const p = cal.data.prefill;
-  if (!p.descField || dsNotes(e)) return null;
-  const from = descSources(p.descField.name).map((f) => f.name);
-  const subject = dsTitle(e);
-  return from.length ? { field: p.descField.name, from, value: (vals) => [subject, vals.filter(Boolean).join(' - ')].filter(Boolean).join('\n') } : null;
 }
 // An event's subject without an Outreach "[Backstory | ...]" prefix.
 const meetingSubject = (e) => String(e.title || e.subject || '').replace(/^\s*\[backstory\b[^\]]*\]\s*/i, '').trim();
@@ -3480,32 +3534,24 @@ const dsNotes = (e) => meetingNotes(e.sf?.description) || meetingNotes(e.descrip
 function createFromEvent(e, close, onCreated = () => loadCalendar()) {
   // The event's opportunity (its own, or borrowed from the Salesforce copy of a Mac or Outlook event) is preselected.
   const oppId = e.oppId || (e.what?.type === 'Opportunity' || String(e.what?.id || '').startsWith('006') ? e.what.id : null);
-  let picked = oppId ? { Id: oppId, Name: e.what?.id === oppId ? e.what.name || oppId : oppId } : null;
-  const picker = oppCombobox({
+  const picked = oppId ? { Id: oppId, Name: e.what?.id === oppId ? e.what.name || oppId : oppId } : null;
+  return newDsForm({
     picked,
     // Opportunities on the event's account, or on accounts named in its title, are listed first. Failing
     // those, the accounts its attendees' email domains belong to (and their only open one is preselected).
-    accounts: [...new Set([e.what?.type === 'Account' && e.what.id, ...(e.accountIds || [])].filter(Boolean))],
-    title: e.title || e.subject,
-    domains: picked ? [] : e.domains || [],
-    onPick: (o) => { picked = o; },
-  });
-  const form = dealSupportForm(null, close, {
+    find: {
+      accounts: [...new Set([e.what?.type === 'Account' && e.what.id, ...(e.accountIds || [])].filter(Boolean))],
+      title: e.title || e.subject,
+      domains: picked ? [] : e.domains || [],
+    },
     title: `New ${dsMeta.label} from this event`,
     values: eventPrefill(e),
-    derived: descDefault(e),
-    submit: async (fields) => {
-      if (!picked) throw new Error('Pick the opportunity this ' + dsMeta.label + ' is for.');
-      const rec = await api(`/calendar/events/${e.id}/deal-support`, { method: 'POST', body: { opportunityId: picked.Id, fields } });
-      toast(`Created ${dsMeta.label}${rec?.Name ? ` "${rec.Name}"` : ''} on ${picked.Name}`, 'ok');
-      await onCreated(rec, picked);
-    },
+    // The description starts with the meeting's subject and ends with what was written about it.
+    descAround: { before: dsTitle(e), after: dsNotes(e) },
+    save: (opp, fields) => api(`/calendar/events/${e.id}/deal-support`, { method: 'POST', body: { opportunityId: opp.Id, fields } }),
+    onCreated,
+    close,
   });
-  // The opportunity picker goes at the top of the form.
-  form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
-    el('div', { class: 'grid' }, el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input)),
-    picker.list, picker.status));
-  return form;
 }
 
 // Type to filter all open opportunities (searched on the server's local copy, sorted by name).

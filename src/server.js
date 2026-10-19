@@ -1174,6 +1174,8 @@ async function createDealSupport(req, meta, oppId, fields, extra = {}) {
     if (v !== '' && v !== null && v !== undefined) body[k] = v;
   }
   for (const [k, v] of Object.entries(extra)) if (body[k] === undefined) body[k] = v;
+  // Salesforce renames each Deal Support itself, but the name can't be empty.
+  if (byName.has('Name') && !body.Name) body.Name = 'X';
   if (meta.mirror && body[meta.mirror.from] != null) body[meta.mirror.to] = String(body[meta.mirror.from]).slice(0, meta.mirror.length);
   const missing = [...byName.values()].filter((f) => f.required && body[f.name] === undefined);
   if (missing.length) throw new HttpError(400, 'Required: ' + missing.map((f) => f.label).join(', '));
