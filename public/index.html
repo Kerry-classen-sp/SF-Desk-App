@@ -1825,7 +1825,7 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
   const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; setRole(o); } });
   const activityF = dsOrderField(dsMeta.fields, DS_ORDER[1]);
   const activityValue = (name) => activityF?.picklist?.find((v) => v.toLowerCase() === name);
-  const activity = activityValue(/\bdemo/i.test(subject) ? 'demo' : 'discussion');
+  const activity = activityValue(/\bdemo(s|nstrations?)?\b/i.test(subject) ? 'demo' : 'discussion');
   const form = dealSupportForm(null, close, {
     title: title || `New ${dsMeta.label}`,
     values: { ...(activity && { [activityF.name]: activity }), ...values },
