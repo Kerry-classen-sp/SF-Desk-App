@@ -179,6 +179,8 @@ darkQuery.addEventListener('change', applyTheme);
   dialog.ds-dialog > section > .form-actions { position: sticky; bottom: 0; margin-top: auto; padding: 12px 0 16px; background: var(--panel); }
   dialog.ds-dialog .opp-pick { max-height: 180px; }
   dialog.ds-dialog select[multiple] { min-height: 9em; }
+  .grid.multi-row { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 10px; }
+  .grid.multi-row select[multiple] { height: 11em; }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
@@ -1767,13 +1769,10 @@ async function moveMyTime(o, box, close) {
   ));
 }
 
-// Multi-select picklists picked one value at a time here, as a dropdown like Role.
-const singlePick = (f) => f.type === 'multipicklist' && (f.name === 'Platform_Request__c' || /^platform request$/i.test(f.label));
-
 function dsInput(f) {
   let n;
   if (f.type === 'picklist' || f.type === 'multipicklist') {
-    const multiple = f.type === 'multipicklist' && !singlePick(f);
+    const multiple = f.type === 'multipicklist';
     n = el('select', { multiple },
       !multiple ? el('option', { value: '' }, '—') : null,
       (f.picklist || []).map((v) => el('option', { value: v }, v)));
@@ -1914,12 +1913,14 @@ function dealSupportForm(o, close, opts = {}) {
   };
   const cell = (f) => el('label', { class: f.type === 'textarea' ? 'wide' : null },
     el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null, f === desc ? rewrite : null), inputs.get(f), refName(f));
-  // Shown up front: the DS_ORDER fields, any other required ones, Description of Request, then the time
-  // fields (customer-facing, internal, travel) with a live total. The rest go under "More fields".
+  // Shown up front: the DS_ORDER fields and any other required ones, with the multi-selects (platform
+  // request, capabilities, integration modules) on a row of their own; Description of Request; then the
+  // time fields (customer-facing, internal, travel) with a live total. The rest go under "More fields".
   const time = fields.filter((f) => f.timeEntry);
   const first = DS_ORDER.map((t) => dsOrderField(fields, t)).filter((f) => f && !f.timeEntry && f !== desc);
   const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f));
-  const required = [...first, ...rest.filter((f) => f.required), desc].filter(Boolean);
+  const multi = [requestF, capsF, modsF].filter((f) => f && first.includes(f));
+  const top = [...first.filter((f) => !multi.includes(f)), ...rest.filter((f) => f.required)];
   const optional = rest.filter((f) => !f.required);
   const total = el('output', { style: 'display:block;padding:6px 0;font-weight:600' });
   const showTotal = () => {
@@ -1938,7 +1939,9 @@ function dealSupportForm(o, close, opts = {}) {
   });
   const box = el('section', {},
     el('h3', {}, opts.title || `New ${dsMeta.label} for ${o.Name}`),
-    el('div', { class: 'grid' }, required.map(cell)),
+    el('div', { class: 'grid' }, top.map(cell)),
+    multi.length ? el('div', { class: 'grid multi-row' }, multi.map(cell)) : null,
+    desc ? el('div', { class: 'grid', style: 'margin-top:10px' }, cell(desc)) : null,
     time.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, time.map(cell),
       time.length > 1 ? el('label', {}, el('span', {}, 'Total time'), total) : null) : null,
     optional.length ? el('details', { class: 'optional' },
