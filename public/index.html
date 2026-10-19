@@ -1925,8 +1925,9 @@ const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const periodKey = (view, f) => view === 'year' ? fyName(f.fy)
   : view === 'quarter' ? `${fyName(f.fy)} Q${f.q}` : `${f.y}-${String(f.m + 1).padStart(2, '0')}`;
 // The deal value the Deals tab totals, picked at the top of the page (and remembered).
-const DEAL_VALUES = { acv: { field: 'SP_SaaS_Total_ACV__c', label: 'SaaS Total ACV', short: 'ACV' },
-  tcv: { field: 'SaaS_TCV__c', label: 'SaaS TCV', short: 'TCV' } };
+// `field` is the Salesforce field it totals; `title` that field's label.
+const DEAL_VALUES = { acv: { field: 'SP_SaaS_Total_ACV__c', label: 'ACV', title: 'SaaS Total ACV' },
+  tcv: { field: 'SaaS_TCV__c', label: 'TCV', title: 'SaaS TCV' } };
 const DEAL_VALUE_KEY = 'sfdesk.dealValue';
 const dealValue = () => DEAL_VALUES[dash.value] || DEAL_VALUES.acv;
 const amt = (o) => Number(o[dealValue().field]) || 0;
@@ -1952,7 +1953,7 @@ async function showDashboard() {
     dashReps();
   }).catch(() => {});
   const value = el('select', { 'aria-label': 'Deal value' }, Object.entries(DEAL_VALUES).map(([v, d]) =>
-    el('option', { value: v, selected: dash.value === v }, d.label)));
+    el('option', { value: v, selected: dash.value === v, title: `Totals the ${d.title} field` }, `Show as ${d.label}`)));
   value.addEventListener('change', () => {
     dash.value = value.value;
     try { localStorage.setItem(DEAL_VALUE_KEY, dash.value); } catch {}
@@ -2224,7 +2225,7 @@ function renderDeals(opps, today) {
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
       el('thead', {}, el('tr', {}, el('th', {}, 'Opportunity'), el('th', {}, 'Account'), el('th', {}, 'Stage'),
         el('th', { class: 'n' }, 'Prob.'), el('th', {}, 'Close date'), el('th', {}, 'Owner'),
-        showCat ? el('th', {}, 'Forecast') : null, el('th', { class: 'n' }, dealValue().short))),
+        showCat ? el('th', {}, 'Forecast') : null, el('th', { class: 'n' }, dealValue().label))),
       tbody,
       list.length ? el('tfoot', {}, el('tr', {},
         el('td', { colspan: ncols - 1 }, `Total (${plural(list.length, 'deal')})`),
@@ -2238,11 +2239,11 @@ function exportDeals(list, showCat, what) {
     { header: 'Opportunity', width: 40 }, { header: 'Account', width: 28 }, { header: 'Stage', width: 18 },
     { header: 'Probability', type: 'percent', width: 11 }, { header: 'Close date', type: 'date', width: 12 },
     { header: 'Owner', width: 20 }, ...(showCat ? [{ header: 'Forecast', width: 12 }] : []),
-    { header: dealValue().label, type: 'money', width: 16, sum: true }, { header: 'Salesforce link', width: 45 },
+    { header: dealValue().label, type: 'money', width: 14, sum: true }, { header: 'Salesforce link', width: 45 },
   ];
   const rows = list.map((o) => [o.Name, o.Account?.Name, o.StageName, o.Probability, o.CloseDate, o.Owner?.Name,
     ...(showCat ? [o.ForecastCategoryName] : []), amt(o), `${me.instanceUrl}/${o.Id}`]);
-  downloadXlsx(`Pipeline ${dealValue().short} - ${what} - ${todayStr()}.xlsx`, 'Pipeline', cols, rows, { totals: true })
+  downloadXlsx(`Pipeline ${dealValue().label} - ${what} - ${todayStr()}.xlsx`, 'Pipeline', cols, rows, { totals: true })
     .catch((e) => toast("Couldn't build the Excel file: " + e.message, 'err'));
 }
 
