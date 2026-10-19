@@ -1086,16 +1086,18 @@ async function dealSupportMeta(req) {
     entry.upFront = true;
   }
 
-  // New Deal Supports default Role to "Lead SE" (matched ignoring case) when the picklist has it.
+  // New Deal Supports default Role to "SME", or "Lead SE" when I'm the opportunity's Lead SE (the form
+  // asks /opportunities/:id/lead-se). Both are matched ignoring case, when the picklist has them.
   const role = fields.find((f) => f.picklist && (f.name === 'Role__c' || /^role$/i.test(f.label)));
-  const leadSe = role?.picklist.find((v) => v.trim().toLowerCase() === 'lead se');
-  if (leadSe) role.defaultValue = leadSe;
+  const roleValue = (name) => role?.picklist.find((v) => v.trim().toLowerCase() === name);
+  const leadSe = roleValue('lead se'), sme = roleValue('sme');
+  if (sme) role.defaultValue = sme;
   const meta = {
     object: d.name,
     label: d.label,
     labelPlural: pluralLabel(d),
     oppField: opp.name,
-    roleDefault: role ? { field: role.name, value: leadSe || null, options: role.picklist } : null,
+    roleDefault: role ? { field: role.name, value: sme || null, leadSe: leadSe || null, options: role.picklist } : null,
     canCreate: d.createable && opp.createable,
     canUpdate: !!d.updateable,
     canDelete: !!d.deletable,
@@ -1156,6 +1158,18 @@ async function listDealSupports(req, meta, oppId, extraWhere = '') {
 }
 
 api.get('/deal-supports/meta', wrap(async (req, res) => res.json(await dealSupportMeta(req))));
+
+// Whether I'm the Lead SE on an opportunity: its own Lead SE field, else its account's. `me` is null
+// when there's no such field or Salesforce can't be reached.
+api.get('/opportunities/:id/lead-se', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const known = await knownLeadSeFields(req);
+  const onOpp = known.Opportunity, field = onOpp || known.Account;
+  if (!field) return res.json({ me: null });
+  const [o] = await query(req, `SELECT ${onOpp ? field.name : `Account.${field.name}`} FROM Opportunity WHERE Id = '${id}'`);
+  const rec = onOpp ? o : o?.Account;
+  res.json({ me: rec ? leadSeMatches(req, field, rec) : null });
+}));
 
 api.get('/opportunities/:id/deal-supports', wrap(async (req, res) => {
   const id = sfId(req.params.id);

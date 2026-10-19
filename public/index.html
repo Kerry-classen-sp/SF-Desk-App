@@ -1811,11 +1811,24 @@ function dsValue(f, n) {
 
 // A new Deal Support: the opportunity first, then the form. `picked` preselects an opportunity and `find`
 // passes oppCombobox's suggestions; save(opp, fields) creates the record, then onCreated(rec, opp) runs.
-function newDsForm({ picked = null, find = {}, values, descAround, title, save, onCreated, close }) {
-  const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; } });
+// Requested Activity starts as Demo when `subject` (a calendar event's) mentions a demo, else Discussion.
+// Role follows the picked opportunity, Lead SE when I'm its Lead SE and SME otherwise, until it's picked by hand.
+function newDsForm({ picked = null, find = {}, values, descAround, title, subject = '', save, onCreated, close }) {
+  let roleTicket = 0, roleTouched = false, role = null;
+  const setRole = async (o) => {
+    const rd = dsMeta.roleDefault, my = ++roleTicket;
+    if (!role || !o || !rd?.leadSe) return;
+    let lead = null;
+    try { lead = (await api(`/opportunities/${o.Id}/lead-se`)).me; } catch { /* keep the default */ }
+    if (my === roleTicket && !roleTouched) role.value = lead ? rd.leadSe : rd.value || '';
+  };
+  const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; setRole(o); } });
+  const activityF = dsOrderField(dsMeta.fields, DS_ORDER[1]);
+  const activityValue = (name) => activityF?.picklist?.find((v) => v.toLowerCase() === name);
+  const activity = activityValue(/\bdemo/i.test(subject) ? 'demo' : 'discussion');
   const form = dealSupportForm(null, close, {
     title: title || `New ${dsMeta.label}`,
-    values,
+    values: { ...(activity && { [activityF.name]: activity }), ...values },
     descAround,
     submit: async (fields) => {
       if (!picked) throw new Error(`Pick the opportunity this ${dsMeta.label} is for.`);
@@ -1827,6 +1840,9 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, save, 
   form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
     el('div', { class: 'grid' }, el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input)),
     picker.list, picker.status));
+  role = dsMeta.roleDefault && form.inputFor(dsMeta.roleDefault.field);
+  role?.addEventListener('change', () => { roleTouched = true; });
+  setRole(picked);
   return form;
 }
 
@@ -1977,6 +1993,7 @@ function dealSupportForm(o, close, opts = {}) {
       toast(e.message, 'err'); create.disabled = false;
     }
   });
+  box.inputFor = (name) => inputs.get(fields.find((f) => f.name === name));
   return box;
 }
 
@@ -3556,6 +3573,7 @@ function createFromEvent(e, close, onCreated = () => loadCalendar()) {
     values: eventPrefill(e),
     // The description starts with the meeting's subject and ends with what was written about it.
     descAround: { before: dsTitle(e), after: dsNotes(e) },
+    subject: [dsTitle(e), e.title, e.subject].filter(Boolean).join(' '),
     save: (opp, fields) => api(`/calendar/events/${e.id}/deal-support`, { method: 'POST', body: { opportunityId: opp.Id, fields } }),
     onCreated,
     close,
