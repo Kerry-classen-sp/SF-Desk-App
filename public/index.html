@@ -1924,13 +1924,19 @@ function fiscal(date) { // 'YYYY-MM-DD' -> { y, m, fy, q }
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const periodKey = (view, f) => view === 'year' ? fyName(f.fy)
   : view === 'quarter' ? `${fyName(f.fy)} Q${f.q}` : `${f.y}-${String(f.m + 1).padStart(2, '0')}`;
-const amt = (o) => Number(o.Amount) || 0;
+// The deal value the Deals tab totals, picked at the top of the page (and remembered).
+const DEAL_VALUES = { acv: { field: 'SP_SaaS_Total_ACV__c', label: 'SaaS Total ACV', short: 'ACV' },
+  tcv: { field: 'SaaS_TCV__c', label: 'SaaS TCV', short: 'TCV' } };
+const DEAL_VALUE_KEY = 'sfdesk.dealValue';
+const dealValue = () => DEAL_VALUES[dash.value] || DEAL_VALUES.acv;
+const amt = (o) => Number(o[dealValue().field]) || 0;
 const sum = (list) => list.reduce((s, o) => s + amt(o), 0);
 const weighted = (list) => list.reduce((s, o) => s + amt(o) * (Number(o.Probability) || 0) / 100, 0);
 const compact = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n >= 1e6 ? 1 : 0 });
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-const dash = { all: [], view: 'month', page: 0, pick: null, filters: null, loads: 0 };
+const dash = { all: [], view: 'month', page: 0, pick: null, filters: null, loads: 0, value: 'acv' };
+try { if (DEAL_VALUES[localStorage.getItem(DEAL_VALUE_KEY)]) dash.value = localStorage.getItem(DEAL_VALUE_KEY); } catch {}
 
 async function showDashboard() {
   setNav('dash');
@@ -1945,10 +1951,17 @@ async function showDashboard() {
     if (JSON.stringify(filterQuery()) !== before) loadDashboard();
     dashReps();
   }).catch(() => {});
+  const value = el('select', { 'aria-label': 'Deal value' }, Object.entries(DEAL_VALUES).map(([v, d]) =>
+    el('option', { value: v, selected: dash.value === v }, d.label)));
+  value.addEventListener('change', () => {
+    dash.value = value.value;
+    try { localStorage.setItem(DEAL_VALUE_KEY, dash.value); } catch {}
+    if (dash.all.length) renderDashboard();
+  });
   document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
     el('div', { class: 'dash-head' },
       el('h2', {}, 'Pipeline'),
-      el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep),
+      el('span', { class: 'picks' }, value, filters.boat, filters.team, filters.rep),
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: loadDashboard }, 'Reload'),
     ),
@@ -2005,7 +2018,7 @@ function renderDashboard() {
   document.getElementById('dashBody').replaceChildren(
     el('div', { class: 'tiles' },
       tile('Open pipeline', compact(sum(opps)), `${money(sum(opps))} · ${plural(opps.length, 'opportunity', 'opportunities')}`, 'hero'),
-      tile('Weighted pipeline', compact(weighted(opps)), 'Amount × probability'),
+      tile('Weighted pipeline', compact(weighted(opps)), `${dealValue().label} × probability`),
       tile(`This quarter (${fyName(now.fy)} Q${now.q})`, compact(sum(inQ)), `${plural(inQ.length, 'deal')} · ${compact(weighted(inQ))} weighted`),
       tile(`This fiscal year (${fyName(now.fy)})`, compact(sum(inFy)), `${plural(inFy.length, 'deal')} · ${compact(weighted(inFy))} weighted`),
       tile('Past close date', compact(sum(late)), late.length ? `⚠ ${plural(late.length, 'deal')} still open` : 'None overdue', late.length ? 'warn' : ''),
@@ -2080,8 +2093,8 @@ function renderForecastChart(opps, now, today) {
   const nowKey = periodKey(view, now);
 
   // One series in the same blue as the other charts; the tooltip still splits it by forecast category.
-  const cats = [['Amount', 'var(--s1)']];
-  const catOf = () => 'Amount';
+  const cats = [[dealValue().label, 'var(--s1)']];
+  const catOf = () => dealValue().label;
   const byCat = (list) => [...FORECAST.map(([c]) => c), 'Other'].map((c) => [c,
     sum(list.filter((o) => (FORECAST.some(([f]) => f === o.ForecastCategoryName) ? o.ForecastCategoryName : 'Other') === c))])
     .filter(([c, v]) => v > 0 && (c !== 'Other' || list.some((o) => o.ForecastCategoryName)));
@@ -2211,7 +2224,7 @@ function renderDeals(opps, today) {
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
       el('thead', {}, el('tr', {}, el('th', {}, 'Opportunity'), el('th', {}, 'Account'), el('th', {}, 'Stage'),
         el('th', { class: 'n' }, 'Prob.'), el('th', {}, 'Close date'), el('th', {}, 'Owner'),
-        showCat ? el('th', {}, 'Forecast') : null, el('th', { class: 'n' }, 'Amount'))),
+        showCat ? el('th', {}, 'Forecast') : null, el('th', { class: 'n' }, dealValue().short))),
       tbody,
       list.length ? el('tfoot', {}, el('tr', {},
         el('td', { colspan: ncols - 1 }, `Total (${plural(list.length, 'deal')})`),
@@ -2225,11 +2238,11 @@ function exportDeals(list, showCat, what) {
     { header: 'Opportunity', width: 40 }, { header: 'Account', width: 28 }, { header: 'Stage', width: 18 },
     { header: 'Probability', type: 'percent', width: 11 }, { header: 'Close date', type: 'date', width: 12 },
     { header: 'Owner', width: 20 }, ...(showCat ? [{ header: 'Forecast', width: 12 }] : []),
-    { header: 'Amount', type: 'money', width: 14, sum: true }, { header: 'Salesforce link', width: 45 },
+    { header: dealValue().label, type: 'money', width: 16, sum: true }, { header: 'Salesforce link', width: 45 },
   ];
   const rows = list.map((o) => [o.Name, o.Account?.Name, o.StageName, o.Probability, o.CloseDate, o.Owner?.Name,
     ...(showCat ? [o.ForecastCategoryName] : []), amt(o), `${me.instanceUrl}/${o.Id}`]);
-  downloadXlsx(`Pipeline - ${what} - ${todayStr()}.xlsx`, 'Pipeline', cols, rows, { totals: true })
+  downloadXlsx(`Pipeline ${dealValue().short} - ${what} - ${todayStr()}.xlsx`, 'Pipeline', cols, rows, { totals: true })
     .catch((e) => toast("Couldn't build the Excel file: " + e.message, 'err'));
 }
 

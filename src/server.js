@@ -1303,8 +1303,10 @@ api.post('/deal-supports/move', wrap(async (req, res) => {
 // Every open opportunity on the accounts the BOAT and team filters cover (see accountFilter), for the
 // Deals tab, the same choice as the Accounts tab. The page applies the sales rep filter (the account owner).
 // The page leaves out hidden records and does the totals.
-const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Amount', 'CloseDate', 'Probability',
-  'ForecastCategoryName', 'IsClosed', 'Owner.Name', 'Account.OwnerId', 'Account.Owner.Name', 'LastModifiedDate'];
+// The Deals tab's ACV / TCV choice totals these.
+const PIPELINE_VALUES = ['SP_SaaS_Total_ACV__c', 'SaaS_TCV__c'];
+const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Amount', ...PIPELINE_VALUES, 'CloseDate',
+  'Probability', 'ForecastCategoryName', 'IsClosed', 'Owner.Name', 'Account.OwnerId', 'Account.Owner.Name', 'LastModifiedDate'];
 
 api.get('/pipeline', wrap(async (req, res) => {
   const known = await knownLeadSeFields(req);
@@ -1318,9 +1320,9 @@ api.get('/pipeline', wrap(async (req, res) => {
     try {
       opportunities = await run(PIPELINE_READ);
     } catch (err) {
-      // Forecast category can be switched off or hidden by field security; carry on without it.
+      // Forecast category and the SaaS values can be switched off or hidden by field security; carry on without them.
       if (err.status !== 400) throw err;
-      opportunities = await run(PIPELINE_READ.filter((f) => f !== 'ForecastCategoryName'));
+      opportunities = await run(PIPELINE_READ.filter((f) => f !== 'ForecastCategoryName' && !PIPELINE_VALUES.includes(f)));
     }
     store.saveOpportunities(orgOf(req), opportunities, { merge: true });
     return { opportunities };
