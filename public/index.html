@@ -178,13 +178,16 @@ darkQuery.addEventListener('change', applyTheme);
     display: flex; flex-direction: column; }
   dialog.ds-dialog > section > .form-actions { position: sticky; bottom: 0; margin-top: auto; padding: 12px 0 16px; background: var(--panel); }
   dialog.ds-dialog .opp-pick { max-height: 180px; }
-  dialog.ds-dialog select[multiple] { min-height: 9em; }
   .grid.multi-row { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 10px; }
-  .grid.multi-row select[multiple] { height: 11em; }
   .grid label span.req { display: inline; color: var(--err); }
   [hidden] { display: none !important; }
   .grid input[type=checkbox] { width: auto; }
-  details.optional summary { cursor: pointer; color: var(--accent); margin: 12px 0 8px; }
+  .grid div.field > span:first-child { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .grid div.field span.req { display: inline; color: var(--err); }
+  fieldset.checklist { margin: 0; padding: 4px 8px; min-width: 0; height: 12em; overflow: auto; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--panel); }
+  fieldset.checklist label { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: 13px; color: var(--ink); cursor: pointer; }
+  fieldset.checklist input[type=checkbox] { margin: 2px 0 0; flex: none; }
   .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .opp-row1 { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 14px; }
   @media (max-width: 1000px) { .opp-row1 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -1771,11 +1774,13 @@ async function moveMyTime(o, box, close) {
 
 function dsInput(f) {
   let n;
-  if (f.type === 'picklist' || f.type === 'multipicklist') {
-    const multiple = f.type === 'multipicklist';
-    n = el('select', { multiple },
-      !multiple ? el('option', { value: '' }, '—') : null,
-      (f.picklist || []).map((v) => el('option', { value: v }, v)));
+  if (f.type === 'multipicklist') {
+    // A checkbox beside each value. A fieldset, so disabling it disables every box.
+    n = el('fieldset', { class: 'checklist' }, (f.picklist || []).map((v) =>
+      el('label', {}, el('input', { type: 'checkbox', value: v }), v)));
+    n.multiple = true;
+  } else if (f.type === 'picklist') {
+    n = el('select', {}, el('option', { value: '' }, '—'), (f.picklist || []).map((v) => el('option', { value: v }, v)));
   } else if (f.type === 'boolean') {
     n = el('input', { type: 'checkbox' });
   } else if (f.type === 'textarea') {
@@ -1788,6 +1793,7 @@ function dsInput(f) {
   }
   if (f.defaultValue != null) {
     if (f.type === 'boolean') n.checked = f.defaultValue === true || f.defaultValue === 'true';
+    else if (f.type === 'multipicklist') for (const x of n.querySelectorAll('input')) x.checked = String(f.defaultValue).split(';').includes(x.value);
     else if (typeof f.defaultValue !== 'object') n.value = f.defaultValue;
   }
   n.setAttribute('aria-label', f.label);
@@ -1796,7 +1802,7 @@ function dsInput(f) {
 
 function dsValue(f, n) {
   if (f.type === 'boolean') return n.checked;
-  if (f.type === 'multipicklist') return [...n.selectedOptions].map((x) => x.value).join(';') || null;
+  if (f.type === 'multipicklist') return [...n.querySelectorAll('input:checked')].map((x) => x.value).join(';') || null;
   if (n.value === '') return null;
   if (['double', 'currency', 'percent', 'int'].includes(f.type)) return Number(n.value);
   if (f.type === 'datetime') return new Date(n.value).toISOString();
@@ -1855,14 +1861,15 @@ function dealSupportForm(o, close, opts = {}) {
   const inputs = new Map(fields.map((f) => [f, dsInput(f)]));
   for (const [f, n] of inputs) {
     if (opts.edit) {
-      if (f.type === 'boolean') n.checked = false; else if (!n.multiple) n.value = '';
+      if (f.type === 'boolean') n.checked = false;
+      else if (n.multiple) for (const x of n.querySelectorAll('input')) x.checked = false;
+      else n.value = '';
       if (f.updateable === false) n.disabled = true;
     }
     const v = opts.values?.[f.name];
     if (v == null || v === '') continue;
     if (f.type === 'boolean') n.checked = !!v;
-    else if (f.type === 'multipicklist' && n.multiple) for (const x of n.options) x.selected = String(v).split(';').includes(x.value);
-    else if (f.type === 'multipicklist') n.value = String(v).split(';')[0];
+    else if (f.type === 'multipicklist') for (const x of n.querySelectorAll('input')) x.checked = String(v).split(';').includes(x.value);
     else if (f.type === 'datetime') n.value = `${localDay(new Date(v))}T${hhmm24(new Date(v))}`;
     else n.value = v;
   }
@@ -1912,17 +1919,19 @@ function dealSupportForm(o, close, opts = {}) {
     change.addEventListener('click', (ev) => { ev.preventDefault(); n.hidden = false; show.remove(); note.remove(); change.remove(); n.focus(); });
     return [show, note, n.disabled ? null : change];
   };
-  const cell = (f) => el('label', { class: f.type === 'textarea' ? 'wide' : null },
+  // A checklist sits in a div, not a label: a label would tick its first box when its title is clicked.
+  const cell = (f) => el(f.type === 'multipicklist' ? 'div' : 'label', { class: ['field', f.type === 'textarea' && 'wide'].filter(Boolean).join(' ') },
     el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null, f === desc ? rewrite : null), inputs.get(f), refName(f));
-  // Shown up front: the DS_ORDER fields and any other required ones, with the multi-selects (platform
-  // request, capabilities, integration modules) on a row of their own; Description of Request; then the
-  // time fields (customer-facing, internal, travel) with a live total. The rest go under "More fields".
+  // Shown: the DS_ORDER fields and any other required ones, with the multi-selects (platform request,
+  // capabilities, integration modules) on a row of their own; Description of Request; then the time
+  // fields (customer-facing, internal, travel) with a live total. Other fields aren't shown but keep
+  // their defaults; the account comes from the opportunity (the server sets it).
   const time = fields.filter((f) => f.timeEntry);
   const first = DS_ORDER.map((t) => dsOrderField(fields, t)).filter((f) => f && !f.timeEntry && f !== desc);
-  const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f));
+  const isAccount = (f) => f.type === 'reference' && f.referenceTo?.includes('Account');
+  const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f) && !isAccount(f));
   const multi = [requestF, capsF, modsF].filter((f) => f && first.includes(f));
   const top = [...first.filter((f) => !multi.includes(f)), ...rest.filter((f) => f.required)];
-  const optional = rest.filter((f) => !f.required);
   const total = el('output', { style: 'display:block;padding:6px 0;font-weight:600' });
   const showTotal = () => {
     const h = time.reduce((s, f) => s + (Number(inputs.get(f).value) || 0), 0);
@@ -1945,8 +1954,6 @@ function dealSupportForm(o, close, opts = {}) {
     desc ? el('div', { class: 'grid', style: 'margin-top:10px' }, cell(desc)) : null,
     time.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, time.map(cell),
       time.length > 1 ? el('label', {}, el('span', {}, 'Total time'), total) : null) : null,
-    optional.length ? el('details', { class: 'optional' },
-      el('summary', {}, `More fields (${optional.length})`), el('div', { class: 'grid' }, optional.map(cell))) : null,
     el('div', { class: 'form-actions' }, opts.remove ? remove : null, el('button', { onclick: close }, 'Cancel'), create),
   );
   create.addEventListener('click', async () => {
@@ -1968,9 +1975,6 @@ function dealSupportForm(o, close, opts = {}) {
       loadDealSupports(o);
     } catch (e) {
       toast(e.message, 'err'); create.disabled = false;
-      // Salesforce wants a field that sits under "More fields": open it so the field can be filled in.
-      const named = optional.find((f) => e.message.includes(f.name) || e.message.includes(f.label));
-      if (named) { box.querySelector('details.optional').open = true; inputs.get(named).focus(); }
     }
   });
   return box;
