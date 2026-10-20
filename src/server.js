@@ -1086,16 +1086,18 @@ async function dealSupportMeta(req) {
     entry.upFront = true;
   }
 
-  // New Deal Supports default Role to "Lead SE" (matched ignoring case) when the picklist has it.
+  // New Deal Supports default Role to "SME", or "Lead SE" when I'm the opportunity's Lead SE (the form
+  // asks /opportunities/:id/lead-se). Both are matched ignoring case, when the picklist has them.
   const role = fields.find((f) => f.picklist && (f.name === 'Role__c' || /^role$/i.test(f.label)));
-  const leadSe = role?.picklist.find((v) => v.trim().toLowerCase() === 'lead se');
-  if (leadSe) role.defaultValue = leadSe;
+  const roleValue = (name) => role?.picklist.find((v) => v.trim().toLowerCase() === name);
+  const leadSe = roleValue('lead se'), sme = roleValue('sme');
+  if (sme) role.defaultValue = sme;
   const meta = {
     object: d.name,
     label: d.label,
     labelPlural: pluralLabel(d),
     oppField: opp.name,
-    roleDefault: role ? { field: role.name, value: leadSe || null, options: role.picklist } : null,
+    roleDefault: role ? { field: role.name, value: sme || null, leadSe: leadSe || null, options: role.picklist } : null,
     canCreate: d.createable && opp.createable,
     canUpdate: !!d.updateable,
     canDelete: !!d.deletable,
@@ -1157,6 +1159,18 @@ async function listDealSupports(req, meta, oppId, extraWhere = '') {
 
 api.get('/deal-supports/meta', wrap(async (req, res) => res.json(await dealSupportMeta(req))));
 
+// Whether I'm the Lead SE on an opportunity: its own Lead SE field, else its account's. `me` is null
+// when there's no such field or Salesforce can't be reached.
+api.get('/opportunities/:id/lead-se', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const known = await knownLeadSeFields(req);
+  const onOpp = known.Opportunity, field = onOpp || known.Account;
+  if (!field) return res.json({ me: null });
+  const [o] = await query(req, `SELECT ${onOpp ? field.name : `Account.${field.name}`} FROM Opportunity WHERE Id = '${id}'`);
+  const rec = onOpp ? o : o?.Account;
+  res.json({ me: rec ? leadSeMatches(req, field, rec) : null });
+}));
+
 api.get('/opportunities/:id/deal-supports', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const meta = await dealSupportMeta(req);
@@ -1174,6 +1188,14 @@ async function createDealSupport(req, meta, oppId, fields, extra = {}) {
     if (v !== '' && v !== null && v !== undefined) body[k] = v;
   }
   for (const [k, v] of Object.entries(extra)) if (body[k] === undefined) body[k] = v;
+  // Salesforce renames each Deal Support itself, but the name can't be empty.
+  if (byName.has('Name') && !body.Name) body.Name = 'X';
+  // The account is always the opportunity's.
+  const account = [...byName.values()].find((f) => f.type === 'reference' && f.referenceTo?.includes('Account'));
+  if (account) {
+    const [opp] = await query(req, `SELECT AccountId FROM Opportunity WHERE Id = '${sfId(oppId)}'`);
+    if (opp?.AccountId) body[account.name] = opp.AccountId;
+  }
   if (meta.mirror && body[meta.mirror.from] != null) body[meta.mirror.to] = String(body[meta.mirror.from]).slice(0, meta.mirror.length);
   const missing = [...byName.values()].filter((f) => f.required && body[f.name] === undefined);
   if (missing.length) throw new HttpError(400, 'Required: ' + missing.map((f) => f.label).join(', '));
@@ -1303,8 +1325,10 @@ api.post('/deal-supports/move', wrap(async (req, res) => {
 // Every open opportunity on the accounts the BOAT and team filters cover (see accountFilter), for the
 // Deals tab, the same choice as the Accounts tab. The page applies the sales rep filter (the account owner).
 // The page leaves out hidden records and does the totals.
-const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Amount', 'CloseDate', 'Probability',
-  'ForecastCategoryName', 'IsClosed', 'Owner.Name', 'Account.OwnerId', 'Account.Owner.Name', 'LastModifiedDate'];
+// The Deals tab's ACV / TCV choice totals these.
+const PIPELINE_VALUES = ['SP_SaaS_Total_ACV__c', 'SaaS_TCV__c'];
+const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Amount', ...PIPELINE_VALUES, 'CloseDate',
+  'Probability', 'ForecastCategoryName', 'IsClosed', 'Owner.Name', 'Account.OwnerId', 'Account.Owner.Name', 'LastModifiedDate'];
 
 api.get('/pipeline', wrap(async (req, res) => {
   const known = await knownLeadSeFields(req);
@@ -1318,9 +1342,9 @@ api.get('/pipeline', wrap(async (req, res) => {
     try {
       opportunities = await run(PIPELINE_READ);
     } catch (err) {
-      // Forecast category can be switched off or hidden by field security; carry on without it.
+      // Forecast category and the SaaS values can be switched off or hidden by field security; carry on without them.
       if (err.status !== 400) throw err;
-      opportunities = await run(PIPELINE_READ.filter((f) => f !== 'ForecastCategoryName'));
+      opportunities = await run(PIPELINE_READ.filter((f) => f !== 'ForecastCategoryName' && !PIPELINE_VALUES.includes(f)));
     }
     store.saveOpportunities(orgOf(req), opportunities, { merge: true });
     return { opportunities };
