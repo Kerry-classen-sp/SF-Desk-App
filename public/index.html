@@ -244,6 +244,13 @@ darkQuery.addEventListener('change', applyTheme);
   .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 13px; }
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .tiles.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .team-range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .team-range input { width: auto; }
+  .deals tr.me td { background: var(--accent-soft); font-weight: 600; }
+  .deals th.on, .deals td.on { color: var(--accent); }
+  .deals th.sortable { cursor: pointer; } .deals th.sortable:hover { text-decoration: underline; }
+  .hbars .lbl.me { color: var(--ink); font-weight: 600; }
   .fynav { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; }
   .fynav button { padding: 2px 8px; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: -4px 0 8px; }
@@ -349,7 +356,7 @@ darkQuery.addEventListener('change', applyTheme);
     .cal.with-panel { grid-template-columns: minmax(0, 1fr); }
     .cal-panel { order: -1; scroll-margin-top: 60px; position: static; max-height: none; overflow: visible; }
     .tiles { grid-template-columns: repeat(2, 1fr); } .tile.hero { grid-column: 1 / -1; }
-    .tiles.even { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tiles.even, .tiles.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .charts { grid-template-columns: 1fr; }
   }
 
@@ -371,7 +378,7 @@ darkQuery.addEventListener('change', applyTheme);
     main.has-detail #list { display: none; }
     main:not(.has-detail) #detail { display: none; }
     .mobile-only { display: inline-block; }
-    .tiles.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tiles.even, .tiles.six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tile { padding: 12px; }
     .tile .v { font-size: 20px; }
     section { padding: 12px; }
@@ -432,6 +439,7 @@ darkQuery.addEventListener('change', applyTheme);
   <nav id="nav" hidden>
     <button id="navDash" onclick="showDashboard()">Deals</button>
     <button id="navTime" onclick="showTime()">DS Time</button>
+    <button id="navTeam" onclick="showTeam()">My Team</button>
     <button id="navCal" onclick="showCalendar()">Time Entry</button>
     <button id="navTes" onclick="showTes()">TES</button>
     <button id="navAccts" onclick="showMain()">Accounts</button>
@@ -772,6 +780,7 @@ function setNav(which) {
   window.scrollTo(0, 0);
   document.getElementById('navDash').classList.toggle('on', which === 'dash');
   document.getElementById('navTime').classList.toggle('on', which === 'time');
+  document.getElementById('navTeam').classList.toggle('on', which === 'team');
   document.getElementById('navCal').classList.toggle('on', which === 'cal');
   document.getElementById('navTes').classList.toggle('on', which === 'tes');
   document.getElementById('navAccts').classList.toggle('on', which === 'accts');
@@ -3091,6 +3100,141 @@ function renderTimeList(all, today) {
       el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, el('th', {}, 'Date'), showPerson ? el('th', {}, 'Person') : null, el('th', {}, 'Opportunity'), el('th', {}, 'Account'),
         showRole ? el('th', {}, 'Role') : null, el('th', {}, time.data.label), el('th', { class: 'n' }, 'Hours'))),
       tbody)),
+  );
+}
+
+// ---------- My Team ----------
+// Me and my team ranked for one period: Deal Support Internal, Customer Facing, Travel and Total time,
+// and the ACV and TCV of opportunities won where each is the Lead SE. Click a tile (or a column) to rank by it.
+// Year and quarter are fiscal (FY starts Feb 1); month is the calendar month; weeks start Monday.
+const RANK_CATS = [
+  { key: 'internal', label: 'Internal', kind: 'h' },
+  { key: 'customer', label: 'Customer Facing', kind: 'h' },
+  { key: 'travel', label: 'Travel', kind: 'h' },
+  { key: 'total', label: 'Total Time', kind: 'h' },
+  { key: 'acv', label: 'Sales (ACV)', kind: '$' },
+  { key: 'tcv', label: 'Sales (TCV)', kind: '$' },
+];
+const RANK_PERIODS = [['year', 'This year'], ['quarter', 'This quarter'], ['month', 'This month'], ['week', 'This week'], ['custom', 'Custom']];
+const RANK_PREFS = 'sfdesk.teamRank';
+const teamRank = { period: 'quarter', cat: 'total', from: '', to: '', data: null, loads: 0 };
+try { Object.assign(teamRank, JSON.parse(localStorage.getItem(RANK_PREFS)) || {}); teamRank.data = null; teamRank.loads = 0; } catch {}
+const saveRankPrefs = () => {
+  const { period, cat, from, to } = teamRank;
+  try { localStorage.setItem(RANK_PREFS, JSON.stringify({ period, cat, from, to })); } catch {}
+};
+const rankValue = (cat, n) => cat.kind === '$' ? money(n) : fmtH(n);
+const ymdOf = (y, m, d) => ymd(new Date(y, m, d, 12));
+
+// The period's first and last day, and how to describe it.
+function rankRange(today = todayStr()) {
+  const f = fiscal(today), y = +today.slice(0, 4), m = +today.slice(5, 7) - 1;
+  if (teamRank.period === 'year') return { from: `${f.fy - 1}-02-01`, to: `${f.fy}-01-31`, label: `${fyName(f.fy)} (Feb ${f.fy - 1} – Jan ${f.fy})` };
+  if (teamRank.period === 'quarter') {
+    const qm = (FY_START + (f.q - 1) * 3) % 12, qy = qm >= FY_START ? f.fy - 1 : f.fy;
+    return { from: ymdOf(qy, qm, 1), to: ymdOf(qy, qm + 3, 0), label: `${fyName(f.fy)} Q${f.q} (${MONTHS[qm]} – ${MONTHS[(qm + 2) % 12]})` };
+  }
+  if (teamRank.period === 'month') return { from: ymdOf(y, m, 1), to: ymdOf(y, m + 1, 0), label: `${MONTHS[m]} ${y}` };
+  if (teamRank.period === 'week') { const mon = mondayOf(today); return { from: mon, to: addDays(mon, 6), label: `Week of ${monDay(mon)} ${mon.slice(0, 4)}` }; }
+  const from = teamRank.from || mondayOf(today), to = teamRank.to || today;
+  return { from, to, label: `${monDay(from)} ${from.slice(0, 4)} – ${monDay(to)} ${to.slice(0, 4)}` };
+}
+
+function showTeam() {
+  setNav('team');
+  current = null;
+  const seg = el('span', { class: 'seg', role: 'group', 'aria-label': 'Period' }, RANK_PERIODS.map(([v, t]) =>
+    el('button', { class: teamRank.period === v ? 'on' : null, onclick: () => {
+      teamRank.period = v;
+      if (v === 'custom' && !teamRank.from) { const r = rankRange(); teamRank.from = r.from; teamRank.to = r.to; }
+      saveRankPrefs();
+      showTeam();
+    } }, t)));
+  const fromIn = el('input', { type: 'date', 'aria-label': 'From', value: teamRank.from || rankRange().from });
+  const toIn = el('input', { type: 'date', 'aria-label': 'To', value: teamRank.to || rankRange().to });
+  const apply = el('button', { class: 'primary', onclick: () => {
+    if (!fromIn.value || !toIn.value) return toast('Pick both dates.', 'err');
+    if (fromIn.value > toIn.value) return toast('The start date is after the end date.', 'err');
+    teamRank.from = fromIn.value; teamRank.to = toIn.value;
+    saveRankPrefs();
+    loadTeam();
+  } }, 'Apply');
+  const custom = teamRank.period === 'custom' ? el('span', { class: 'team-range' }, fromIn, 'to', toIn, apply) : null;
+  document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
+    el('div', { class: 'dash-head' },
+      el('h2', {}, 'My Team'),
+      el('span', { class: 'picks' }, seg, custom),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: loadTeam }, 'Reload'),
+    ),
+    el('div', { class: 'sub', id: 'teamSub' }, 'Loading…'),
+    el('div', { id: 'teamBody' }),
+  ));
+  loadTeam();
+}
+
+async function loadTeam() {
+  const seq = ++teamRank.loads, r = rankRange();
+  const sub = document.getElementById('teamSub');
+  if (sub) sub.textContent = `Loading ${r.label}…`;
+  try {
+    const data = await api('/team-ranking?' + new URLSearchParams({ from: r.from, to: r.to }));
+    if (seq !== teamRank.loads) return;
+    teamRank.data = { ...data, label: r.label };
+    if (document.getElementById('teamBody')) renderTeam();
+  } catch (e) {
+    if (seq !== teamRank.loads) return;
+    if (sub) sub.textContent = e.message;
+    document.getElementById('teamBody')?.replaceChildren();
+  }
+}
+
+function renderTeam() {
+  const d = teamRank.data, f = d.fields;
+  const cats = RANK_CATS.filter((c) => c.kind === 'h' ? (c.key === 'total' || f[c.key]) : d.sales?.[c.key]);
+  const cat = cats.find((c) => c.key === teamRank.cat) || cats.find((c) => c.key === 'total') || cats[0];
+  const ranked = [...d.people].sort((a, b) => b[cat.key] - a[cat.key] || a.name.localeCompare(b.name));
+  // Ties share a rank (1, 2, 2, 4).
+  const rankOf = new Map();
+  ranked.forEach((p, i) => rankOf.set(p.id, i && ranked[i - 1][cat.key] === p[cat.key] ? rankOf.get(ranked[i - 1].id) : i + 1));
+  const pick = (key) => { teamRank.cat = key; saveRankPrefs(); renderTeam(); };
+  const others = d.people.length - 1;
+  document.getElementById('teamSub').textContent = `${d.label} · You and ${plural(others, 'team member')}` +
+    (d.teamSource === 'manager' ? ' (the people who share your manager)' : d.teamSource === 'settings' ? ' (your Salesforce default team)' : '') +
+    ` · Time from ${dsMeta?.labelPlural || 'Deal Supports'} by ${f.person}, dated by ${f.date}` +
+    (d.sales ? ` · Sales from opportunities won (closed in the period) where each is the ${f.leadSe}` : ' · No Lead SE user field on Opportunity, so sales can\'t be ranked') +
+    ` · Ranked by ${cat.label}`;
+
+  const tile = (c) => {
+    const sum = d.people.reduce((s, p) => s + p[c.key], 0);
+    const top = [...d.people].sort((a, b) => b[c.key] - a[c.key])[0];
+    return el('button', { class: 'tile' + (c === cat ? ' on' : ''), title: `Rank by ${c.label}`, onclick: () => pick(c.key) },
+      el('div', { class: 'k' }, c.label), el('div', { class: 'v' }, c.kind === '$' ? compact(sum) : fmtH(sum)),
+      el('div', { class: 'd' }, top && top[c.key] > 0 ? `Top: ${top.me ? 'You' : top.name}` : 'Nothing yet'));
+  };
+  const max = Math.max(...ranked.map((p) => p[cat.key]), 0) || 1;
+  const bars = el('div', { class: 'hbars' }, ranked.flatMap((p) => [
+    el('div', { class: 'lbl' + (p.me ? ' me' : ''), title: p.name }, `${rankOf.get(p.id)}. ${p.me ? `${p.name} (you)` : p.name}`),
+    el('div', { class: 'track' },
+      el('div', { class: 'bar', style: `width: calc((100% - 150px) * ${p[cat.key] / max})` }),
+      el('span', { class: 'val' }, rankValue(cat, p[cat.key]), cat.kind === '$' && p.won ? el('span', {}, ` · ${plural(p.won, 'deal')}`) : null)),
+  ]));
+  const th = (c) => el('th', { class: ['n', 'sortable', c === cat && 'on'].filter(Boolean).join(' '), title: `Rank by ${c.label}`, onclick: () => pick(c.key) }, c.label);
+  const td = (c, p) => el('td', { class: 'n' + (c === cat ? ' on' : '') }, rankValue(c, p[c.key]));
+  const totals = Object.fromEntries(cats.map((c) => [c.key, d.people.reduce((s, p) => s + p[c.key], 0)]));
+  document.getElementById('teamBody').replaceChildren(
+    el('div', { class: 'tiles six' }, cats.map(tile)),
+    el('section', {}, el('h3', {}, `Ranked by ${cat.label}`), d.people.length ? bars : el('div', { class: 'empty' }, 'No team members found.')),
+    el('section', {}, el('h3', {}, 'Everyone'),
+      el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
+        el('thead', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'Person'), cats.map(th),
+          el('th', { class: 'n' }, dsMeta?.labelPlural || 'Deal Supports'), d.sales ? el('th', { class: 'n' }, 'Deals won') : null)),
+        el('tbody', {}, ranked.map((p) => el('tr', { class: 'nolink' + (p.me ? ' me' : '') },
+          el('td', {}, rankOf.get(p.id)), el('td', {}, p.me ? `${p.name} (you)` : p.name), cats.map((c) => td(c, p)),
+          el('td', { class: 'n' }, p.activities.toLocaleString()), d.sales ? el('td', { class: 'n' }, p.won.toLocaleString()) : null))),
+        el('tfoot', {}, el('tr', {}, el('td', {}), el('td', {}, 'Team total'), cats.map((c) => el('td', { class: 'n' }, rankValue(c, totals[c.key]))),
+          el('td', { class: 'n' }, d.people.reduce((s, p) => s + p.activities, 0).toLocaleString()),
+          d.sales ? el('td', { class: 'n' }, d.people.reduce((s, p) => s + p.won, 0).toLocaleString()) : null))))),
   );
 }
 

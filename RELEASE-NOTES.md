@@ -1,5 +1,13 @@
 # SF Desk release notes
 
+## 1.5.0 (October 22, 2026)
+
+- **My Team tab:** ranks you and your team (your Salesforce default team, else the people who share your
+  manager) for This year, This quarter, This month, This week or a custom date range. Rank by Deal Support
+  Internal, Customer Facing, Travel or Total time (by Assigned SE and Date of Activity), or by Sales in ACV or
+  TCV (opportunities won in the period where each is the Lead SE). Each category has a tile with the team
+  total and the leader; click a tile or a column to rank by it. Year and quarter are fiscal.
+
 ## 1.4.0 (October 22, 2026)
 
 - **New Deal Support opens in a dialog:** the opportunity, then Date of Activity, Requested Activity, Role,
