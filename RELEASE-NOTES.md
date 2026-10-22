@@ -1,5 +1,13 @@
 # SF Desk release notes
 
+## 1.5.1 (October 22, 2026)
+
+- **My Team, Show All:** tick it to rank everyone in the records you can see instead of only your team.
+- **My Team, BOAT:** the Everyone table shows each person's SailPoint BOAT, the one with most of the accounts
+  they're Account Lead SE on (hover for the others).
+- **My Team, sorting and export:** click any column in the Everyone table to sort by it (again to reverse),
+  and **Export to Excel** saves the table as shown, with BOAT and Other BOATs columns.
+
 ## 1.5.0 (October 22, 2026)
 
 - **My Team tab:** ranks you and your team (your Salesforce default team, else the people who share your
