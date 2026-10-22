@@ -1604,6 +1604,79 @@ api.get('/my-time', wrap(async (req, res) => {
   }));
 }));
 
+// ---------- My Team ----------
+
+// Me and my team side by side for one date range: Deal Support hours by kind (Internal, Customer Facing,
+// Travel, Total), counted for the person in the Assigned SE field and dated by Date of Activity, and the
+// ACV and TCV of the opportunities won (closed in the range) where each is the Lead SE.
+const addDaysIso = (s, n) => new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10) + n)).toISOString().slice(0, 10);
+const TEAM_HOURS = [
+  ['internal', (f) => f.name === 'Prep_Time__c' || /internal time|prep(aration)? time/i.test(f.label)],
+  ['customer', (f) => f.name === 'Meeting_Duration__c' || /customer facing time|meeting duration/i.test(f.label)],
+  ['travel', (f) => f.name === 'Travel_Time__c' || /travel time/i.test(f.label)],
+];
+
+api.get('/team-ranking', wrap(async (req, res) => {
+  const from = isoDate(req.query.from), to = isoDate(req.query.to);
+  if (from > to) throw new HttpError(400, 'The start date is after the end date.');
+  const me = sfId(req.session.sf.user.id);
+  const team = await myTeam(req).catch(() => ({ source: null, members: [] }));
+  const people = [{ id: me, name: req.session.sf.user.name || 'You', me: true }, ...team.members.filter((m) => m.id !== me)];
+  const ids = people.map((p) => `'${sfId(p.id)}'`).join(', ');
+  const ds = await dealSupportMeta(req), tm = await timeMeta(req);
+  const who = tm.userFields[0], date = tm.dateFields[0];
+  const hours = Object.fromEntries(TEAM_HOURS.map(([key, test]) => [key, ds.fields.find((f) => f.timeEntry && test(f)) || null]));
+  const total = tm.hoursFields.find((f) => /total/i.test(f.label) && f.unit !== 'text') || null;
+  const toHours = (f, v) => (Number(v) || 0) / (/minute|\bmins?\b/i.test(`${f.label} ${f.name}`) || f.unit === 'minutes' ? 60 : 1);
+  const rows = new Map(people.map((p) => [p.id, { ...p, activities: 0, internal: 0, customer: 0, travel: 0, total: 0, won: 0, acv: 0, tcv: 0 }]));
+  const row = (id) => rows.get(id) || [...rows.values()].find((r) => r.id.slice(0, 15) === String(id || '').slice(0, 15));
+
+  // Deal Support hours, summed per person in Salesforce.
+  const range = (f) => f.type === 'datetime' ? `${f.name} >= ${from}T00:00:00Z AND ${f.name} < ${addDaysIso(to, 1)}T00:00:00Z`
+    : `${f.name} >= ${from} AND ${f.name} <= ${to}`;
+  const sums = [...Object.entries(hours).filter(([, f]) => f).map(([k, f]) => `SUM(${f.name}) ${k}`), ...(total ? [`SUM(${total.name}) total`] : [])];
+  const dsRecs = await query(req, `SELECT ${who.name} who, COUNT(Id) n${sums.length ? ', ' + sums.join(', ') : ''} FROM ${ds.object} ` +
+    `WHERE ${who.name} IN (${ids}) AND ${range(date)} GROUP BY ${who.name}`);
+  for (const r of dsRecs) {
+    const p = row(r.who);
+    if (!p) continue;
+    p.activities = r.n || 0;
+    for (const [k, f] of Object.entries(hours)) if (f) p[k] = toHours(f, r[k]);
+    p.total = total ? toHours(total, r.total) : p.internal + p.customer + p.travel;
+  }
+
+  // Won opportunities where each person is the Lead SE, closed in the range.
+  const lse = (await knownLeadSeFields(req)).Opportunity;
+  let sales = null;
+  if (lse?.isUser) {
+    const run = (cols) => query(req, `SELECT ${lse.name} who, COUNT(Id) n${cols.map((c) => `, SUM(${c}) ${c === PIPELINE_VALUES[0] ? 'acv' : 'tcv'}`).join('')} ` +
+      `FROM Opportunity WHERE IsWon = true AND ${lse.name} IN (${ids}) AND CloseDate >= ${from} AND CloseDate <= ${to} GROUP BY ${lse.name}`);
+    let recs;
+    try { recs = await run(PIPELINE_VALUES); sales = { acv: true, tcv: true }; } catch (err) {
+      if (err.status !== 400) throw err;
+      recs = await run([]); sales = { acv: false, tcv: false };
+    }
+    for (const r of recs) {
+      const p = row(r.who);
+      if (!p) continue;
+      p.won = r.n || 0;
+      p.acv = Number(r.acv) || 0;
+      p.tcv = Number(r.tcv) || 0;
+    }
+  }
+
+  res.json({
+    from, to, teamSource: team.source,
+    fields: {
+      person: who.label, date: date.label, leadSe: lse?.isUser ? 'Lead SE' : null,
+      internal: hours.internal?.label || null, customer: hours.customer?.label || null, travel: hours.travel?.label || null,
+      total: total?.label || 'Total (Internal + Customer Facing + Travel)',
+    },
+    sales,
+    people: [...rows.values()],
+  });
+}));
+
 // ---------- TES ----------
 
 // TES Requests are the Deal Supports of this record type.
