@@ -1,5 +1,24 @@
 # SF Desk release notes
 
+## 1.4.0 (October 22, 2026)
+
+- **New Deal Support opens in a dialog:** the opportunity, then Date of Activity, Requested Activity, Role,
+  and Platform Request, Platform Capabilities and Integration Modules as checkbox lists side by side. Then
+  the description, and Customer Facing, Internal and Travel Time with their total. The account comes from the
+  opportunity.
+- **Description written for you:** it's proposed from the activity, platform request, capabilities and
+  modules as you pick them, until you type in it. **Write it** puts the proposal back.
+- **Role and activity filled in:** Role is Lead SE when you're the opportunity's Lead SE (or, when it has
+  none, the account's), else SME, until you pick one. Requested Activity is Demo when the meeting mentions a
+  demo, else Discussion.
+- **Show Closed Opportunities:** tick it beside the opportunity search to find closed opportunities too.
+  They're searched in Salesforce as you type, listed after the open ones, and marked closed.
+- **RFP and TES requests:** pick the RFP Request and Related TES Link from the requests on the chosen
+  opportunity and its account, instead of typing an Id.
+- **Time Entry:** right-click a meeting to Create Deal Support or mark it No Deal Support needed.
+- **Deals:** Show as ACV or Show as TCV totals SaaS Total ACV or SaaS TCV throughout.
+- **Accounts:** the opportunities table is read-only, and Open takes you to the opportunity in Salesforce.
+
 ## 1.3.0 (October 15, 2026)
 
 - **TES tab:** the TES Requests where you (My Accounts), your team or one team member is the Opportunity Lead

@@ -1164,11 +1164,86 @@ api.get('/deal-supports/meta', wrap(async (req, res) => res.json(await dealSuppo
 api.get('/opportunities/:id/lead-se', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const known = await knownLeadSeFields(req);
-  const onOpp = known.Opportunity, field = onOpp || known.Account;
-  if (!field) return res.json({ me: null });
-  const [o] = await query(req, `SELECT ${onOpp ? field.name : `Account.${field.name}`} FROM Opportunity WHERE Id = '${id}'`);
-  const rec = onOpp ? o : o?.Account;
-  res.json({ me: rec ? leadSeMatches(req, field, rec) : null });
+  const oppF = known.Opportunity, acctF = known.Account;
+  if (!oppF && !acctF) return res.json({ me: null });
+  const cols = [oppF?.name, acctF && `Account.${acctF.name}`].filter(Boolean);
+  const [o] = await query(req, `SELECT ${cols.join(', ')} FROM Opportunity WHERE Id = '${id}'`);
+  if (!o) return res.json({ me: null });
+  // The opportunity's own Lead SE wins. When that field is blank, the account's Lead SE counts.
+  if (oppF && o[oppF.name] != null && o[oppF.name] !== '') return res.json({ me: leadSeMatches(req, oppF, o) });
+  if (acctF && o.Account) return res.json({ me: leadSeMatches(req, acctF, o.Account) });
+  res.json({ me: false });
+}));
+
+// RFP Requests and TES Requests (Deal Supports of those record types) on an opportunity or its
+// account, so the form can link Related TES Link and RFP Request without typing an Id.
+const RELATED_REQUESTS = [
+  { key: 'tes', recordType: 'TES Request', field: 'Related_TES_Link__c', label: /^related tes link$/i },
+  { key: 'rfp', recordType: 'RFP Request', field: 'RFP_Request__c', label: /^rfp request$/i },
+];
+const RELATED_LIMIT = 200;
+
+async function relatedRequestMeta(req) {
+  if (req.session.relatedReq) return req.session.relatedReq;
+  const ds = await dealSupportMeta(req);
+  const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
+  const find = (name, re) => d.fields.find((f) => f.name === name) || d.fields.find((f) => re.test(f.label));
+  const kinds = RELATED_REQUESTS.flatMap((k) => {
+    const f = find(k.field, k.label);
+    const rt = (d.recordTypeInfos || []).find((r) => lower(r.name) === lower(k.recordType));
+    return f?.type === 'reference' && rt ? [{ key: k.key, field: f.name, label: f.label, recordType: rt.name }] : [];
+  });
+  const acct = d.fields.filter((f) => f.type === 'reference' && f.referenceTo?.includes('Account'))
+    .sort((a, b) => (b.name === 'Account_lookup__c') - (a.name === 'Account_lookup__c'))[0];
+  const date = find('Date_of_Sales_Activity__c', /^date of activity$/i);
+  req.session.relatedReq = {
+    object: ds.object, oppField: ds.oppField, oppRel: ds.oppRel,
+    acctField: acct?.name || null, acctRel: acct?.relationshipName || null,
+    date: date?.name || null,
+    stage: find('Stage__c', /^tes stage$/i)?.name || null,
+    tesType: find('TES_Offering__c', /^tes type$/i)?.name || null,
+    rfpType: find('RFP_Type__c', /^rfp type$/i)?.name || null,
+    kinds,
+  };
+  return req.session.relatedReq;
+}
+
+api.get('/opportunities/:id/related-requests', wrap(async (req, res) => {
+  const oppId = sfId(req.params.id);
+  const meta = await relatedRequestMeta(req);
+  const empty = { tes: [], rfp: [], truncated: false };
+  if (!meta.kinds.length) return res.json(empty);
+  const [opp] = await query(req, `SELECT AccountId FROM Opportunity WHERE Id = '${oppId}'`);
+  if (!opp) throw new HttpError(404, 'Opportunity not found');
+  const sameId = (a, b) => String(a || '').slice(0, 15) === String(b || '').slice(0, 15);
+  const match = [`${meta.oppField} = '${oppId}'`];
+  if (opp.AccountId && meta.acctField) match.push(`${meta.acctField} = '${sfId(opp.AccountId)}'`);
+  const types = meta.kinds.map((k) => `RecordType.Name = ${soqlStr(k.recordType)}`).join(' OR ');
+  const cols = ['Id', 'Name', 'RecordType.Name', 'CreatedDate', meta.oppField,
+    ...(meta.oppRel ? [`${meta.oppRel}.Name`] : []),
+    ...(meta.acctField ? [meta.acctField] : []),
+    ...(meta.acctRel ? [`${meta.acctRel}.Name`] : []),
+    ...[meta.date, meta.stage, meta.tesType, meta.rfpType].filter(Boolean)];
+  const records = await query(req, `SELECT ${[...new Set(cols)].join(', ')} FROM ${meta.object} ` +
+    `WHERE (${types}) AND (${match.join(' OR ')}) ORDER BY CreatedDate DESC LIMIT ${RELATED_LIMIT}`, RELATED_LIMIT);
+  const out = { ...empty, truncated: records.length >= RELATED_LIMIT };
+  for (const r of records) {
+    const kind = meta.kinds.find((k) => lower(r.RecordType?.Name) === lower(k.recordType));
+    if (!kind || !out[kind.key]) continue;
+    const type = r[kind.key === 'rfp' ? meta.rfpType : meta.tesType];
+    out[kind.key].push({
+      id: r.Id, name: r.Name || r.Id,
+      date: String((meta.date && r[meta.date]) || r.CreatedDate || '').slice(0, 10),
+      detail: [meta.stage && r[meta.stage], type].filter(Boolean).join(' · '),
+      oppName: meta.oppRel ? r[meta.oppRel]?.Name || '' : '',
+      accountName: meta.acctRel ? r[meta.acctRel]?.Name || '' : '',
+      sameOpp: sameId(r[meta.oppField], oppId),
+    });
+  }
+  const byMatch = (a, b) => b.sameOpp - a.sameOpp || (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name);
+  out.tes.sort(byMatch);
+  out.rfp.sort(byMatch);
+  res.json(out);
 }));
 
 api.get('/opportunities/:id/deal-supports', wrap(async (req, res) => {
@@ -2226,10 +2301,33 @@ api.get('/opportunities/open', wrap(async (req, res) => {
   const top = (accounts.size || title || domainIds.size) ? [...matches.filter(suggested), ...matches.filter((o) => !suggested(o))] : matches;
   // One open opportunity across the matched accounts: the page can preselect it.
   const onDomain = records.filter((o) => domainIds.has(o.AccountId));
-  res.json({ total: records.length, matched: matches.length, syncedAt: at,
+  // closed=1 also searches closed opportunities live in Salesforce (they aren't kept locally): the words
+  // typed, else the suggested accounts' closed ones. Most recently closed first.
+  let closed = [], closedError;
+  if (req.query.closed === '1') {
+    const acctIds = [...new Set([...accounts, ...domainIds])].filter((id) => /^[a-zA-Z0-9]{15,18}$/.test(id)).slice(0, 50);
+    const where = ['IsClosed = true'];
+    if (words.length) where.push(...words.map((w) => `(Name LIKE '%${soqlLike(w)}%' OR Account.Name LIKE '%${soqlLike(w)}%')`));
+    else if (acctIds.length) where.push(`AccountId IN (${acctIds.map((id) => `'${sfId(id)}'`).join(', ')})`);
+    if (where.length > 1) {
+      try {
+        const recs = await query(req, 'SELECT Id, Name, AccountId, Account.Name, StageName, CloseDate, Owner.Name FROM Opportunity ' +
+          `WHERE ${where.join(' AND ')} ORDER BY CloseDate DESC LIMIT ${limit}`, limit);
+        closed = recs.map((o) => ({ Id: o.Id, Name: o.Name, AccountId: o.AccountId, Account: { Name: o.Account?.Name || '' },
+          StageName: o.StageName, CloseDate: o.CloseDate, Owner: { Name: o.Owner?.Name || '' }, IsClosed: true }));
+        const onHint = (o) => accounts.has(o.AccountId) || domainIds.has(o.AccountId);
+        closed = [...closed.filter(onHint), ...closed.filter((o) => !onHint(o))];
+      } catch (err) {
+        if (err.status === 401) throw err;
+        closedError = err.status >= 502 ? "Closed opportunities can't be searched while Salesforce can't be reached." : err.message;
+      }
+    }
+  }
+  res.json({ total: records.length, matched: matches.length, syncedAt: at, closedMatched: closed.length, closedError,
     domainAccounts: byDomain.length ? byDomain : undefined, pick: onDomain.length === 1 ? onDomain[0] : undefined,
-    records: top.slice(0, limit).map((o) => ({ ...o, suggested: !!suggested(o) || undefined,
-      via: !hinted(o) && domainIds.has(o.AccountId) ? 'domain' : undefined })) });
+    records: [...top.slice(0, limit).map((o) => ({ ...o, suggested: !!suggested(o) || undefined,
+      via: !hinted(o) && domainIds.has(o.AccountId) ? 'domain' : undefined })),
+    ...closed.map((o) => ({ ...o, suggested: (accounts.has(o.AccountId) || domainIds.has(o.AccountId)) || undefined }))] });
 }));
 
 // The activity done on a Deal Support: Requested Activity in Kerry's org, else a field labelled like it.

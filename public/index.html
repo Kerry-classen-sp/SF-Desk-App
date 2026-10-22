@@ -334,6 +334,16 @@ darkQuery.addEventListener('change', applyTheme);
   .opp-pick button.active { outline: 2px solid var(--accent); outline-offset: -2px; }
   .opp-pick .m { color: var(--muted); font-size: 12px; }
   .panel-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .opp-search { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+  .opp-search > label:first-child { flex: 1 1 320px; min-width: 0; }
+  .opp-search > label:first-child > span:first-child { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .opp-search .show-closed { display: flex; gap: 6px; align-items: center; white-space: nowrap; padding-bottom: 7px; font-size: 13px; cursor: pointer; }
+  .opp-search .show-closed input { width: auto; margin: 0; }
+  .request-note { display: block; margin: 2px 0 0; } .request-note:empty { display: none; }
+  .ctx-menu { position: fixed; z-index: 40; min-width: 220px; margin: 0; padding: 4px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .ctx-menu button { display: block; width: 100%; text-align: left; border: 0; background: none; border-radius: 6px; padding: 8px 10px; color: var(--ink); }
+  .ctx-menu button:hover { background: var(--accent-soft); }
   /* ---------- responsive ---------- */
   @media (max-width: 1000px) {
     .cal.with-panel { grid-template-columns: minmax(0, 1fr); }
@@ -1814,15 +1824,19 @@ function dsValue(f, n) {
 // Requested Activity starts as Demo when `subject` (a calendar event's) mentions a demo, else Discussion.
 // Role follows the picked opportunity, Lead SE when I'm its Lead SE and SME otherwise, until it's picked by hand.
 function newDsForm({ picked = null, find = {}, values, descAround, title, subject = '', save, onCreated, close }) {
-  let roleTicket = 0, roleTouched = false, role = null;
+  let roleTicket = 0, roleTouched = false, settingRole = false, role = null;
   const setRole = async (o) => {
     const rd = dsMeta.roleDefault, my = ++roleTicket;
     if (!role || !o || !rd?.leadSe) return;
     let lead = null;
     try { lead = (await api(`/opportunities/${o.Id}/lead-se`)).me; } catch { /* keep the default */ }
-    if (my === roleTicket && !roleTouched) role.value = lead ? rd.leadSe : rd.value || '';
+    // null means the Lead SE field couldn't be read, so leave whatever is already chosen.
+    if (my !== roleTicket || roleTouched || lead == null) return;
+    settingRole = true;
+    role.value = lead ? rd.leadSe : rd.value || '';
+    settingRole = false;
   };
-  const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; setRole(o); } });
+  const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; setRole(o); form?.bindOpportunity(o); } });
   const activityF = dsOrderField(dsMeta.fields, DS_ORDER[1]);
   const activityValue = (name) => activityF?.picklist?.find((v) => v.toLowerCase() === name);
   const activity = activityValue(/\bdemo(s|nstrations?)?\b/i.test(subject) ? 'demo' : 'discussion');
@@ -1837,12 +1851,17 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
       await onCreated(rec, picked);
     },
   });
+  const showClosed = el('input', { type: 'checkbox' });
+  showClosed.addEventListener('change', () => picker.setClosed(showClosed.checked));
   form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
-    el('div', { class: 'grid' }, el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input)),
+    el('div', { class: 'opp-search' },
+      el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input),
+      el('label', { class: 'show-closed' }, showClosed, 'Show Closed Opportunities')),
     picker.list, picker.status));
   role = dsMeta.roleDefault && form.inputFor(dsMeta.roleDefault.field);
-  role?.addEventListener('change', () => { roleTouched = true; });
+  role?.addEventListener('change', () => { if (!settingRole) roleTouched = true; });
   setRole(picked);
+  form.bindOpportunity(picked);
   return form;
 }
 
@@ -1874,7 +1893,19 @@ const dsOrderField = (fields, [name, re]) => fields.find((f) => f.name === name)
 // subject and notes) around the description proposed from the picks.
 function dealSupportForm(o, close, opts = {}) {
   const fields = dsMeta.fields.filter((f) => f.createable);
-  const inputs = new Map(fields.map((f) => [f, dsInput(f)]));
+  // RFP Request and Related TES Link are lookups to other Deal Supports. The form lists the matching
+  // records instead of asking for an Id.
+  const relatedKind = (f) => f.type !== 'reference' ? ''
+    : f.name === 'Related_TES_Link__c' || /^related tes link$/i.test(f.label) ? 'tes'
+    : f.name === 'RFP_Request__c' || /^rfp request$/i.test(f.label) ? 'rfp' : '';
+  const requestNotes = new Map();
+  const inputs = new Map(fields.map((f) => {
+    const kind = relatedKind(f);
+    if (!kind) return [f, dsInput(f)];
+    const n = el('select', { 'aria-label': f.label, 'data-request': kind }, el('option', { value: '' }, '—'));
+    requestNotes.set(f, el('span', { class: 'sub request-note' }, 'Pick an opportunity to see matching requests.'));
+    return [f, n];
+  }));
   for (const [f, n] of inputs) {
     if (opts.edit) {
       if (f.type === 'boolean') n.checked = false;
@@ -1887,7 +1918,11 @@ function dealSupportForm(o, close, opts = {}) {
     if (f.type === 'boolean') n.checked = !!v;
     else if (f.type === 'multipicklist') for (const x of n.querySelectorAll('input')) x.checked = String(v).split(';').includes(x.value);
     else if (f.type === 'datetime') n.value = `${localDay(new Date(v))}T${hhmm24(new Date(v))}`;
-    else n.value = v;
+    else if (n.dataset.request) {
+      const name = f.relationshipName && opts.values?.[f.relationshipName]?.Name;
+      n.append(el('option', { value: String(v) }, name || String(v)));
+      n.value = String(v);
+    } else n.value = v;
   }
   // The record's name is never shown: Salesforce renames each Deal Support itself, but the name can't be
   // empty, so new ones are sent as "X".
@@ -1907,7 +1942,7 @@ function dealSupportForm(o, close, opts = {}) {
   const around = opts.descAround || {};
   const proposal = () => [around.before, propose(), around.after].filter(Boolean).join('\n').slice(0, desc.length || 32000);
   let typed = !!opts.edit;
-  const rewrite = el('button', { type: 'button', class: 'linkish', style: 'display:inline;margin-left:8px' }, 'Write it from the picks');
+  const rewrite = el('button', { type: 'button', class: 'linkish', style: 'display:inline;margin-left:8px' }, 'Write it');
   if (desc) {
     const t = inputs.get(desc);
     t.rows = 6;
@@ -1925,6 +1960,7 @@ function dealSupportForm(o, close, opts = {}) {
   }
   // A lookup on a saved record shows its record's name, with the Id it holds underneath (until it's changed).
   const refName = (f) => {
+    if (inputs.get(f)?.dataset.request) return null;
     const name = opts.edit && f.relationshipName && opts.values?.[f.relationshipName]?.Name;
     if (!name) return null;
     const n = inputs.get(f), id = n.value;
@@ -1937,15 +1973,16 @@ function dealSupportForm(o, close, opts = {}) {
   };
   // A checklist sits in a div, not a label: a label would tick its first box when its title is clicked.
   const cell = (f) => el(f.type === 'multipicklist' ? 'div' : 'label', { class: ['field', f.type === 'textarea' && 'wide'].filter(Boolean).join(' ') },
-    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null, f === desc ? rewrite : null), inputs.get(f), refName(f));
+    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null, f === desc ? rewrite : null), inputs.get(f), refName(f), requestNotes.get(f));
   // Shown: the DS_ORDER fields and any other required ones, with the multi-selects (platform request,
   // capabilities, integration modules) on a row of their own; Description of Request; then the time
-  // fields (customer-facing, internal, travel) with a live total. Other fields aren't shown but keep
-  // their defaults; the account comes from the opportunity (the server sets it).
+  // fields (customer-facing, internal, travel) with a live total. The account comes from the opportunity
+  // (the server sets it). RFP / TES requests are listed for the picked account and opportunity. Other
+  // fields aren't shown but keep their defaults.
   const time = fields.filter((f) => f.timeEntry);
   const first = DS_ORDER.map((t) => dsOrderField(fields, t)).filter((f) => f && !f.timeEntry && f !== desc);
   const isAccount = (f) => f.type === 'reference' && f.referenceTo?.includes('Account');
-  const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f) && !isAccount(f));
+  const rest = fields.filter((f) => f !== nameF && f !== desc && !f.timeEntry && !first.includes(f) && !isAccount(f) && !relatedKind(f));
   const multi = [requestF, capsF, modsF].filter((f) => f && first.includes(f));
   const top = [...first.filter((f) => !multi.includes(f)), ...rest.filter((f) => f.required)];
   const total = el('output', { style: 'display:block;padding:6px 0;font-weight:600' });
@@ -1955,6 +1992,51 @@ function dealSupportForm(o, close, opts = {}) {
   };
   for (const f of time) inputs.get(f).addEventListener('input', showTotal);
   showTotal();
+  const requests = fields.filter((f) => relatedKind(f));
+  // RFP and TES requests for the opportunity picked above, or others on its account.
+  const related = { oppId: null, ticket: 0, tes: null, rfp: null, error: '', truncated: false };
+  const requestLabel = (r) => [r.name, r.detail, r.date].filter(Boolean).join(' · ');
+  const paintRequest = (f) => {
+    const n = inputs.get(f), kind = n?.dataset.request;
+    if (!kind) return;
+    const note = requestNotes.get(f);
+    const keep = n.value, keepText = n.selectedOptions[0]?.value ? n.selectedOptions[0].textContent : '';
+    const list = related[kind];
+    n.replaceChildren(el('option', { value: '' }, '—'));
+    const word = kind === 'rfp' ? 'RFP' : 'TES';
+    if (!related.oppId) note.textContent = 'Pick an opportunity to see matching requests.';
+    else if (list == null) note.textContent = related.error || 'Loading…';
+    else if (!list.length) note.textContent = related.error || `No ${word} requests on this account or opportunity.`;
+    else {
+      const group = (rows, label) => rows.length ? el('optgroup', { label }, rows.map((r) => el('option', { value: r.id }, requestLabel(r)))) : null;
+      for (const g of [group(list.filter((r) => r.sameOpp), 'This opportunity'), group(list.filter((r) => !r.sameOpp), 'This account')]) if (g) n.append(g);
+      note.textContent = related.truncated ? 'Showing the most recent matches. There are more on this account.' : '';
+    }
+    const sameId = (a, b) => String(a || '').slice(0, 15) === String(b || '').slice(0, 15);
+    const found = keep && [...n.options].find((opt) => sameId(opt.value, keep));
+    if (keep && !found) n.append(el('option', { value: keep }, keepText || keep));
+    if (keep) n.value = found ? found.value : keep;
+  };
+  const loadRelated = async (opp) => {
+    const id = opp?.Id || null;
+    related.oppId = id;
+    related.error = '';
+    const mine = ++related.ticket;
+    if (!id) { related.tes = []; related.rfp = []; requests.forEach(paintRequest); return; }
+    related.tes = related.rfp = null;
+    requests.forEach(paintRequest);
+    try {
+      const data = await api(`/opportunities/${id}/related-requests`);
+      if (mine !== related.ticket) return;
+      related.tes = data.tes || [];
+      related.rfp = data.rfp || [];
+      related.truncated = !!data.truncated;
+    } catch (err) {
+      if (mine !== related.ticket) return;
+      related.tes = []; related.rfp = []; related.error = err.message;
+    }
+    requests.forEach(paintRequest);
+  };
   const create = el('button', { class: 'primary' }, opts.edit ? 'Save changes' : `Create ${dsMeta.label}`);
   // opts.remove deletes the record, after asking.
   const remove = el('button', { class: 'danger', style: 'margin-right:auto' }, 'Remove');
@@ -1970,6 +2052,7 @@ function dealSupportForm(o, close, opts = {}) {
     desc ? el('div', { class: 'grid', style: 'margin-top:10px' }, cell(desc)) : null,
     time.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, time.map(cell),
       time.length > 1 ? el('label', {}, el('span', {}, 'Total time'), total) : null) : null,
+    requests.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, requests.map(cell)) : null,
     el('div', { class: 'form-actions' }, opts.remove ? remove : null, el('button', { onclick: close }, 'Cancel'), create),
   );
   create.addEventListener('click', async () => {
@@ -1994,6 +2077,8 @@ function dealSupportForm(o, close, opts = {}) {
     }
   });
   box.inputFor = (name) => inputs.get(fields.find((f) => f.name === name));
+  box.bindOpportunity = (opp) => loadRelated(opp);
+  if (o?.Id) loadRelated(o);
   return box;
 }
 
@@ -3177,7 +3262,7 @@ function renderCalendar() {
   const fromMac = cal.data.source && cal.data.source !== 'salesforce';
   document.getElementById('calSub').textContent = (cal.sourceNote && !fromMac ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
-      (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it or create a ' + dsMeta.label
+      (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed'
     : fromMac ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Outlook or Google calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here.');
 
@@ -3196,7 +3281,8 @@ function renderCalendar() {
   const evBox = (e) => {
     const st = evStatus(e);
     const n = el('button', { class: `ev ${st}${cal.sel === e.id ? ' sel' : ''}`, title: `${e.title || e.subject} · ${STATUS_TEXT[st]}`,
-      onclick: () => selectEvent(e.id) },
+      onclick: () => selectEvent(e.id),
+      oncontextmenu: (ev) => { if (openEventMenu(e, ev.clientX, ev.clientY)) ev.preventDefault(); } },
       el('div', { class: 's' }, e.title || e.subject),
       e.allDay ? null : el('div', { class: 't' }, `${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`));
     return n;
@@ -3358,7 +3444,7 @@ async function editDealSupport(id, host, rerender, reload) {
   if (raw.trim() && notes !== raw.trim()) {
     changes[descName] = notes || descSources(descName).map((f) => dsText(f, data.record[f.name])).filter(Boolean).join(' - ');
   }
-  const box = dealSupportForm(null, close, {
+  const box = dealSupportForm(opp, close, {
     edit: true,
     title: `Edit ${dsMeta.label} ${data.record.Name || ''}`.trim(),
     values: data.record,
@@ -3397,6 +3483,45 @@ const editPencil = (name, onclick) => el('td', { class: 'edit-cell' }, el('butto
 // The Deal Support being edited from the selected event, shown in the event's panel.
 const evEdit = { editing: null };
 const editFromEvent = (r) => editDealSupport(r.Id, evEdit, renderEventPanel, loadCalendar);
+
+// Right-click an event that still needs time: create a Deal Support, or mark that none is needed.
+function closeEventMenu() { document.getElementById('evMenu')?.remove(); }
+function openEventMenu(e, x, y) {
+  closeEventMenu();
+  const st = evStatus(e);
+  const items = [];
+  if (dsMeta?.canCreate && st !== 'covered') items.push({ label: `Create ${dsMeta.label}`, run: () => {
+    formDialog((close) => createFromEvent(e, close, async () => { close(); await loadCalendar(); }));
+  } });
+  if (st !== 'covered') items.push({
+    label: e.skipped ? 'Needs a Deal Support after all' : 'No Deal Support needed',
+    run: async () => {
+      await api(`/calendar/events/${e.id}/skip`, { method: 'POST', body: { skip: !e.skipped, copies: e.copies || [] } });
+      e.skipped = !e.skipped;
+      renderCalendar();
+    },
+  });
+  if (!items.length) return false;
+  if (cal.sel !== e.id) {
+    cal.sel = e.id;
+    if (CAL_WIDE.matches) cal.editing = null;
+    evEdit.editing = null;
+    renderCalendar();
+  }
+  const menu = el('div', { id: 'evMenu', class: 'ctx-menu', role: 'menu', style: `left:${x}px;top:${y}px` },
+    items.map((it) => el('button', { type: 'button', role: 'menuitem', onclick: async () => {
+      closeEventMenu();
+      try { await it.run(); } catch (err) { toast(err.message, 'err'); }
+    } }, it.label)));
+  document.body.append(menu);
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth - 8) menu.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
+  if (r.bottom > window.innerHeight - 8) menu.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+  return true;
+}
+document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('#evMenu')) closeEventMenu(); });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeEventMenu(); });
+window.addEventListener('scroll', closeEventMenu, true);
 
 function selectEvent(id) {
   cal.sel = cal.sel === id ? null : id;
@@ -3587,11 +3712,15 @@ function oppCombobox({ picked, accounts = [], title = '', domains = [], onPick }
     role: 'combobox', 'aria-label': 'Opportunity', 'aria-expanded': 'true' });
   const list = el('div', { class: 'opp-pick', role: 'listbox' }, el('div', { class: 'empty' }, 'Loading open opportunities…'));
   const status = el('div', { class: 'sub', style: 'margin:6px 0 0' });
-  let rows = [], active = -1, ticket = 0, info = null, byDomain = null;
+  let rows = [], active = -1, ticket = 0, info = null, byDomain = null, closed = false;
   const showStatus = () => {
-    status.textContent = (picked ? `Picked: ${picked.Name}${picked.Account?.Name ? ` (${picked.Account.Name})` : ''}` : 'Nothing picked yet.') +
+    const openShown = rows.filter((o) => !o.IsClosed).length;
+    status.textContent = (picked ? `Picked: ${picked.Name}${picked.Account?.Name ? ` (${picked.Account.Name})` : ''}${picked.IsClosed ? ' (closed)' : ''}` : 'Nothing picked yet.') +
       (info ? ` · ${info.matched.toLocaleString()} of ${info.total.toLocaleString()} open opportunities match` +
-        (info.matched > rows.length ? `, showing the first ${rows.length}` : '') : '') +
+        (info.matched > openShown ? `, showing the first ${openShown}` : '') : '') +
+      (closed && info ? (info.closedError ? ` · ${info.closedError}`
+        : !input.value.trim() && !info.closedMatched ? ' · Type to search closed opportunities too'
+        : ` · ${info.closedMatched.toLocaleString()} closed shown`) : '') +
       (byDomain ? ` · Attendees from ${byDomain.map((a) => `${a.domain} → ${a.Name}`).join(', ')}` : '');
   };
   const choose = (o) => { picked = o; onPick(o); render(); };
@@ -3601,9 +3730,10 @@ function oppCombobox({ picked, accounts = [], title = '', domains = [], onPick }
       type: 'button', role: 'option', 'aria-selected': String(picked?.Id === o.Id),
       class: [picked?.Id === o.Id && 'on', i === active && 'active'].filter(Boolean).join(' ') || null,
       onclick: () => choose(o),
-    }, el('div', {}, o.Name, o.suggested ? el('span', { class: 'tag' }, o.via === 'domain' ? 'attendee match' : 'suggested') : null),
-      el('div', { class: 'm' }, [o.Account?.Name, o.StageName, o.CloseDate && `closes ${o.CloseDate}`, o.Owner?.Name].filter(Boolean).join(' · '))))
-      : [el('div', { class: 'empty' }, input.value.trim() ? 'No open opportunities match.' : 'No open opportunities.')]));
+    }, el('div', {}, o.Name, o.IsClosed ? el('span', { class: 'tag' }, 'closed') : null,
+      o.suggested ? el('span', { class: 'tag' }, o.via === 'domain' ? 'attendee match' : 'suggested') : null),
+      el('div', { class: 'm' }, [o.Account?.Name, o.StageName, o.CloseDate && `${o.IsClosed ? 'closed' : 'closes'} ${o.CloseDate}`, o.Owner?.Name].filter(Boolean).join(' · '))))
+      : [el('div', { class: 'empty' }, input.value.trim() ? `No ${closed ? '' : 'open '}opportunities match.` : 'No open opportunities.')]));
     list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
     showStatus();
   };
@@ -3613,6 +3743,7 @@ function oppCombobox({ picked, accounts = [], title = '', domains = [], onPick }
     if (accounts.length) params.set('accounts', accounts.join(','));
     if (title) params.set('title', title);
     if (domains.length) params.set('domains', domains.join(','));
+    if (closed) params.set('closed', '1');
     try {
       const r = await api('/opportunities/open?' + params);
       if (my !== ticket) return;
@@ -3637,7 +3768,12 @@ function oppCombobox({ picked, accounts = [], title = '', domains = [], onPick }
   });
   showStatus();
   load();
-  return { input, list, status };
+  const setClosed = (on) => {
+    closed = !!on;
+    input.placeholder = closed ? 'Type to find an open or closed opportunity or account…' : 'Type to find an open opportunity or account…';
+    load();
+  };
+  return { input, list, status, setClosed };
 }
 
 let resizeTimer;
