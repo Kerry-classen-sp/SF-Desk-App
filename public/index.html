@@ -247,6 +247,8 @@ darkQuery.addEventListener('change', applyTheme);
   .tiles.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .team-range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
   .team-range input { width: auto; }
+  .dash-head .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  .dash-head .check input { width: auto; margin: 0; }
   .deals tr.me td { background: var(--accent-soft); font-weight: 600; }
   .deals th.on, .deals td.on { color: var(--accent); }
   .deals th.sortable { cursor: pointer; } .deals th.sortable:hover { text-decoration: underline; }
@@ -3119,6 +3121,9 @@ const RANK_PERIODS = [['year', 'This year'], ['quarter', 'This quarter'], ['mont
 const RANK_PREFS = 'sfdesk.teamRank';
 const teamRank = { period: 'quarter', cat: 'total', from: '', to: '', data: null, loads: 0 };
 try { Object.assign(teamRank, JSON.parse(localStorage.getItem(RANK_PREFS)) || {}); teamRank.data = null; teamRank.loads = 0; } catch {}
+teamRank.all = false;
+// The Everyone table's order: a column key ('rank', 'name', 'boat', a category, 'activities', 'won') and direction.
+teamRank.sort = { key: 'rank', desc: false };
 const saveRankPrefs = () => {
   const { period, cat, from, to } = teamRank;
   try { localStorage.setItem(RANK_PREFS, JSON.stringify({ period, cat, from, to })); } catch {}
@@ -3164,6 +3169,8 @@ function showTeam() {
     el('div', { class: 'dash-head' },
       el('h2', {}, 'My Team'),
       el('span', { class: 'picks' }, seg, custom),
+      el('label', { class: 'check', title: 'Rank everyone in the records you can see, not only your team' },
+        el('input', { type: 'checkbox', checked: teamRank.all, onchange: (e) => { teamRank.all = e.target.checked; loadTeam(); } }), 'Show All'),
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: loadTeam }, 'Reload'),
     ),
@@ -3178,7 +3185,7 @@ async function loadTeam() {
   const sub = document.getElementById('teamSub');
   if (sub) sub.textContent = `Loading ${r.label}…`;
   try {
-    const data = await api('/team-ranking?' + new URLSearchParams({ from: r.from, to: r.to }));
+    const data = await api('/team-ranking?' + new URLSearchParams({ from: r.from, to: r.to, ...(teamRank.all ? { all: '1' } : {}) }));
     if (seq !== teamRank.loads) return;
     teamRank.data = { ...data, label: r.label };
     if (document.getElementById('teamBody')) renderTeam();
@@ -3197,9 +3204,10 @@ function renderTeam() {
   // Ties share a rank (1, 2, 2, 4).
   const rankOf = new Map();
   ranked.forEach((p, i) => rankOf.set(p.id, i && ranked[i - 1][cat.key] === p[cat.key] ? rankOf.get(ranked[i - 1].id) : i + 1));
-  const pick = (key) => { teamRank.cat = key; saveRankPrefs(); renderTeam(); };
-  const others = d.people.length - 1;
-  document.getElementById('teamSub').textContent = `${d.label} · You and ${plural(others, 'team member')}` +
+  const pick = (key) => { teamRank.cat = key; teamRank.sort = { key: 'rank', desc: false }; saveRankPrefs(); renderTeam(); };
+  const others = d.people.length - 1, all = d.teamSource === 'all';
+  document.getElementById('teamSub').textContent = `${d.label} · ` +
+    (all ? `Everyone in the records you can see: ${plural(d.people.length, 'person', 'people')}` : `You and ${plural(others, 'team member')}`) +
     (d.teamSource === 'manager' ? ' (the people who share your manager)' : d.teamSource === 'settings' ? ' (your Salesforce default team)' : '') +
     ` · Time from ${dsMeta?.labelPlural || 'Deal Supports'} by ${f.person}, dated by ${f.date}` +
     (d.sales ? ` · Sales from opportunities won (closed in the period) where each is the ${f.leadSe}` : ' · No Lead SE user field on Opportunity, so sales can\'t be ranked') +
@@ -3219,23 +3227,63 @@ function renderTeam() {
       el('div', { class: 'bar', style: `width: calc((100% - 150px) * ${p[cat.key] / max})` }),
       el('span', { class: 'val' }, rankValue(cat, p[cat.key]), cat.kind === '$' && p.won ? el('span', {}, ` · ${plural(p.won, 'deal')}`) : null)),
   ]));
-  const th = (c) => el('th', { class: ['n', 'sortable', c === cat && 'on'].filter(Boolean).join(' '), title: `Rank by ${c.label}`, onclick: () => pick(c.key) }, c.label);
+  // Sorting the table: text columns start A–Z, numbers highest first; clicking the same column again reverses it.
+  // A category column also ranks by that category (tiles and bars too). Blank BOATs stay last.
+  const TEXT_COLS = new Set(['rank', 'name', 'boat']);
+  const sortBy = (key) => {
+    const s = teamRank.sort;
+    teamRank.sort = s.key === key ? { key, desc: !s.desc } : { key, desc: !TEXT_COLS.has(key) };
+    if (cats.some((c) => c.key === key) && teamRank.cat !== key) { teamRank.cat = key; teamRank.sort = { key, desc: true }; saveRankPrefs(); }
+    renderTeam();
+  };
+  const sortVal = (p, key) => key === 'rank' ? rankOf.get(p.id) : key === 'name' ? p.name : key === 'boat' ? p.boats[0]?.boat || '' : p[key];
+  const { key: sk, desc } = teamRank.sort;
+  const table = [...ranked].sort((a, b) => {
+    const x = sortVal(a, sk), y = sortVal(b, sk);
+    if (sk === 'boat' && !x !== !y) return !x ? 1 : -1;
+    const c = typeof x === 'string' ? x.localeCompare(y) : (x ?? 0) - (y ?? 0);
+    return (desc ? -c : c) || rankOf.get(a.id) - rankOf.get(b.id);
+  });
+  const head = (key, label, opts = {}) => el('th', { ...opts, class: [opts.class, 'sortable', sk === key && 'on'].filter(Boolean).join(' '),
+    title: opts.title || `Sort by ${label}`, 'aria-sort': sk === key ? (desc ? 'descending' : 'ascending') : null, onclick: () => sortBy(key) },
+    label, sk === key ? (desc ? ' ▼' : ' ▲') : null);
+  const th = (c) => head(c.key, c.label, { class: 'n' + (c === cat ? ' on' : ''), title: `Sort and rank by ${c.label}` });
   const td = (c, p) => el('td', { class: 'n' + (c === cat ? ' on' : '') }, rankValue(c, p[c.key]));
   const totals = Object.fromEntries(cats.map((c) => [c.key, d.people.reduce((s, p) => s + p[c.key], 0)]));
+  const boatTitle = (p) => p.boats.length ? p.boats.map((b) => `${b.boat}: ${plural(b.accounts, 'account')}`).join('\n') : `Not the Account Lead SE on any account with a ${f.boat}`;
+  const boatCell = (p) => el('td', { title: boatTitle(p) }, p.boats[0]?.boat || '—', p.boats.length > 1 ? el('span', { class: 'sub', style: 'margin:0' }, ` +${p.boats.length - 1}`) : null);
   document.getElementById('teamBody').replaceChildren(
     el('div', { class: 'tiles six' }, cats.map(tile)),
-    el('section', {}, el('h3', {}, `Ranked by ${cat.label}`), d.people.length ? bars : el('div', { class: 'empty' }, 'No team members found.')),
-    el('section', {}, el('h3', {}, 'Everyone'),
+    el('section', {}, el('h3', {}, `Ranked by ${cat.label}`), d.people.length ? bars : el('div', { class: 'empty' }, all ? 'No one found.' : 'No team members found.')),
+    el('section', {}, el('h3', {}, 'Everyone', el('span', { class: 'spacer' }),
+      el('button', { disabled: !d.people.length, onclick: () => exportTeam(d, cats, table, rankOf, all) }, 'Export to Excel')),
       el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
-        el('thead', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'Person'), cats.map(th),
-          el('th', { class: 'n' }, dsMeta?.labelPlural || 'Deal Supports'), d.sales ? el('th', { class: 'n' }, 'Deals won') : null)),
-        el('tbody', {}, ranked.map((p) => el('tr', { class: 'nolink' + (p.me ? ' me' : '') },
-          el('td', {}, rankOf.get(p.id)), el('td', {}, p.me ? `${p.name} (you)` : p.name), cats.map((c) => td(c, p)),
+        el('thead', {}, el('tr', {}, head('rank', '#', { title: `Sort by rank (${cat.label})` }), head('name', 'Person'),
+          f.boat ? head('boat', 'BOAT', { title: 'Sort by BOAT (from the accounts each is the Account Lead SE on)' }) : null, cats.map(th),
+          head('activities', dsMeta?.labelPlural || 'Deal Supports', { class: 'n' }), d.sales ? head('won', 'Deals won', { class: 'n' }) : null)),
+        el('tbody', {}, table.map((p) => el('tr', { class: 'nolink' + (p.me ? ' me' : '') },
+          el('td', {}, rankOf.get(p.id)), el('td', {}, p.me ? `${p.name} (you)` : p.name), f.boat ? boatCell(p) : null, cats.map((c) => td(c, p)),
           el('td', { class: 'n' }, p.activities.toLocaleString()), d.sales ? el('td', { class: 'n' }, p.won.toLocaleString()) : null))),
-        el('tfoot', {}, el('tr', {}, el('td', {}), el('td', {}, 'Team total'), cats.map((c) => el('td', { class: 'n' }, rankValue(c, totals[c.key]))),
+        el('tfoot', {}, el('tr', {}, el('td', {}), el('td', {}, all ? 'Total' : 'Team total'), f.boat ? el('td', {}) : null, cats.map((c) => el('td', { class: 'n' }, rankValue(c, totals[c.key]))),
           el('td', { class: 'n' }, d.people.reduce((s, p) => s + p.activities, 0).toLocaleString()),
           d.sales ? el('td', { class: 'n' }, d.people.reduce((s, p) => s + p.won, 0).toLocaleString()) : null))))),
   );
+}
+
+// The Everyone table as a spreadsheet, in the table's order.
+function exportTeam(d, cats, ranked, rankOf, all) {
+  const cols = [
+    { header: 'Rank', type: 'number', width: 7 }, { header: 'Person', width: 26 },
+    ...(d.fields.boat ? [{ header: 'BOAT', width: 30 }, { header: 'Other BOATs', width: 40 }] : []),
+    ...cats.map((c) => ({ header: c.kind === '$' ? c.label : `${c.label} (hours)`, type: c.kind === '$' ? 'money' : 'number', width: 16, sum: true })),
+    { header: dsMeta?.labelPlural || 'Deal Supports', type: 'number', width: 14, sum: true },
+    ...(d.sales ? [{ header: 'Deals won', type: 'number', width: 11, sum: true }] : []),
+  ];
+  const rows = ranked.map((p) => [rankOf.get(p.id), p.name,
+    ...(d.fields.boat ? [p.boats[0]?.boat || '', p.boats.slice(1).map((b) => b.boat).join('; ')] : []),
+    ...cats.map((c) => p[c.key]), p.activities, ...(d.sales ? [p.won] : [])]);
+  downloadXlsx(`SF Desk - ${all ? 'Everyone' : 'My Team'} - ${d.label} - ${todayStr()}.xlsx`, all ? 'Everyone' : 'My Team', cols, rows, { totals: true })
+    .catch((e) => toast("Couldn't build the Excel file: " + e.message, 'err'));
 }
 
 // ---------- My Calendar ----------

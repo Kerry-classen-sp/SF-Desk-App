@@ -26,7 +26,10 @@ calendar permission and troubleshooting.
 - **My Team** ranks you and your team (your Salesforce default team, else the people who share your manager)
   for This year, This quarter, This month, This week or a custom date range. Click a tile or column to rank by
   Deal Support Internal, Customer Facing, Travel or Total time (by Assigned SE and Date of Activity), or by
-  Sales in ACV or TCV (opportunities won in the period where each is the Lead SE). Year and quarter are fiscal
+  Sales in ACV or TCV (opportunities won in the period where each is the Lead SE). Year and quarter are fiscal.
+  **Show All** ranks everyone in the records you can see instead. The Everyone table shows each person's
+  SailPoint BOAT (the one with most of the accounts they're Account Lead SE on; hover for the others) and
+  exports to Excel
 - **Export to Excel** on the Pipeline deal list and the My Time activity list downloads the rows shown (after
   filters, hidden records and any clicked bar, tile or opportunity) as an .xlsx with typed dates, amounts and
   hours, a total row and a link to each record

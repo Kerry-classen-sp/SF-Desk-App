@@ -1609,6 +1609,7 @@ api.get('/my-time', wrap(async (req, res) => {
 // Me and my team side by side for one date range: Deal Support hours by kind (Internal, Customer Facing,
 // Travel, Total), counted for the person in the Assigned SE field and dated by Date of Activity, and the
 // ACV and TCV of the opportunities won (closed in the range) where each is the Lead SE.
+// all=1: everyone in the records this user can see, instead of me and my team.
 const addDaysIso = (s, n) => new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10) + n)).toISOString().slice(0, 10);
 const TEAM_HOURS = [
   ['internal', (f) => f.name === 'Prep_Time__c' || /internal time|prep(aration)? time/i.test(f.label)],
@@ -1619,24 +1620,32 @@ const TEAM_HOURS = [
 api.get('/team-ranking', wrap(async (req, res) => {
   const from = isoDate(req.query.from), to = isoDate(req.query.to);
   if (from > to) throw new HttpError(400, 'The start date is after the end date.');
+  const all = req.query.all === '1';
   const me = sfId(req.session.sf.user.id);
-  const team = await myTeam(req).catch(() => ({ source: null, members: [] }));
+  const team = all ? { source: 'all', members: [] } : await myTeam(req).catch(() => ({ source: null, members: [] }));
   const people = [{ id: me, name: req.session.sf.user.name || 'You', me: true }, ...team.members.filter((m) => m.id !== me)];
   const ids = people.map((p) => `'${sfId(p.id)}'`).join(', ');
+  const whoIn = (field) => all ? `${field} != null` : `${field} IN (${ids})`;
   const ds = await dealSupportMeta(req), tm = await timeMeta(req);
   const who = tm.userFields[0], date = tm.dateFields[0];
   const hours = Object.fromEntries(TEAM_HOURS.map(([key, test]) => [key, ds.fields.find((f) => f.timeEntry && test(f)) || null]));
   const total = tm.hoursFields.find((f) => /total/i.test(f.label) && f.unit !== 'text') || null;
   const toHours = (f, v) => (Number(v) || 0) / (/minute|\bmins?\b/i.test(`${f.label} ${f.name}`) || f.unit === 'minutes' ? 60 : 1);
   const rows = new Map(people.map((p) => [p.id, { ...p, activities: 0, internal: 0, customer: 0, travel: 0, total: 0, won: 0, acv: 0, tcv: 0 }]));
-  const row = (id) => rows.get(id) || [...rows.values()].find((r) => r.id.slice(0, 15) === String(id || '').slice(0, 15));
+  const row = (id) => {
+    const found = rows.get(id) || [...rows.values()].find((r) => r.id.slice(0, 15) === String(id || '').slice(0, 15));
+    if (found || !all || !id) return found;
+    const added = { id, name: '', me: false, activities: 0, internal: 0, customer: 0, travel: 0, total: 0, won: 0, acv: 0, tcv: 0 };
+    rows.set(id, added);
+    return added;
+  };
 
   // Deal Support hours, summed per person in Salesforce.
   const range = (f) => f.type === 'datetime' ? `${f.name} >= ${from}T00:00:00Z AND ${f.name} < ${addDaysIso(to, 1)}T00:00:00Z`
     : `${f.name} >= ${from} AND ${f.name} <= ${to}`;
   const sums = [...Object.entries(hours).filter(([, f]) => f).map(([k, f]) => `SUM(${f.name}) ${k}`), ...(total ? [`SUM(${total.name}) total`] : [])];
   const dsRecs = await query(req, `SELECT ${who.name} who, COUNT(Id) n${sums.length ? ', ' + sums.join(', ') : ''} FROM ${ds.object} ` +
-    `WHERE ${who.name} IN (${ids}) AND ${range(date)} GROUP BY ${who.name}`);
+    `WHERE ${whoIn(who.name)} AND ${range(date)} GROUP BY ${who.name}`);
   for (const r of dsRecs) {
     const p = row(r.who);
     if (!p) continue;
@@ -1650,7 +1659,7 @@ api.get('/team-ranking', wrap(async (req, res) => {
   let sales = null;
   if (lse?.isUser) {
     const run = (cols) => query(req, `SELECT ${lse.name} who, COUNT(Id) n${cols.map((c) => `, SUM(${c}) ${c === PIPELINE_VALUES[0] ? 'acv' : 'tcv'}`).join('')} ` +
-      `FROM Opportunity WHERE IsWon = true AND ${lse.name} IN (${ids}) AND CloseDate >= ${from} AND CloseDate <= ${to} GROUP BY ${lse.name}`);
+      `FROM Opportunity WHERE IsWon = true AND ${whoIn(lse.name)} AND CloseDate >= ${from} AND CloseDate <= ${to} GROUP BY ${lse.name}`);
     let recs;
     try { recs = await run(PIPELINE_VALUES); sales = { acv: true, tcv: true }; } catch (err) {
       if (err.status !== 400) throw err;
@@ -1665,10 +1674,36 @@ api.get('/team-ranking', wrap(async (req, res) => {
     }
   }
 
+  const unnamed = [...rows.values()].filter((p) => !p.name);
+  for (const part of chunks(unnamed.map((p) => sfId(p.id)), IN_CHUNK)) {
+    for (const u of await query(req, `SELECT Id, Name FROM User WHERE Id IN (${part.map((id) => `'${id}'`).join(', ')})`, 5000)) {
+      const p = row(u.Id);
+      if (p) p.name = u.Name;
+    }
+  }
+  for (const p of unnamed) p.name ||= 'Unknown user';
+
+  // Each person's SailPoint BOATs: those of the accounts they're Account Lead SE on, most accounts first.
+  const af = await accountFilters(req).catch(() => null), acctLse = af?.se;
+  const boatF = af?.boat && !['multipicklist', 'textarea'].includes(af.boat.type) ? af.boat : null;
+  for (const p of rows.values()) p.boats = [];
+  if (boatF && acctLse?.isUser) {
+    try {
+      for (const part of chunks([...rows.keys()].map(sfId), IN_CHUNK)) {
+        const recs = await query(req, `SELECT ${acctLse.name} who, ${boatF.name} b, COUNT(Id) n FROM Account ` +
+          `WHERE ${acctLse.name} IN (${part.map((id) => `'${id}'`).join(', ')}) AND ${boatF.name} != null GROUP BY ${acctLse.name}, ${boatF.name}`, 5000);
+        for (const r of recs) row(r.who)?.boats.push({ boat: String(r.b), accounts: r.n || 0 });
+      }
+      for (const p of rows.values()) p.boats.sort((a, b) => b.accounts - a.accounts || a.boat.localeCompare(b.boat));
+    } catch (err) {
+      if (err.status !== 400) throw err;
+    }
+  }
+
   res.json({
     from, to, teamSource: team.source,
     fields: {
-      person: who.label, date: date.label, leadSe: lse?.isUser ? 'Lead SE' : null,
+      person: who.label, date: date.label, leadSe: lse?.isUser ? 'Lead SE' : null, boat: boatF && acctLse?.isUser ? boatF.label : null,
       internal: hours.internal?.label || null, customer: hours.customer?.label || null, travel: hours.travel?.label || null,
       total: total?.label || 'Total (Internal + Customer Facing + Travel)',
     },
