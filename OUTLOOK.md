@@ -16,6 +16,13 @@ category list the first time). Everything runs through SF Desk on your Mac, so S
 button to work. It only reads the meeting you click it on, and nothing is saved to Salesforce until you click
 **Create Deal Support**; in Outlook it only ever adds that category.
 
+The add-in can only mark the meeting it's open on. SF Desk can also mark every meeting that has a Deal Support
+without opening each one, but that's off for now: it needs IT to approve "Microsoft Graph Command Line Tools"
+for Calendars.ReadWrite. Once they have, add `SF_DESK_OUTLOOK_MARK=1` to `.env` (for the Mac app,
+`~/Library/Application Support/SF Desk/.env`) and restart SF Desk. Then click
+**Mark in Outlook** on the **Time Entry** tab and sign in to Microsoft 365 once (allow SF Desk to read and update
+your calendar). After that, each week you open in Time Entry has its covered meetings marked.
+
 The add-in signs in with your Salesforce CLI login (Option A in the README); with that, it connects by itself
 the first time you open it. It doesn't work with the OAuth app login (Option B).
 
