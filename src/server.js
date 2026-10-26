@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { isMac, macCalendar } from './macCalendar.js';
 import { isWindows, windowsCalendar } from './windowsCalendar.js';
-import { graphCalendar } from './graphCalendar.js';
+import { graphCalendar, MARK_ENABLED } from './graphCalendar.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -83,8 +83,9 @@ const store = openDb(DB_FILE);
 // This computer's own calendar for Time Entry: the Mac's Internet Accounts, or classic Outlook on Windows.
 const localCal = isMac ? macCalendar(ROOT, path.dirname(DB_FILE)) : isWindows ? windowsCalendar(ROOT) : null;
 const LOCAL_CAL_NAME = isWindows ? 'Outlook (classic)' : 'Mac calendar';
-// Microsoft 365 calendars through Microsoft Graph, for the new Outlook (Windows; SF_DESK_GRAPH=1 elsewhere).
-const graphCal = isWindows || process.env.SF_DESK_GRAPH ? graphCalendar(path.dirname(DB_FILE)) : null;
+// Microsoft 365 calendars through Microsoft Graph, for the new Outlook (Windows; SF_DESK_GRAPH=1 elsewhere), and
+// for marking meetings that have a Deal Support in Outlook (also on the Mac, once SF_DESK_OUTLOOK_MARK=1).
+const graphCal = isWindows || (isMac && MARK_ENABLED) || process.env.SF_DESK_GRAPH ? graphCalendar(path.dirname(DB_FILE)) : null;
 const readerFor = (source) => (source.startsWith('graph:') ? graphCal : localCal);
 
 const app = express();
@@ -1339,8 +1340,8 @@ api.delete('/deal-supports/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Move My Time: my Deal Supports (Assigned SE = me) on a closed opportunity, and the open opportunities on
-// the same account they can be moved to. Only the opportunity lookup changes; the account lookup stays.
+// Move My Time: my Deal Supports (Assigned SE = me) on an opportunity (open or closed), and the other open
+// opportunities on the same account they can be moved to. Only the opportunity lookup changes; the account lookup stays.
 async function myTimeOn(req, oppId) {
   const ds = await dealSupportMeta(req);
   const tm = await timeMeta(req);
@@ -1402,14 +1403,17 @@ api.post('/deal-supports/move', wrap(async (req, res) => {
 // The page leaves out hidden records and does the totals.
 // The Deals tab's ACV / TCV choice totals these.
 const PIPELINE_VALUES = ['SP_SaaS_Total_ACV__c', 'SaaS_TCV__c'];
-const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Amount', ...PIPELINE_VALUES, 'CloseDate',
+const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', 'Type', 'Amount', ...PIPELINE_VALUES, 'CloseDate',
   'Probability', 'ForecastCategoryName', 'IsClosed', 'Owner.Name', 'Account.OwnerId', 'Account.Owner.Name', 'LastModifiedDate'];
+// Deals and My Team leave out renewals (exactly this Type; "Renewal with Upsell" stays). Blank Types stay too.
+const SKIP_TYPE = 'Renewal';
+const NOT_SKIPPED = `Type != '${SKIP_TYPE}'`;
 
 api.get('/pipeline', wrap(async (req, res) => {
   const known = await knownLeadSeFields(req);
   const af = await accountFilters(req);
   const filter = await accountFilter(req, af, 'Account.');
-  const where = ['IsClosed = false', ...filter.soql];
+  const where = ['IsClosed = false', NOT_SKIPPED, ...filter.soql];
   const run = (fields) => query(req, `SELECT ${withField(fields, known.Opportunity).join(', ')} FROM Opportunity ` +
     `WHERE ${where.join(' AND ')} ORDER BY CloseDate ASC`, 5000);
   res.json(await withCacheFallback(req, res, async () => {
@@ -1425,7 +1429,7 @@ api.get('/pipeline', wrap(async (req, res) => {
     return { opportunities };
   }, () => {
     const saved = store.listOpenOpportunities(orgOf(req), { groups: filter.groups, match: filter.match });
-    return { data: { opportunities: saved.records }, syncedAt: saved.syncedAt };
+    return { data: { opportunities: saved.records.filter((o) => o.Type !== SKIP_TYPE) }, syncedAt: saved.syncedAt };
   }));
 }));
 
@@ -1659,7 +1663,7 @@ api.get('/team-ranking', wrap(async (req, res) => {
   let sales = null;
   if (lse?.isUser) {
     const run = (cols) => query(req, `SELECT ${lse.name} who, COUNT(Id) n${cols.map((c) => `, SUM(${c}) ${c === PIPELINE_VALUES[0] ? 'acv' : 'tcv'}`).join('')} ` +
-      `FROM Opportunity WHERE IsWon = true AND ${whoIn(lse.name)} AND CloseDate >= ${from} AND CloseDate <= ${to} GROUP BY ${lse.name}`);
+      `FROM Opportunity WHERE IsWon = true AND ${NOT_SKIPPED} AND ${whoIn(lse.name)} AND CloseDate >= ${from} AND CloseDate <= ${to} GROUP BY ${lse.name}`);
     let recs;
     try { recs = await run(PIPELINE_VALUES); sales = { acv: true, tcv: true }; } catch (err) {
       if (err.status !== 400) throw err;
@@ -2201,7 +2205,7 @@ api.get('/calendar/sources', wrap(async (req, res) => {
   const info = { local: !!localCal || !!graphCal, mac: isMac, platform: process.platform, name: LOCAL_CAL_NAME, calendars: [] };
   if (graphCal) {
     const st = graphCal.status();
-    info.graph = { ...st, calendars: [] };
+    info.graph = { ...st, canMark: MARK_ENABLED, calendars: [] };
     if (st.signedIn) {
       try { info.graph.calendars = await graphCal.calendars(); } catch (err) { info.graph.error = err.message; }
     }
@@ -2219,6 +2223,19 @@ api.post('/graph/signin', wrap(async (req, res) => {
 }));
 api.get('/graph/status', (req, res) => res.json(graphCal ? graphCal.status() : { signedIn: false }));
 api.post('/graph/signout', (req, res) => { graphCal?.signOut(); res.json({ ok: true }); });
+
+// Mark meetings that have a Deal Support with the Deal Support category in Outlook (Microsoft 365), as the
+// add-in does for the meeting open in it. events: [{ start, allDay, date, subject }] from one range.
+api.post('/graph/mark', wrap(async (req, res) => {
+  if (!graphCal || !MARK_ENABLED) throw new HttpError(404, 'Marking meetings in Outlook isn\'t turned on (SF_DESK_OUTLOOK_MARK).');
+  const from = isoDateTime(req.body?.from), to = isoDateTime(req.body?.to);
+  const name = String(req.body?.category || 'Deal Support').trim().slice(0, 255) || 'Deal Support';
+  const events = (Array.isArray(req.body?.events) ? req.body.events : []).slice(0, 500).map((e) => ({
+    start: String(e?.start || '').replace(/\+0000$/, 'Z'), allDay: !!e?.allDay,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(e?.date) ? e.date : '', subject: String(e?.subject || '').slice(0, 500),
+  }));
+  res.json(events.length ? await graphCal.markCategory(from, to, events, name) : { marked: 0, already: 0, notFound: 0, failed: 0 });
+}));
 
 // Calendar events for a range, each marked as covered by a Deal Support or not. source is
 // "salesforce" (default) or a calendar Id from this computer (Mac or Outlook). from/to: the range's start and end as UTC instants;

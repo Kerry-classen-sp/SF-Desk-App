@@ -1731,9 +1731,9 @@ function renderDealSupports(o, records) {
     close,
   })) }, `New ${dsMeta.label}`) : null;
 
-  // Move My Time: on a closed opportunity, move my Deal Supports to an open one on the same account.
+  // Move My Time: move my Deal Supports on this opportunity (open or closed) to another open one on the same account.
   const moveBox = el('div');
-  const move = o.IsClosed && dsMeta.canUpdate && dsMeta.oppUpdateable ? el('button', { onclick: () => {
+  const move = dsMeta.canUpdate && dsMeta.oppUpdateable ? el('button', { onclick: () => {
     move.hidden = true;
     moveMyTime(o, moveBox, () => { move.hidden = false; moveBox.replaceChildren(); });
   } }, 'Move My Time') : null;
@@ -1762,7 +1762,7 @@ async function moveMyTime(o, box, close) {
   const cancel = el('button', { onclick: close }, 'Cancel');
   const say = (...kids) => box.replaceChildren(el('section', {}, el('h3', {}, 'Move My Time'), ...kids, el('div', { class: 'form-actions' }, cancel)));
   if (!d.records.length) return say(el('div', { class: 'empty' }, `You have no ${d.labelPlural.toLowerCase()} on this opportunity (${d.mineLabel} = you).`));
-  if (!d.targets.length) return say(el('div', { class: 'empty' }, `${d.from.accountName || 'This account'} has no open opportunities to move your time to.`));
+  if (!d.targets.length) return say(el('div', { class: 'empty' }, `${d.from.accountName || 'This account'} has no ${d.from.IsClosed ? '' : 'other '}open opportunities to move your time to.`));
   const pick = el('select', { 'aria-label': 'Open opportunity' }, el('option', { value: '' }, 'Pick an open opportunity…'),
     d.targets.map((t) => el('option', { value: t.Id }, [t.Name, t.StageName, t.CloseDate && `closes ${t.CloseDate}`].filter(Boolean).join(' · '))));
   const go = el('button', { class: 'primary', disabled: true }, 'Move');
@@ -1787,7 +1787,7 @@ async function moveMyTime(o, box, close) {
     el('h3', {}, 'Move My Time'),
     el('div', { class: 'sub' }, `${d.records.length} ${plural} of yours on this opportunity, ${hrs} hours in all. ` +
       (d.others ? `${d.others} belonging to other people ${d.others === 1 ? 'stays' : 'stay'} here. ` : '') +
-      `Pick an open opportunity on ${d.from.accountName || 'this account'} to move them to.`),
+      `Pick ${d.from.IsClosed ? 'an' : 'another'} open opportunity on ${d.from.accountName || 'this account'} to move them to.`),
     el('label', { style: 'display:block;margin-top:8px' }, pick),
     el('div', { class: 'form-actions' }, cancel, go),
   ));
@@ -3117,11 +3117,14 @@ const RANK_CATS = [
   { key: 'acv', label: 'Sales (ACV)', kind: '$' },
   { key: 'tcv', label: 'Sales (TCV)', kind: '$' },
 ];
-const RANK_PERIODS = [['year', 'This year'], ['quarter', 'This quarter'], ['month', 'This month'], ['week', 'This week'], ['custom', 'Custom']];
+const RANK_PERIODS = [['year', 'Year'], ['quarter', 'Quarter'], ['month', 'Month'], ['week', 'Week'], ['custom', 'Custom']];
 const RANK_PREFS = 'sfdesk.teamRank';
 const teamRank = { period: 'quarter', cat: 'total', from: '', to: '', data: null, loads: 0 };
 try { Object.assign(teamRank, JSON.parse(localStorage.getItem(RANK_PREFS)) || {}); teamRank.data = null; teamRank.loads = 0; } catch {}
 teamRank.all = false;
+teamRank.period = 'quarter';
+// A day in the period shown: today's period until Previous or Next moves it.
+teamRank.anchor = null;
 // The Everyone table's order: a column key ('rank', 'name', 'boat', a category, 'activities', 'won') and direction.
 teamRank.sort = { key: 'rank', desc: false };
 const saveRankPrefs = () => {
@@ -3131,8 +3134,16 @@ const saveRankPrefs = () => {
 const rankValue = (cat, n) => cat.kind === '$' ? money(n) : fmtH(n);
 const ymdOf = (y, m, d) => ymd(new Date(y, m, d, 12));
 
+// Move the period shown back (-1) or forward (1) by one year, quarter, month or week.
+function shiftRank(n) {
+  const a = teamRank.anchor || todayStr(), y = +a.slice(0, 4), m = +a.slice(5, 7) - 1;
+  const months = { year: 12, quarter: 3, month: 1 }[teamRank.period];
+  teamRank.anchor = months ? ymdOf(y, m + n * months, 15) : addDays(a, 7 * n);
+  showTeam();
+}
+
 // The period's first and last day, and how to describe it.
-function rankRange(today = todayStr()) {
+function rankRange(today = teamRank.anchor || todayStr()) {
   const f = fiscal(today), y = +today.slice(0, 4), m = +today.slice(5, 7) - 1;
   if (teamRank.period === 'year') return { from: `${f.fy - 1}-02-01`, to: `${f.fy}-01-31`, label: `${fyName(f.fy)} (Feb ${f.fy - 1} – Jan ${f.fy})` };
   if (teamRank.period === 'quarter') {
@@ -3149,8 +3160,9 @@ function showTeam() {
   setNav('team');
   current = null;
   const seg = el('span', { class: 'seg', role: 'group', 'aria-label': 'Period' }, RANK_PERIODS.map(([v, t]) =>
-    el('button', { class: teamRank.period === v ? 'on' : null, onclick: () => {
+    el('button', { class: teamRank.period === v ? 'on' : null, title: v === 'custom' ? null : `The current ${t.toLowerCase()}`, onclick: () => {
       teamRank.period = v;
+      teamRank.anchor = null;
       if (v === 'custom' && !teamRank.from) { const r = rankRange(); teamRank.from = r.from; teamRank.to = r.to; }
       saveRankPrefs();
       showTeam();
@@ -3165,10 +3177,15 @@ function showTeam() {
     loadTeam();
   } }, 'Apply');
   const custom = teamRank.period === 'custom' ? el('span', { class: 'team-range' }, fromIn, 'to', toIn, apply) : null;
+  const unit = RANK_PERIODS.find(([v]) => v === teamRank.period)?.[1].toLowerCase();
+  const nav = teamRank.period === 'custom' ? null : el('span', { class: 'fynav' },
+    el('button', { onclick: () => shiftRank(-1), title: `Previous ${unit}`, 'aria-label': `Previous ${unit}` }, '‹'),
+    el('span', {}, rankRange().label),
+    el('button', { onclick: () => shiftRank(1), title: `Next ${unit}`, 'aria-label': `Next ${unit}` }, '›'));
   document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
     el('div', { class: 'dash-head' },
       el('h2', {}, 'My Team'),
-      el('span', { class: 'picks' }, seg, custom),
+      el('span', { class: 'picks' }, seg, nav, custom),
       el('label', { class: 'check', title: 'Rank everyone in the records you can see, not only your team' },
         el('input', { type: 'checkbox', checked: teamRank.all, onchange: (e) => { teamRank.all = e.target.checked; loadTeam(); } }), 'Show All'),
       el('span', { class: 'spacer', style: 'flex:1' }),
@@ -3317,6 +3334,8 @@ function showCalendar() {
           el('span', {}, el('i', { style: 'background:var(--open);border-color:var(--open-line)' }), 'No Deal Support'),
           el('span', {}, el('i', { style: 'background:var(--skip);border-color:var(--skip-line)' }), 'Not needed')),
         el('span', { class: 'spacer', style: 'flex:1' }),
+        el('button', { id: 'calMark', hidden: true, onclick: () => markOutlook(false),
+          title: 'Add the Deal Support category in Outlook to this week\'s meetings that have one' }, 'Mark in Outlook'),
         el('button', { onclick: () => loadSources().then(loadCalendar) }, 'Reload'),
       ),
       el('div', { class: 'sub', id: 'calSub' }, 'Loading…'),
@@ -3347,6 +3366,8 @@ async function loadSources() {
       (exchange.find((c) => /^calendar$/i.test(c.title)) || exchange[0])?.id || 'salesforce';
   if (!cal.source || !calendars.some((c) => c.id === cal.source) && cal.source !== 'salesforce' || (wasRefused && !error)) cal.source = pick;
   cal.sourceNote = [error, graph?.error].filter(Boolean).join(' ');
+  const mark = document.getElementById('calMark');
+  if (mark) mark.hidden = !graph?.canMark;
   const select = document.getElementById('calSource');
   if (!select) return;
   const groups = new Map();
@@ -3363,7 +3384,7 @@ async function loadSources() {
       el('option', { disabled: true, title: error || '' }, error ? `Not available: ${error.length > 90 ? error.slice(0, 90) + '…' : error}` : 'No calendars found in classic Outlook')) : null,
     graph ? el('optgroup', { label: 'Microsoft 365' },
       graph.signedIn ? el('option', { value: 'graph:signout' }, `Sign out of Microsoft 365${graph.account ? ` (${graph.account})` : ''}`)
-        : el('option', { value: 'graph:signin' }, 'Sign in to read your Microsoft 365 calendar…')) : null);
+        : el('option', { value: 'graph:signin' }, 'Sign in to Microsoft 365…')) : null);
   select.value = cal.source;
   select.hidden = !(cal.sources.local ?? cal.sources.mac);
   select.onchange = async () => {
@@ -3384,18 +3405,21 @@ async function loadSources() {
 }
 
 // Microsoft 365 sign-in with a device code: show the code and Microsoft's page, then wait for it to finish.
-async function graphSignIn() {
+// keepSource: stay on the calendar shown (signing in to mark meetings in Outlook), rather than switching to Microsoft 365's.
+async function graphSignIn({ keepSource = false } = {}) {
   const sub = document.getElementById('calSub');
   let info;
   try { info = await api('/graph/signin', { method: 'POST' }); } catch (e) { toast(e.message, 'err'); return; }
   const ticket = cal.graphTicket = {};
   const status = el('span', {}, ' Waiting for you to finish signing in…');
   sub.replaceChildren(el('div', { class: 'graph-signin', style: 'padding:10px 12px;border:1px solid var(--line, #ccc);border-radius:8px;margin:6px 0;line-height:1.6' },
-    'To read your Microsoft 365 calendar, open ', el('a', { href: info.verificationUri, target: '_blank', rel: 'noopener' }, info.verificationUri),
+    'To use your Microsoft 365 calendar, open ', el('a', { href: info.verificationUri, target: '_blank', rel: 'noopener' }, info.verificationUri),
     ' and enter the code ', el('b', { style: 'font-size:1.15em;letter-spacing:.08em;user-select:all' }, info.userCode), ' ',
     el('button', { onclick: () => navigator.clipboard?.writeText(info.userCode).then(() => toast('Code copied')) }, 'Copy code'), ' ',
     el('button', { onclick: () => { cal.graphTicket = null; loadCalendar(); } }, 'Cancel'),
-    el('br'), 'Sign in with your work account and accept reading your calendar.', status));
+    el('br'), cal.sources?.graph?.canMark
+      ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
+      : 'Sign in with your work account and accept reading your calendar.', status));
   window.open(info.verificationUri, '_blank', 'noopener');
   while (cal.graphTicket === ticket) {
     await new Promise((r) => setTimeout(r, 3000));
@@ -3404,8 +3428,11 @@ async function graphSignIn() {
     if (st.signedIn) {
       cal.graphTicket = null;
       toast(`Signed in to Microsoft 365${st.account ? ` as ${st.account}` : ''}`);
-      try { localStorage.removeItem(CAL_SOURCE); } catch {}
-      cal.sources = null; cal.source = null;
+      if (!keepSource) {
+        try { localStorage.removeItem(CAL_SOURCE); } catch {}
+        cal.source = null;
+      }
+      cal.sources = null;
       return loadSources().then(loadCalendar);
     }
     if (!st.pending && st.error) {
@@ -3414,6 +3441,39 @@ async function graphSignIn() {
       sub.replaceChildren(el('span', { style: 'color:var(--err, #b00020)' }, `Microsoft 365 sign-in didn't work: ${st.error}`));
       return;
     }
+  }
+}
+
+// Meetings with a Deal Support get the Deal Support category in Outlook (Microsoft 365), as the add-in does for
+// the meeting open in it, so they show as linked without opening each one. Runs after each week loads once
+// signed in with permission to update the calendar; the button signs in first. Meetings sent once this
+// session aren't sent again automatically.
+const outlookSent = new Set();
+async function markOutlook(auto) {
+  const g = cal.sources?.graph;
+  if (!g?.canMark || !cal.data || !dsMeta) return;
+  if (!g.canWrite) {
+    if (auto) return;
+    if (g.signedIn && !confirm('To mark meetings in Outlook, sign in to Microsoft 365 again and allow SF Desk to update your calendar. ' +
+      `It only adds the "${dsMeta.label}" category. Sign in now?`)) return;
+    return graphSignIn({ keepSource: true });
+  }
+  const key = (e) => `${e.allDay ? e.date : e.start}|${e.subject}`;
+  const events = cal.data.events.filter((e) => e.supports.length && (!auto || !outlookSent.has(key(e))));
+  if (!events.length) { if (!auto) toast(`No meetings with a ${dsMeta.label} this week.`); return; }
+  const week = cal.week;
+  try {
+    const r = await api('/graph/mark', { method: 'POST', body: {
+      from: localDate(week).toISOString(), to: localDate(addDays(week, 7)).toISOString(), category: dsMeta.label,
+      events: events.map(({ start, allDay, date, subject }) => ({ start, allDay, date, subject })) } });
+    for (const e of events) outlookSent.add(key(e));
+    const parts = [r.marked ? `Marked ${plural(r.marked, 'meeting')} in Outlook` : null,
+      !auto && r.already ? `${plural(r.already, 'meeting')} already marked` : null,
+      !auto && r.notFound ? `${r.notFound} not found in your Outlook calendar` : null].filter(Boolean);
+    if (r.failed) toast(`Couldn't mark ${plural(r.failed, 'meeting')} in Outlook: ${r.error || 'Microsoft 365 refused'}`, 'err');
+    else if (parts.length) toast(parts.join(' · '));
+  } catch (e) {
+    if (!auto) toast(e.message, 'err');
   }
 }
 
@@ -3431,6 +3491,7 @@ async function loadCalendar() {
     if (ticket !== cal.loading || !document.getElementById('calBody')) return;
     cal.data = data;
     renderCalendar();
+    markOutlook(true);
   } catch (e) {
     if (ticket !== cal.loading) return;
     // This computer's calendar refused (no permission yet) or failed: say why and show Salesforce events instead.
