@@ -1,5 +1,18 @@
 # SF Desk release notes
 
+## 1.6.0 (October 26, 2026)
+
+- **My Team periods:** the buttons are Year, Quarter, Month, Week and Custom, with ‹ and › to step back and
+  forward a period at a time (fiscal years and quarters). Clicking a period goes back to the current one, and
+  My Team opens on Quarter.
+- **Renewals left out:** Deals and My Team's sales leave out opportunities of type Renewal ("Renewal with
+  Upsell" still counts).
+- **Move My Time from open opportunities:** move your Deal Supports from any opportunity, open or closed, to
+  another open one on the same account.
+- **Marking meetings in Outlook (off for now):** SF Desk can add the Deal Support category to every covered
+  meeting through Microsoft 365, once IT approves calendar updates and `SF_DESK_OUTLOOK_MARK=1` is set (see
+  OUTLOOK.md).
+
 ## 1.5.1 (October 22, 2026)
 
 - **My Team, Show All:** tick it to rank everyone in the records you can see instead of only your team.
