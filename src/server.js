@@ -46,7 +46,7 @@ const ACCOUNT_FIELDS = ['Name', 'Type', 'Industry', 'Phone', 'Website', 'AnnualR
   'NumberOfEmployees', 'BillingCity', 'BillingState', 'Description'];
 const OPP_FIELDS = ['Name', 'StageName', 'Amount', 'CloseDate', 'Probability', 'NextStep', 'Description'];
 const ACCOUNT_READ = ['Id', ...ACCOUNT_FIELDS, 'OwnerId', 'Owner.Name', 'LastModifiedDate'];
-const OPP_READ = ['Id', 'AccountId', ...OPP_FIELDS, 'IsClosed', 'Owner.Name', 'LastModifiedDate'];
+const OPP_READ = ['Id', 'AccountId', ...OPP_FIELDS, 'IsClosed', 'Owner.Name', 'CreatedDate', 'LastModifiedDate'];
 
 // The "Deal Support" object attached to opportunities. Found by its label unless these name it:
 // SF_DEAL_SUPPORT_OBJECT is its API name (e.g. Deal_Support__c), SF_DEAL_SUPPORT_OPP_FIELD its
@@ -737,7 +737,7 @@ api.get('/accounts/:id', wrap(async (req, res) => {
     const [account] = await query(req, `SELECT ${fields.join(', ')} FROM Account WHERE Id = '${id}'`);
     if (!account) throw new HttpError(404, 'Account not found');
     const opportunities = await query(req,
-      `SELECT ${oppRead(known).join(', ')} FROM Opportunity WHERE AccountId = '${id}' ORDER BY IsClosed ASC, CloseDate ASC`);
+      `SELECT ${oppRead(known).join(', ')} FROM Opportunity WHERE AccountId = '${id}' ORDER BY CreatedDate DESC`);
     store.saveAccountDetail(orgOf(req), account, opportunities);
     return onlyMine({ account, opportunities });
   }, () => {
@@ -1093,10 +1093,18 @@ async function dealSupportMeta(req) {
   const roleValue = (name) => role?.picklist.find((v) => v.trim().toLowerCase() === name);
   const leadSe = roleValue('lead se'), sme = roleValue('sme');
   if (sme) role.defaultValue = sme;
+  // The hours shown and totalled on an opportunity's Deal Supports list: customer-facing time and the total
+  // (a formula, so usually not on the form).
+  const numeric = (f) => ['double', 'int', 'currency', 'percent'].includes(f.type);
+  const listHours = [
+    d.fields.find((f) => numeric(f) && (f.name === 'Meeting_Duration__c' || /customer facing time|meeting duration/i.test(f.label))),
+    d.fields.find((f) => numeric(f) && (f.name === 'Total_Time_Hours__c' || /^total time\b/i.test(f.label))),
+  ].filter(Boolean).map((f) => ({ name: f.name, label: f.label.replace(/\s*\(hours\)\s*$/i, '') }));
   const meta = {
     object: d.name,
     label: d.label,
     labelPlural: pluralLabel(d),
+    listHours,
     oppField: opp.name,
     roleDefault: role ? { field: role.name, value: sme || null, leadSe: leadSe || null, options: role.picklist } : null,
     canCreate: d.createable && opp.createable,
@@ -1143,7 +1151,7 @@ async function dealSupportLayout(req, object) {
 }
 
 const dsReadFields = (meta) =>
-  ['Id', 'CreatedDate', 'CreatedBy.Name', 'Owner.Name', ...meta.fields.map((f) => f.name)]
+  ['Id', 'CreatedDate', 'CreatedBy.Name', 'Owner.Name', ...meta.fields.map((f) => f.name), ...(meta.listHours || []).map((f) => f.name)]
     .filter((f, i, all) => all.indexOf(f) === i);
 
 async function listDealSupports(req, meta, oppId, extraWhere = '') {
@@ -2032,7 +2040,9 @@ function titleNamesAccount(title, account) {
   const words = nameWords(account);
   const core = words.filter((w) => !['inc', 'corp', 'corporation', 'company', 'llc', 'ltd', 'plc', 'the'].includes(w)).join(' ');
   if (core.length >= 2 && t.includes(` ${core} `)) return true;
-  return words.some((w) => !NAME_STOP.has(w) && (w.length >= 4 || w.includes('&')) && t.includes(` ${w} `));
+  // Otherwise only the name's leading word: "Koch" names Koch Capabilities, LLC, but "Capabilities" doesn't.
+  const lead = words.find((w) => !NAME_STOP.has(w));
+  return !!lead && (lead.length >= 4 || lead.includes('&')) && t.includes(` ${lead} `);
 }
 
 // Email domains that say nothing about the customer: my company's and free mail.
@@ -2263,9 +2273,10 @@ api.get('/calendar', wrap(async (req, res) => {
     // Covered: a Deal Support created from the event (or a copy of it), or one of mine on the same date
     // with the event's opportunity, the event's account, or the event's title as its name. Mac events
     // have no Salesforce links, so for those the account is found from the title and attendee domains.
-    const out = events.map((e) => {
+    const covers = coverEvents(req, events, marks, linkedById, mine);
+    const out = events.map((e, i) => {
       const { oppId, ...shown } = e;
-      return { ...shown, supports: coveringSupports(e, marks, linkedById, mine), skipped: [e.id, ...e.copies].some((id) => marks[id]?.skipped) };
+      return { ...shown, supports: covers[i], skipped: [e.id, ...e.copies].some((id) => marks[id]?.skipped) };
     });
     // My Deal Supports dated this week, for the list under the calendar, with the events each covers.
     const tm = await timeMeta(req).catch(() => null);
@@ -2283,25 +2294,53 @@ api.get('/calendar', wrap(async (req, res) => {
   }));
 }));
 
-// The Deal Supports covering an event: those created from it (or a copy of it) here, then mine on the same
-// date with the event's opportunity, account or title as their name. Events from outside Salesforce have no
-// links of their own unless borrowed, so for those the account is also found from the title and attendee domains.
-function coveringSupports(e, marks, linkedById, mine) {
+// The Deal Supports covering each event. A Deal Support covers one meeting only: the one it was created
+// from (or a copy of it), else the meeting that matches it best among mine on the same date: same opportunity,
+// then the event's title as its name, then the event's account, then (for events from outside Salesforce,
+// which have no links of their own unless borrowed) the account named in the title or by attendee domains.
+// A meeting with a Deal Support created from it gets no matched ones. Ties go to the earlier meeting.
+function coverEvents(req, events, marks, linkedById, mine) {
   const norm = (s) => cleanSubject(s).toLowerCase();
-  const supports = [];
-  for (const id of [e.id, ...e.copies]) {
-    const m = marks[id];
-    if (m?.dsId && linkedById.has(m.dsId) && !supports.some((x) => x.Id === m.dsId)) supports.push({ ...linkedById.get(m.dsId), how: 'created' });
+  const created = events.map((e) => {
+    const out = [];
+    for (const id of [e.id, ...e.copies]) {
+      const m = marks[id];
+      if (m?.dsId && linkedById.has(m.dsId) && !out.some((x) => x.Id === m.dsId)) out.push({ ...linkedById.get(m.dsId), how: 'created' });
+    }
+    return out;
+  });
+  // Taken: created from one of these events, or from another event of the same calendar outside them.
+  const taken = new Set(created.flat().map((r) => r.Id));
+  const kind = (id) => /^(mac|win|gr|ol)_/.exec(id)?.[1] || 'sf';
+  const shown = new Set(events.flatMap((e) => [e.id, ...e.copies]));
+  const kinds = new Set(events.map((e) => kind(e.id)));
+  for (const [dsId, ids] of Object.entries(store.eventsOfDealSupports(orgOf(req), mine.map((r) => r.Id)))) {
+    if (ids.some((id) => !shown.has(id) && kinds.has(kind(id)))) taken.add(dsId);
   }
-  for (const r of mine) {
-    if (r.date !== e.date || supports.some((x) => x.Id === r.Id)) continue;
-    const hit = (e.oppId && r.oppId === e.oppId) || norm(r.Name) === norm(e.subject) ||
-      r.accountIds.some((a) => e.accountIds.includes(a)) ||
-      (!e.sfEvent && (r.accountNames.some((n) => titleNamesAccount(e.title, n)) ||
-        r.domains.some((d) => e.domains.some((x) => x === d || x.endsWith('.' + d) || domainLabel(x) === domainLabel(d)))));
-    if (hit) supports.push({ ...r, how: 'matched' });
+  const score = (e, r) => {
+    if (r.date !== e.date) return 0;
+    if (e.oppId && r.oppId === e.oppId) return 4;
+    if (norm(r.Name) === norm(e.subject)) return 3;
+    if (r.accountIds.some((a) => e.accountIds.includes(a))) return 2;
+    return !e.sfEvent && (r.accountNames.some((n) => titleNamesAccount(e.title, n)) ||
+      r.domains.some((d) => e.domains.some((x) => x === d || x.endsWith('.' + d) || domainLabel(x) === domainLabel(d)))) ? 1 : 0;
+  };
+  const pairs = [];
+  events.forEach((e, i) => {
+    if (created[i].length) return;
+    for (const r of mine) {
+      const s = !taken.has(r.Id) && score(e, r);
+      if (s) pairs.push({ i, r, s, at: e.start || '' });
+    }
+  });
+  pairs.sort((a, b) => b.s - a.s || String(a.at).localeCompare(String(b.at)) || a.i - b.i);
+  const matched = events.map(() => null);
+  for (const p of pairs) {
+    if (matched[p.i] || taken.has(p.r.Id)) continue;
+    matched[p.i] = { ...p.r, how: 'matched' };
+    taken.add(p.r.Id);
   }
-  return supports;
+  return events.map((e, i) => created[i].length ? created[i] : matched[i] ? [matched[i]] : []);
 }
 
 // Event Ids: Salesforce Ids, or "mac_" (Mac calendar), "win_" (Outlook on Windows), "gr_" (Microsoft 365)
@@ -2343,7 +2382,7 @@ api.post('/outlook/event', wrap(async (req, res) => {
   const linkedIds = [...new Set(Object.values(marks).map((m) => m.dsId).filter(Boolean))];
   const [linked, mine] = await Promise.all([dealSupportsById(req, ds, linkedIds),
     myDealSupportsBetween(req, ds, cm, date, date)]);
-  const supports = coveringSupports(e, marks, new Map(linked.map((r) => [r.Id, r])), mine);
+  const [supports] = coverEvents(req, [e], marks, new Map(linked.map((r) => [r.Id, r])), mine);
   res.json({ event: { ...e, supports, skipped: !!marks[e.id]?.skipped }, prefill: cm,
     dealSupport: { object: ds.object, label: ds.label, labelPlural: ds.labelPlural } });
 }));
@@ -2471,16 +2510,23 @@ api.get('/accounts/:id/deal-supports', wrap(async (req, res) => {
   const activity = activityField(ds);
   const onAccount = [cm.matchAccount && `${cm.matchAccount} = '${id}'`, tm.oppRel && `${tm.oppRel}.AccountId = '${id}'`].filter(Boolean);
   if (!onAccount.length) throw new HttpError(404, `Can't tell which ${ds.labelPlural} belong to an account.`);
-  const fields = ['Id', 'Name', date.name, hours.name, ds.oppField, ...(tm.oppRel ? [`${tm.oppRel}.Name`] : []),
+  // Customer-facing and total hours when the object has them, else the time field alone as the total.
+  const customer = ds.listHours.find((f) => !/^total/i.test(f.label)) || null;
+  const total = ds.listHours.find((f) => /^total/i.test(f.label)) || null;
+  const fields = ['Id', 'Name', date.name, hours.name, ...ds.listHours.map((f) => f.name), ds.oppField,
+    ...(tm.oppRel ? [`${tm.oppRel}.Name`, `${tm.oppRel}.CreatedDate`] : []),
     ...(who ? [`${who.rel}.Name`] : []), ...(tm.roleField ? [tm.roleField] : []), ...(activity ? [activity.name] : [])];
   const from = date.type === 'datetime' ? `${since}T00:00:00Z` : since;
   const recs = await query(req, `SELECT ${[...new Set(fields)].join(', ')} FROM ${ds.object} ` +
     `WHERE (${onAccount.join(' OR ')}) AND ${date.name} >= ${from} ORDER BY ${date.name} DESC`, 5000);
   res.json({
     label: ds.label, labelPlural: ds.labelPlural, dateLabel: date.label, hoursLabel: hours.label, hoursUnit: hours.unit,
+    customerLabel: customer?.label || null, totalLabel: total?.label || null,
     whoLabel: who?.label || null, activityLabel: activity?.label || null,
     records: recs.map((r) => ({ Id: r.Id, Name: r.Name, date: String(r[date.name] || '').slice(0, 10), hours: r[hours.name] ?? null,
-      oppId: r[ds.oppField] || null, oppName: tm.oppRel ? r[tm.oppRel]?.Name || '' : '', who: who ? r[who.rel]?.Name || '' : '',
+      customer: customer ? r[customer.name] ?? null : null, total: total ? r[total.name] ?? null : null,
+      oppId: r[ds.oppField] || null, oppName: tm.oppRel ? r[tm.oppRel]?.Name || '' : '',
+      oppCreated: tm.oppRel ? r[tm.oppRel]?.CreatedDate || '' : '', who: who ? r[who.rel]?.Name || '' : '',
       role: tm.roleField ? r[tm.roleField] || '' : '',
       activity: activity ? String(r[activity.name] ?? '').split(';').join(', ') : '' })),
   });

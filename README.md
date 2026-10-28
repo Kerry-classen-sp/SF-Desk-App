@@ -18,7 +18,7 @@ calendar permission and troubleshooting.
   year, stacked by forecast category. Click a bar to list its deals, and a deal to open it. The fiscal year
   starts Feb 1 and is named for the calendar year it ends in (FY27 = Feb 2026 – Jan 2027)
 - **My Time** totals the hours on your Deal Supports across all opportunities: this week, the previous week,
-  the last 30 days, this fiscal quarter and this fiscal year, hours per week for the last 13 weeks, and hours
+  this calendar month, this fiscal quarter and this fiscal year, hours per week for the last 13 weeks, and hours
   per opportunity for any of those periods. Click a tile, week or opportunity to list its activities (the pencil
   on a row edits that Deal Support). **Show** switches between My Time, My Team (you and your team together, with
   a Person column) and any one team member. Weeks

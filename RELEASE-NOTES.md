@@ -1,5 +1,21 @@
 # SF Desk release notes
 
+## 1.7.0 (October 28, 2026)
+
+- **Deals follow the forecast period:** the Closing table and the Pipeline by stage chart show the month,
+  fiscal quarter or fiscal year picked on the Forecast chart, and ‹ › step one period at a time. Axis labels
+  read like "Oct '26".
+- **Sort any table:** click a column heading to sort by it, again to reverse. Subtotal rows stay with their
+  group.
+- **My Time, Month:** "30 days" is now Month, the whole calendar month.
+- **Opportunity Deal Supports:** the table shows Customer Facing Time and Total Time with their totals, and
+  no longer the Created date.
+- **Account Deal Supports:** Customer Facing Time and Total Time, with a subtotal for each opportunity and a
+  total (also in the Excel export). Opportunities on the Accounts page are listed newest first.
+- **One Deal Support per meeting:** on Time Entry (and in the Outlook add-in), a Deal Support covers only the
+  meeting it was created from, or else the one meeting that matches it best that day. A meeting title must
+  name the account (e.g. "Koch"), not just share a word with it.
+
 ## 1.6.0 (October 26, 2026)
 
 - **My Team periods:** the buttons are Year, Quarter, Month, Week and Custom, with ‹ and › to step back and
