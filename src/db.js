@@ -245,6 +245,17 @@ export function openDb(file) {
       return out;
     },
 
+    // The events each of these Deal Supports was created from: { [dsId]: [eventId, ...] }.
+    eventsOfDealSupports(orgId, dsIds) {
+      const get = db.prepare('SELECT event_id FROM event_marks WHERE org_id = ? AND ds_id = ?');
+      const out = {};
+      for (const id of dsIds) {
+        const rows = get.all(orgId, id);
+        if (rows.length) out[id] = rows.map((r) => r.event_id);
+      }
+      return out;
+    },
+
     linkEvent(orgId, eventId, dsId) {
       db.prepare(`
         INSERT INTO event_marks (org_id, event_id, ds_id, skipped, updated_at) VALUES (?, ?, ?, 0, ?)

@@ -255,6 +255,9 @@ darkQuery.addEventListener('change', applyTheme);
   .hbars .lbl.me { color: var(--ink); font-weight: 600; }
   .fynav { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; }
   .fynav button { padding: 2px 8px; }
+  .fynav .range { white-space: nowrap; min-width: 9.5em; text-align: center; }
+  th.sorts { cursor: pointer; user-select: none; } th.sorts:hover { text-decoration: underline; }
+  th.sorts .sort-ind { font-size: 10px; margin-left: 3px; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: -4px 0 8px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   .hbars { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13px; }
@@ -276,6 +279,8 @@ darkQuery.addEventListener('change', applyTheme);
   #tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
   .deals td { white-space: nowrap; } .deals td.n { text-align: right; font-variant-numeric: tabular-nums; }
   .deals th.n { text-align: right; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tfoot td { font-weight: 600; border-top: 2px solid var(--line); border-bottom: 0; }
   .deals tfoot td { font-weight: 600; border-top: 2px solid var(--line); border-bottom: 0; }
   .deals tbody tr { cursor: pointer; } .deals tbody tr.nolink { cursor: default; } .deals tr.subtotal td { font-weight: 600; background: var(--bg); } .deals tbody tr:hover td { background: var(--bg); }
   .deals td.wrap { white-space: normal; min-width: 180px; }
@@ -1332,7 +1337,12 @@ function renderAccountDealSupports(data, fyStart) {
   const toHours = (v) => v == null || v === '' ? 0
     : data.hoursUnit === 'text' ? parseDuration(v) : data.hoursUnit === 'minutes' ? Number(v) / 60 : Number(v) || 0;
   const list = data.records.filter((r) => r.date && r.date >= from && r.date <= today);
-  const total = list.reduce((s, r) => s + toHours(r.hours), 0);
+  // Customer-facing and total time, each with subtotals and a total; just the one time field when the object lacks them.
+  const hourCols = [
+    data.customerLabel && { label: data.customerLabel, of: (r) => Number(r.customer) || 0 },
+    data.totalLabel ? { label: data.totalLabel, of: (r) => Number(r.total) || 0 } : { label: data.hoursLabel, of: (r) => toHours(r.hours) },
+  ].filter(Boolean);
+  const sumOf = (rows, c) => rows.reduce((s, r) => s + c.of(r), 0);
   const seg = el('span', { class: 'seg' }, Object.entries({ 30: '30 days', 60: '60 days', 90: '90 days', fy: fyName(fiscal(today).fy) })
     .map(([k, t]) => el('button', { class: acctDsRange === k ? 'on' : null, onclick: () => { acctDsRange = k; renderAccountDealSupports(data, fyStart); } }, t)));
   const showRole = list.some((r) => r.role);
@@ -1344,7 +1354,7 @@ function renderAccountDealSupports(data, fyStart) {
   const showOpp = bySe && opps.size > 1 && list.some((r) => r.oppName && !String(r.Name || '').toLowerCase().includes(r.oppName.toLowerCase()));
   // The record number only (e.g. "DR-012345" -> "012345") keeps the first column narrow; the full name is its tooltip.
   const canEdit = !!dsMeta?.canUpdate;
-  const ncols = 3 + showActivity + showOpp + !!data.whoLabel + showRole + canEdit;
+  const ncols = 2 + hourCols.length + showActivity + showOpp + !!data.whoLabel + showRole + canEdit;
   const edit = (r) => editDealSupport(r.Id, acctDsEdit, () => renderAccountDealSupports(data, fyStart), () => loadAccountDealSupports(data.accountId));
   const row = (r) => el('tr', { class: 'nolink' + (acctDsEdit.editing?.id === r.Id ? ' sel' : '') },
     canEdit ? editPencil(r.Name, () => edit(r)) : null,
@@ -1354,21 +1364,23 @@ function renderAccountDealSupports(data, fyStart) {
     showOpp ? el('td', { class: 'wrap' }, r.oppName) : null,
     data.whoLabel ? el('td', {}, r.who) : null,
     showRole ? el('td', {}, r.role) : null,
-    el('td', { class: 'n' }, fmtH(toHours(r.hours))));
+    hourCols.map((c) => el('td', { class: 'n' }, fmtH(c.of(r)))));
   const sumRow = (text, rows, cls) => el('tr', { class: 'nolink ' + cls },
-    el('td', { colspan: ncols - 1 }, `${text} (${rows.length})`),
-    el('td', { class: 'n' }, fmtH(rows.reduce((s, r) => s + toHours(r.hours), 0))));
+    el('td', { colspan: ncols - hourCols.length }, `${text} (${rows.length})`),
+    hourCols.map((c) => el('td', { class: 'n' }, fmtH(sumOf(rows, c)))));
   const tbody = el('tbody');
   const blocks = [];
   {
-    // One block per opportunity (or per Assigned SE when ticked), A–Z, each ending in its subtotal.
+    // One block per opportunity, newest created first (or per Assigned SE A–Z when ticked), each ending in its subtotal.
     const groups = new Map();
     for (const r of list) {
       const k = (bySe ? r.who : r.oppName) || '(none)';
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
     }
-    for (const [k, rows] of [...groups].sort((x, y) => x[0].localeCompare(y[0]))) {
+    const order = bySe ? (x, y) => x[0].localeCompare(y[0])
+      : (x, y) => String(y[1][0].oppCreated || '').localeCompare(String(x[1][0].oppCreated || '')) || x[0].localeCompare(y[0]);
+    for (const [k, rows] of [...groups].sort(order)) {
       blocks.push([k, rows]);
       tbody.append(...rows.map(row), sumRow(`Subtotal ${k}`, rows, 'subtotal'));
     }
@@ -1378,32 +1390,33 @@ function renderAccountDealSupports(data, fyStart) {
     onchange: (e) => { acctDsGroup = e.target.checked; renderAccountDealSupports(data, fyStart); } }), `Group by ${data.whoLabel}`) : null;
   sec.replaceChildren(
     el('h3', {}, `${data.labelPlural}: ${rangeLabel}`, el('span', { class: 'spacer' }), group, seg,
-      el('button', { disabled: !list.length, onclick: () => exportAccountDealSupports(data, blocks, bySe, toHours, rangeLabel) }, 'Export to Excel')),
-    el('div', { class: 'tiles', style: 'grid-template-columns:repeat(2, minmax(0, 220px));margin-bottom:12px' },
+      el('button', { disabled: !list.length, onclick: () => exportAccountDealSupports(data, blocks, bySe, hourCols, rangeLabel) }, 'Export to Excel')),
+    el('div', { class: 'tiles', style: `grid-template-columns:repeat(${1 + hourCols.length}, minmax(0, 220px));margin-bottom:12px` },
       el('div', { class: 'tile' }, el('div', { class: 'k' }, data.labelPlural), el('div', { class: 'v' }, list.length.toLocaleString())),
-      el('div', { class: 'tile' }, el('div', { class: 'k' }, data.hoursLabel), el('div', { class: 'v' }, fmtH(total)))),
+      hourCols.map((c) => el('div', { class: 'tile' }, el('div', { class: 'k' }, c.label), el('div', { class: 'v' }, fmtH(sumOf(list, c)))))),
     acctDsEdit.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
       el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, el('th', {}, '#'), el('th', {}, data.dateLabel),
         showActivity ? el('th', {}, data.activityLabel) : null, showOpp ? el('th', {}, 'Opportunity') : null,
-        data.whoLabel ? el('th', {}, data.whoLabel) : null, showRole ? el('th', {}, 'Role') : null, el('th', { class: 'n' }, 'Hours'))),
+        data.whoLabel ? el('th', {}, data.whoLabel) : null, showRole ? el('th', {}, 'Role') : null, hourCols.map((c) => el('th', { class: 'n' }, c.label)))),
       tbody,
       list.length ? el('tfoot', {}, sumRow('Total', list, '')) : null)),
   );
 }
 
 // The panel's rows as shown (same period and grouping), with full names, subtotals, the total and links.
-function exportAccountDealSupports(data, blocks, bySe, toHours, rangeLabel) {
+function exportAccountDealSupports(data, blocks, bySe, hourCols, rangeLabel) {
   const showRole = blocks.some(([, rows]) => rows.some((r) => r.role));
   const cols = [
     { header: data.label, width: 34 }, { header: data.dateLabel, type: 'date', width: 13 },
     ...(data.activityLabel ? [{ header: data.activityLabel, width: 22 }] : []), { header: 'Opportunity', width: 36 },
     ...(data.whoLabel ? [{ header: data.whoLabel, width: 22 }] : []), ...(showRole ? [{ header: 'Role', width: 14 }] : []),
-    { header: 'Hours', type: 'number', width: 10 }, { header: 'Salesforce link', width: 45 },
+    ...hourCols.map((c) => ({ header: c.label, type: 'number', width: 14 })), { header: 'Salesforce link', width: 45 },
   ];
   const line = (r) => [r.Name || r.Id, r.date, ...(data.activityLabel ? [r.activity] : []), r.oppName,
-    ...(data.whoLabel ? [r.who] : []), ...(showRole ? [r.role] : []), toHours(r.hours), `${me.instanceUrl}/${r.Id}`];
-  const sumLine = (label, rows) => ({ bold: true, values: [label, ...Array(cols.length - 3).fill(''), rows.reduce((s, r) => s + toHours(r.hours), 0), ''] });
+    ...(data.whoLabel ? [r.who] : []), ...(showRole ? [r.role] : []), ...hourCols.map((c) => c.of(r)), `${me.instanceUrl}/${r.Id}`];
+  const sumLine = (label, rows) => ({ bold: true, values: [label, ...Array(cols.length - 2 - hourCols.length).fill(''),
+    ...hourCols.map((c) => rows.reduce((s, r) => s + c.of(r), 0)), ''] });
   const rows = [];
   for (const [k, list] of blocks) rows.push(...list.map(line), sumLine(`Subtotal ${k}`, list));
   rows.push(sumLine('Total', blocks.flatMap(([, list]) => list)));
@@ -1466,10 +1479,13 @@ function renderAccountForm() {
   sec.replaceChildren(el('h3', {}, 'Account', el('span', { class: 'spacer' }), revert, save), form);
 }
 
+// An account's opportunities, newest created first (copies saved before CreatedDate was read keep their order).
+const newestFirst = (x, y) => String(y.CreatedDate || '').localeCompare(String(x.CreatedDate || ''));
+
 function renderOpps() {
   renderSub();
   const sec = document.getElementById('oppSection');
-  const all = current.opportunities;
+  const all = [...current.opportunities].sort(newestFirst);
   // Hidden ones go first (unless "Show hidden"), then closed ones (unless "Show closed").
   const visible = showHiddenOpps ? all : all.filter((o) => !isHidden(o.Id));
   const hiddenCount = all.length - visible.length;
@@ -1608,8 +1624,7 @@ function openAcctPopup(openOpp) {
   const renderOppList = () => {
     const all = current.opportunities.filter((o) => !isHidden(o.Id));
     const closed = all.filter((o) => o.IsClosed).length;
-    const list = (withClosed ? all : all.filter((o) => !o.IsClosed))
-      .sort((x, y) => (x.IsClosed - y.IsClosed) || String(x.CloseDate || '').localeCompare(String(y.CloseDate || '')));
+    const list = (withClosed ? all : all.filter((o) => !o.IsClosed)).sort(newestFirst);
     const toggle = el('input', { type: 'checkbox', checked: withClosed, onchange: (e) => { withClosed = e.target.checked; renderOppList(); } });
     const pick = (o) => el('a', { href: '#', onclick: (ev) => { ev.preventDefault(); dlg.close(); openOpp(o.Id); } }, o.Name);
     oppSec.replaceChildren(
@@ -1692,7 +1707,8 @@ function dsText(f, v) {
 // Up to five columns for the list: the name, then required fields, then status/type-like picklists.
 function dsColumns() {
   const name = dsMeta.fields.find((f) => f.name === 'Name');
-  const rest = dsMeta.fields.filter((f) => f !== name && f.type !== 'textarea' && f.type !== 'reference');
+  const hours = new Set((dsMeta.listHours || []).map((f) => f.name));
+  const rest = dsMeta.fields.filter((f) => f !== name && f.type !== 'textarea' && f.type !== 'reference' && !hours.has(f.name));
   const picked = [...rest.filter((f) => f.required),
     ...rest.filter((f) => f.type === 'picklist' && /status|type|stage|request|product/i.test(f.name + f.label))];
   return [name, ...picked].filter((f, i, all) => f && all.indexOf(f) === i).slice(0, 5);
@@ -1701,8 +1717,11 @@ function dsColumns() {
 function renderDealSupports(o, records) {
   const sec = document.getElementById('dealSupports');
   const cols = dsColumns();
+  // Customer Facing and Total Time, with their totals under the table.
+  const hours = dsMeta.listHours || [];
+  const hoursOf = (r, f) => Number(r[f.name]) || 0;
   const canEdit = dsMeta.canUpdate;
-  const ncols = cols.length + 2 + (canEdit ? 1 : 0);
+  const ncols = cols.length + 1 + hours.length + (canEdit ? 1 : 0);
   const edit = (r) => editDealSupport(r.Id, oppDsEdit, () => renderDealSupports(o, records), () => loadDealSupports(o));
   const tbody = el('tbody');
   for (const r of records) {
@@ -1716,7 +1735,7 @@ function renderDealSupports(o, records) {
         canEdit ? editPencil(r.Name, () => edit(r)) : null,
         cols.map((f) => f.name === 'Name' ? dsNameCell(r.Name) : el('td', {}, dsText(f, r[f.name]) || '—')),
         el('td', {}, r.CreatedBy?.Name || ''),
-        el('td', {}, shortDate(r.CreatedDate)),
+        hours.map((f) => el('td', { class: 'n' }, r[f.name] == null || r[f.name] === '' ? '—' : fmtH(hoursOf(r, f)))),
       ),
       more,
     );
@@ -1744,8 +1763,12 @@ function renderDealSupports(o, records) {
     moveBox,
     oppDsEdit.editing?.box || '',
     el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, cols.map((f) => el('th', {}, f.label)), el('th', {}, 'Created by'), el('th', {}, 'Created'))),
+      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, cols.map((f) => el('th', {}, f.label)), el('th', {}, 'Created by'),
+        hours.map((f) => el('th', { class: 'n' }, f.label)))),
       tbody,
+      records.length && hours.length ? el('tfoot', {}, el('tr', {},
+        el('td', { colspan: ncols - hours.length }, `Total (${records.length})`),
+        hours.map((f) => el('td', { class: 'n' }, fmtH(records.reduce((s, r) => s + hoursOf(r, f), 0)))))) : null,
     )),
   );
 }
@@ -2123,7 +2146,8 @@ const weighted = (list) => list.reduce((s, o) => s + amt(o) * (Number(o.Probabil
 const compact = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n >= 1e6 ? 1 : 0 });
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-const dash = { all: [], view: 'month', page: 0, pick: null, filters: null, loads: 0, value: 'acv' };
+// pick: a clicked stage ({ kind: 'stage', key, label }); period: the key of a clicked forecast column.
+const dash = { all: [], view: 'month', pick: null, period: null, filters: null, loads: 0, value: 'acv' };
 try { if (DEAL_VALUES[localStorage.getItem(DEAL_VALUE_KEY)]) dash.value = localStorage.getItem(DEAL_VALUE_KEY); } catch {}
 
 async function showDashboard() {
@@ -2203,6 +2227,15 @@ function renderDashboard() {
   const late = opps.filter((o) => o.CloseDate < today);
   const tile = (k, v, d, cls = '') => el('div', { class: 'tile ' + cls }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v), el('div', { class: 'd' }, d));
 
+  // The stage chart and the deal list cover one period of the forecast chart's view: the whole calendar month,
+  // fiscal quarter or fiscal year. That's the picked one (a clicked column, or ‹ ›), else the current one.
+  const fc = forecastPeriods(opps, now, today);
+  const nowKey = periodKey(dash.view, now);
+  const current = fc.all[0];
+  const period = fc.selected;
+  const inPick = period ? opps.filter((o) => periodKey(dash.view, fiscal(o.CloseDate)) === period.key) : [];
+  const nameOf = (x) => !x ? '' : x.key === nowKey ? `this ${dash.view} (${x.short})` : x.short;
+
   document.getElementById('dashBody').replaceChildren(
     el('div', { class: 'tiles' },
       tile('Open pipeline', compact(sum(opps)), `${money(sum(opps))} · ${plural(opps.length, 'opportunity', 'opportunities')}`, 'hero'),
@@ -2217,13 +2250,47 @@ function renderDashboard() {
     ),
     el('section', { id: 'dealList' }),
   );
-  renderStageChart(opps);
-  renderForecastChart(opps, now, today);
-  renderDeals(opps, today);
+  const label = nameOf(period);
+  renderStageChart(inPick, label);
+  renderForecastChart(opps, now, fc, period?.key);
+  renderDeals(inPick, today, label, period !== current ? nameOf(current) : null);
+}
+
+// The forecast chart's periods for its view: from the current one (earlier close dates are counted in
+// "Past close date") through the last one with a close date, each with its first and last day. `selected`
+// is the picked period (dash.period), else the current one; months show 12 at a time, the 12 holding it.
+function forecastPeriods(opps, now, today) {
+  const view = dash.view;
+  const end = fiscal(opps.reduce((m, o) => (o.CloseDate > m ? o.CloseDate : m), today));
+  const day = (y, m, d) => ymd(new Date(y, m, d, 12));
+  let periods = [];
+  if (view === 'month') {
+    for (let i = now.y * 12 + now.m; i <= end.y * 12 + end.m; i++) {
+      const y = Math.floor(i / 12), m = i % 12, fy = m >= FY_START ? y + 1 : y;
+      const label = i === now.y * 12 + now.m || m === 0 ? `${MONTHS[m]} '${String(y % 100).padStart(2, '0')}` : MONTHS[m];
+      periods.push({ key: periodKey('month', { y, m }), label, long: `${MONTHS[m]} ${y} (${fyName(fy)})`, short: `${MONTHS[m]} ${y}`,
+        y, m, from: day(y, m, 1), to: day(y, m + 1, 0) });
+    }
+  } else {
+    for (let fy = now.fy; fy <= end.fy; fy++) {
+      if (view === 'year') {
+        periods.push({ key: fyName(fy), label: fyName(fy), long: `${fyName(fy)} (Feb ${fy - 1} – Jan ${fy})`, short: fyName(fy),
+          from: day(fy - 1, FY_START, 1), to: day(fy, FY_START, 0) });
+      } else for (let q = fy === now.fy ? now.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
+        const qm = FY_START + (q - 1) * 3;
+        periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}`, short: `${fyName(fy)} Q${q}`,
+          from: day(fy - 1, qm, 1), to: day(fy - 1, qm + 3, 0) });
+      }
+    }
+  }
+  const all = periods;
+  const index = Math.max(0, all.findIndex((x) => x.key === dash.period));
+  if (view === 'month') periods = all.slice(Math.floor(index / 12) * 12, Math.floor(index / 12) * 12 + 12);
+  return { all, periods, index, selected: all[index] };
 }
 
 // Pipeline by stage: one horizontal bar per stage, in the org's stage order.
-function renderStageChart(opps) {
+function renderStageChart(opps, label) {
   const sec = document.getElementById('stageChart');
   const by = new Map();
   for (const o of opps) {
@@ -2246,36 +2313,16 @@ function renderStageChart(opps) {
     hover(track, () => tipHtml(k, [['Total', money(total)], ['Weighted', money(weighted(list))], ['Opportunities', list.length]]));
     grid.append(el('div', { class: 'lbl' + dim, title: k, onclick: choose }, k), track);
   }
-  sec.replaceChildren(el('h3', {}, 'Pipeline by stage'),
-    stages.length ? grid : el('div', { class: 'empty' }, 'No open opportunities.'));
+  sec.replaceChildren(el('h3', {}, 'Pipeline by stage', el('span', { class: 'spacer' }), el('span', { class: 'sub', style: 'margin:0' }, `Closing ${label}`)),
+    stages.length ? grid : el('div', { class: 'empty' }, 'No open opportunities closing then.'));
 }
 
 // Forecast by close date: stacked columns per fiscal month / quarter / year, by forecast category.
-function renderForecastChart(opps, now, today) {
+// `selected`: the period the stage chart and deal list cover; the other columns are dimmed.
+function renderForecastChart(opps, now, fc, selected) {
   const sec = document.getElementById('forecastChart');
   const view = dash.view;
-
-  // The periods to show, in order: from the current one (earlier close dates are counted in "Past
-  // close date") through the last one with a close date. Months come 12 at a time.
-  const end = fiscal(opps.reduce((m, o) => (o.CloseDate > m ? o.CloseDate : m), today));
-  let periods = [];
-  if (view === 'month') {
-    for (let i = now.y * 12 + now.m; i <= end.y * 12 + end.m; i++) {
-      const y = Math.floor(i / 12), m = i % 12, fy = m >= FY_START ? y + 1 : y;
-      const label = i === now.y * 12 + now.m || m === 0 ? `${MONTHS[m]} ${String(y % 100).padStart(2, '0')}` : MONTHS[m];
-      periods.push({ key: periodKey('month', { y, m }), label, long: `${MONTHS[m]} ${y} (${fyName(fy)})`, y, m });
-    }
-  } else {
-    for (let fy = now.fy; fy <= end.fy; fy++) {
-      if (view === 'year') periods.push({ key: fyName(fy), label: fyName(fy), long: `${fyName(fy)} (Feb ${fy - 1} – Jan ${fy})` });
-      else for (let q = fy === now.fy ? now.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
-        periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}` });
-      }
-    }
-  }
-  const pages = view === 'month' ? Math.ceil(periods.length / 12) : 1;
-  dash.page = Math.min(pages - 1, Math.max(0, dash.page));
-  if (view === 'month') periods = periods.slice(dash.page * 12, dash.page * 12 + 12);
+  const { periods, all, index } = fc;
   const byKey = new Map(periods.map((p) => [p.key, []]));
   for (const o of opps) byKey.get(periodKey(view, fiscal(o.CloseDate)))?.push(o);
   const nowKey = periodKey(view, now);
@@ -2288,12 +2335,13 @@ function renderForecastChart(opps, now, today) {
     .filter(([c, v]) => v > 0 && (c !== 'Other' || list.some((o) => o.ForecastCategoryName)));
 
   const seg = el('div', { class: 'seg' }, [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']].map(([v, t]) =>
-    el('button', { class: view === v ? 'on' : null, onclick: () => { dash.view = v; dash.pick = null; renderDashboard(); } }, t)));
-  const monthName = (p) => `${MONTHS[p.m]} ${p.y}`;
-  const fynav = view === 'month' && pages > 1 ? el('span', { class: 'fynav' },
-    el('button', { disabled: dash.page <= 0, onclick: () => { dash.page--; dash.pick = null; renderDashboard(); }, 'aria-label': 'Earlier 12 months' }, '‹'),
-    periods.length > 1 ? `${monthName(periods[0])} – ${monthName(periods.at(-1))}` : monthName(periods[0]),
-    el('button', { disabled: dash.page >= pages - 1, onclick: () => { dash.page++; dash.pick = null; renderDashboard(); }, 'aria-label': 'Later 12 months' }, '›')) : null;
+    el('button', { class: view === v ? 'on' : null, onclick: () => { dash.view = v; dash.period = null; renderDashboard(); } }, t)));
+  // ‹ › step the selected month, quarter or year (the deal list and stage chart follow).
+  const go = (i) => { dash.period = i ? all[i].key : null; renderDashboard(); };
+  const fynav = all.length ? el('span', { class: 'fynav' },
+    el('button', { disabled: index <= 0, onclick: () => go(index - 1), title: `Previous ${view}`, 'aria-label': `Previous ${view}` }, '‹'),
+    el('span', { class: 'range' }, fc.selected.short),
+    el('button', { disabled: index >= all.length - 1, onclick: () => go(index + 1), title: `Next ${view}`, 'aria-label': `Next ${view}` }, '›')) : null;
   const legend = cats.length > 1 ? el('div', { class: 'legend' },
     cats.map(([c, color]) => el('span', {}, el('i', { style: `background:${color}` }), c))) : null;
   const box = el('div');
@@ -2307,7 +2355,7 @@ function renderForecastChart(opps, now, today) {
   const y = (v) => top + plotH - (v / ymax) * plotH;
   const slot = (W - left - right) / periods.length;
   const bw = Math.min(140, slot * 0.75);
-  const pick = dash.pick?.kind === 'period' ? dash.pick.key : null;
+  const pick = selected || null;
   const g = svgEl('svg', { class: 'cols', viewBox: `0 0 ${W} ${H}`, height: H, role: 'img',
     'aria-label': 'Open pipeline by close date' });
   for (const t of ticks) {
@@ -2333,7 +2381,7 @@ function renderForecastChart(opps, now, today) {
     }
     const hit = svgEl('rect', { class: 'hit', x: left + slot * i, y: top, width: slot, height: plotH });
     hit.addEventListener('click', () => {
-      dash.pick = pick === p.key ? null : { kind: 'period', view, key: p.key, label: p.long };
+      dash.period = p.key === nowKey || p.key === dash.period ? null : p.key;
       renderDashboard();
     });
     hover(hit, () => tipHtml(p.long + (p.key === nowKey ? ' · now' : ''), [
@@ -2382,15 +2430,86 @@ function hover(node, content) {
   node.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 }
 
-// The deals behind the chart: the clicked stage or period, else everything closing this quarter.
-function renderDeals(opps, today) {
+// ---------- Sortable tables ----------
+// Click a column heading in any table to sort by it (again to reverse): text A–Z first, numbers, money, hours
+// and dates highest first; blanks stay last. Rows with a cell spanning columns (group headings, subtotals,
+// pagers) stay where they are and the rows between them sort among themselves; an expandable detail row
+// (.ds-more) moves with the row above it. Tables that sort themselves (headings already .sortable) are left
+// alone. A table's sort is kept, for this session, when it's drawn again with the same headings.
+const tableSorts = new Map(); // headings joined -> { col, desc }
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+function cellValue(td) {
+  const s = (td?.dataset.sort ?? td?.textContent ?? '').replace(/[⚠▲▼]/g, '').trim();
+  if (!s || s === '—' || s === '-') return null;
+  const n = s.replace(/[\s,]/g, '').match(/^(-)?\$?(-)?(\d*\.?\d+)(%|h)?$/);
+  return n ? Number(n[3]) * (n[1] || n[2] ? -1 : 1) : s;
+}
+function sortTable(table, col, desc) {
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+  const fixed = (tr) => [...tr.cells].some((c) => c.colSpan > 1);
+  const blocks = [[]];
+  for (const tr of [...tbody.rows]) {
+    if (fixed(tr) && !tr.classList.contains('ds-more')) blocks.push(tr, []);
+    else if (tr.classList.contains('ds-more') && blocks.at(-1).length) blocks.at(-1).at(-1).push(tr);
+    else blocks.at(-1).push([tr]);
+  }
+  const cmp = (a, b) => {
+    const x = cellValue(a[0].cells[col]), y = cellValue(b[0].cells[col]);
+    if (x == null || y == null) return x == null && y == null ? 0 : x == null ? 1 : -1;
+    const c = typeof x === 'number' && typeof y === 'number' ? x - y : collator.compare(String(x), String(y));
+    return desc ? -c : c;
+  };
+  const out = blocks.flatMap((b) => Array.isArray(b) ? [...b].sort(cmp).flat() : [b]);
+  tbody.append(...out);
+}
+function makeSortable(table) {
+  const head = table.tHead?.rows[0];
+  if (!head || table.dataset.sorts || head.querySelector('th.sortable')) return;
+  table.dataset.sorts = '1';
+  const ths = [...head.cells];
+  const key = ths.map((th) => th.textContent.trim()).join('|');
+  const show = (col, desc) => ths.forEach((th, i) => {
+    th.querySelector('.sort-ind')?.remove();
+    th.removeAttribute('aria-sort');
+    if (i === col) { th.setAttribute('aria-sort', desc ? 'descending' : 'ascending'); th.append(el('span', { class: 'sort-ind' }, desc ? '▼' : '▲')); }
+  });
+  ths.forEach((th, col) => {
+    if (!th.textContent.trim() || th.colSpan > 1) return;
+    th.classList.add('sorts');
+    if (!th.title) th.title = `Sort by ${th.textContent.trim()}`;
+    th.addEventListener('click', () => {
+      const was = tableSorts.get(key);
+      let desc;
+      if (was?.col === col) desc = !was.desc;
+      else {
+        const first = [...(table.tBodies[0]?.rows || [])].map((tr) => cellValue(tr.cells[col])).find((v) => v != null);
+        desc = typeof first === 'number';
+      }
+      tableSorts.set(key, { col, desc });
+      sortTable(table, col, desc);
+      show(col, desc);
+    });
+  });
+  const saved = tableSorts.get(key);
+  if (saved && ths[saved.col]?.classList.contains('sorts')) { sortTable(table, saved.col, saved.desc); show(saved.col, saved.desc); }
+}
+new MutationObserver((records) => {
+  for (const r of records) for (const n of r.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.tagName === 'TABLE') makeSortable(n);
+    else n.querySelectorAll?.('table').forEach(makeSortable);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+// The deals behind the charts: those closing in the forecast chart's selected period, narrowed to the
+// clicked stage, if any. `label` names that period; `back`, when given, the current one to go back to.
+function renderDeals(opps, today, label, back) {
   const sec = document.getElementById('dealList');
-  const now = fiscal(today), p = dash.pick;
-  const list = p?.kind === 'stage' ? opps.filter((o) => (o.StageName || 'No stage') === p.key)
-    : p?.kind === 'period' ? opps.filter((o) => periodKey(p.view, fiscal(o.CloseDate)) === p.key)
-    : opps.filter((o) => { const f = fiscal(o.CloseDate); return f.fy === now.fy && f.q === now.q; });
-  const title = p ? `${p.label}: ${plural(list.length, 'deal')}, ${money(sum(list))}`
-    : `Closing this quarter (${fyName(now.fy)} Q${now.q}): ${plural(list.length, 'deal')}, ${money(sum(list))}`;
+  const p = dash.pick;
+  const list = p?.kind === 'stage' ? opps.filter((o) => (o.StageName || 'No stage') === p.key) : [...opps];
+  const what = p?.kind === 'stage' ? `${p.label}, closing ${label}` : `Closing ${label}`;
+  const title = `${what}: ${plural(list.length, 'deal')}, ${money(sum(list))}`;
   list.sort((a, b) => amt(b) - amt(a));
   const showCat = list.some((o) => o.ForecastCategoryName);
   const tbody = el('tbody', {}, list.map((o) => el('tr', { onclick: () => openDeal(o), title: 'Open this opportunity' },
@@ -2407,8 +2526,10 @@ function renderDeals(opps, today) {
   if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No open deals here.')));
   sec.replaceChildren(
     el('h3', {}, title, el('span', { class: 'spacer' }),
-      p ? el('button', { onclick: () => { dash.pick = null; renderDashboard(); } }, 'Show this quarter') : el('span', { class: 'sub', style: 'margin:0' }, 'Click a bar to list its deals'),
-      el('button', { disabled: !list.length, onclick: () => exportDeals(list, showCat, p ? p.label : `${fyName(now.fy)} Q${now.q}`) }, 'Export to Excel')),
+      p ? el('button', { onclick: () => { dash.pick = null; renderDashboard(); } }, 'All stages') : null,
+      back ? el('button', { onclick: () => { dash.period = null; renderDashboard(); } }, `Show ${back}`) : null,
+      !p && !back ? el('span', { class: 'sub', style: 'margin:0' }, `Click a ${dash.view} or a stage to change this list`) : null,
+      el('button', { disabled: !list.length, onclick: () => exportDeals(list, showCat, what) }, 'Export to Excel')),
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
       el('thead', {}, el('tr', {}, el('th', {}, 'Opportunity'), el('th', {}, 'Account'), el('th', {}, 'Stage'),
         el('th', { class: 'n' }, 'Prob.'), el('th', {}, 'Close date'), el('th', {}, 'Owner'),
@@ -2775,7 +2896,7 @@ async function openOppPopup(oppId, accountId) {
 
 // ---------- My Time ----------
 // Your hours from the Deal Supports where you are the chosen user (Owner by default), across all
-// opportunities: this week, last week, the last 30 days, this fiscal quarter and year, per week,
+// opportunities: this week, last week, this calendar month, this fiscal quarter and year, per week,
 // and per opportunity. Weeks start on Monday.
 const time = { data: null, range: 'fy', opp: null };
 // Field picks that differ from the server's defaults, kept in this browser. (v2: picks saved by the
@@ -2867,10 +2988,11 @@ function inBoat(e) {
 function timeRanges(today) {
   const now = fiscal(today), mon = mondayOf(today), qm = (FY_START + (now.q - 1) * 3) % 12;
   const span = (a, b) => (e) => e.date && e.date >= a && e.date <= b;
+  const m0 = ymd(new Date(now.y, now.m, 1, 12)), m1 = ymd(new Date(now.y, now.m + 1, 0, 12));
   return {
     week: { label: 'This week', sub: `${monDay(mon)} – ${monDay(addDays(mon, 6))}`, test: span(mon, addDays(mon, 6)) },
     prev: { label: 'Previous week', sub: `${monDay(addDays(mon, -7))} – ${monDay(addDays(mon, -1))}`, test: span(addDays(mon, -7), addDays(mon, -1)) },
-    d30: { label: 'Last 30 days', sub: `${monDay(addDays(today, -29))} – ${monDay(today)}`, test: span(addDays(today, -29), today) },
+    month: { label: `This month (${MONTHS[now.m]} ${now.y})`, sub: `${monDay(m0)} – ${monDay(m1)}`, test: span(m0, m1) },
     q: { label: `This quarter (${fyName(now.fy)} Q${now.q})`, sub: `${MONTHS[qm]} – ${MONTHS[(qm + 2) % 12]}`, test: (e) => { if (!e.date) return false; const f = fiscal(e.date); return f.fy === now.fy && f.q === now.q; } },
     fy: { label: `This fiscal year (${fyName(now.fy)})`, sub: `Feb ${now.fy - 1} – Jan ${now.fy}`, test: (e) => !!e.date && fiscal(e.date).fy === now.fy },
     all: { label: 'All time', sub: null, test: () => true },
@@ -2966,7 +3088,7 @@ function renderTime() {
       el('div', { class: 'd' }, [r.sub, list.length ? `${plural(list.length, 'activity', 'activities')} · ${plural(opps, 'opp', 'opps')}` : 'Nothing logged'].filter(Boolean).join(' · ')));
   };
   document.getElementById('timeBody').replaceChildren(
-    el('div', { class: 'tiles even' }, ['week', 'prev', 'd30', 'q', 'fy'].map(tile)),
+    el('div', { class: 'tiles even' }, ['week', 'prev', 'month', 'q', 'fy'].map(tile)),
     el('div', { class: 'charts' },
       el('section', { id: 'weekChart' }),
       el('section', { id: 'oppTime' }),
@@ -3034,7 +3156,7 @@ function renderOppTime(all, today) {
   }
   const rows = [...by.values()].map((o) => ({ ...o, hours: hoursOf(o.entries) })).sort((a, b) => b.hours - a.hours);
   const TOP = 15, shown = rows.slice(0, TOP), max = Math.max(0.01, ...rows.map((o) => o.hours));
-  const seg = el('div', { class: 'seg' }, [['week', 'Week'], ['prev', 'Prev'], ['d30', '30 days'], ['q', 'Quarter'], ['fy', 'Year'], ['all', 'All']].map(([v, t]) =>
+  const seg = el('div', { class: 'seg' }, [['week', 'Week'], ['prev', 'Prev'], ['month', 'Month'], ['q', 'Quarter'], ['fy', 'Year'], ['all', 'All']].map(([v, t]) =>
     el('button', { class: time.range === v ? 'on' : null, onclick: () => { time.range = v; time.opp = null; renderTime(); } }, t)));
   const grid = el('div', { class: 'hbars' });
   for (const o of shown) {
