@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 STAGE="$OUT/SF Desk Installer"
-NODE_VERSION="${1:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0))[0].version')}"
+NODE_VERSION="${1:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0)).find((r) => !r.version.includes("-")).version')}"
 NODE_NAME="node-$NODE_VERSION-darwin-arm64"
 
 rm -rf "$STAGE" "$OUT/SF-Desk-mac.zip"

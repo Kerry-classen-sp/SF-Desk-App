@@ -10,7 +10,7 @@
 #        dist/SF Desk.app, dist/SF-Desk-app.zip and dist/SF-Desk.dmg   the Mac app
 # A new version (package.json "version") is a separate, deliberate change; this only counts builds.
 #
-#   scripts/build-apps.sh [--npm] [node-version]    e.g. v26.12.0 (default: latest release)
+#   scripts/build-apps.sh [--npm] [node-version]    e.g. v26.12.0 (default: latest release, not pre-releases)
 #
 # Run it on a Mac with the Xcode Command Line Tools and the GitHub CLI (gh) signed in. The npm registry is
 # blocked on the SailPoint network, so by default the packages take this checkout's node_modules, after
@@ -52,7 +52,7 @@ if [ -z "$USE_NPM" ]; then
   '
   export SF_DESK_NODE_MODULES="$ROOT/node_modules"
 fi
-NODE_VERSION="${NODE_ARG:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0))[0].version')}"
+NODE_VERSION="${NODE_ARG:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0)).find((r) => !r.version.includes("-")).version')}"
 
 # 1. Latest commits and tags, then everything uncommitted.
 git fetch --tags origin || die "Couldn't fetch from GitHub (above)."

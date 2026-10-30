@@ -1,5 +1,12 @@
 # SF Desk release notes
 
+## 1.7.1 (October 30, 2026)
+
+- **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
+  ("PEM routines::no start line") stopped SF Desk from starting. Now only the Outlook add-in is off until
+  **SF Desk > Set Up Outlook Add-in** makes a new certificate, which it now does whenever the old one can't
+  be read. New certificates are written only once complete, so an interrupted setup leaves nothing broken.
+
 ## 1.7.0 (October 28, 2026)
 
 - **Deals follow the forecast period:** the Closing table and the Pipeline by stage chart show the month,

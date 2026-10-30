@@ -2593,8 +2593,14 @@ app.listen(PORT, 'localhost', () => {
 
 // HTTPS for the Outlook add-in, only when its certificate has been made (scripts/outlook-cert.sh).
 const certFile = path.join(CERT_DIR, 'localhost.pem'), keyFile = path.join(CERT_DIR, 'localhost-key.pem');
+// An unreadable certificate (empty, half-written) only turns the add-in off; SF Desk itself keeps running.
 if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
-  https.createServer({ cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) }, app)
-    .on('error', (err) => console.error(`Outlook add-in HTTPS listener not started: ${err.message}`))
-    .listen(HTTPS_PORT, 'localhost', () => console.log(`Outlook add-in served at https://localhost:${HTTPS_PORT}/outlook/pane`));
+  try {
+    https.createServer({ cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) }, app)
+      .on('error', (err) => console.error(`Outlook add-in HTTPS listener not started: ${err.message}`))
+      .listen(HTTPS_PORT, 'localhost', () => console.log(`Outlook add-in served at https://localhost:${HTTPS_PORT}/outlook/pane`));
+  } catch (err) {
+    console.error(`Outlook add-in HTTPS listener not started: the certificate in ${CERT_DIR} can't be read (${err.message}). ` +
+      'Make a new one with SF Desk > Set Up Outlook Add-in (or sh scripts/outlook-cert.sh --renew --trust).');
+  }
 }

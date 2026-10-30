@@ -9,7 +9,24 @@ DIR="${SF_DESK_CERTS:-certs}"
 mkdir -p "$DIR"
 chmod 700 "$DIR"
 
-if [ ! -f "$DIR/localhost.pem" ] || [ "${1:-}" = "--renew" ]; then
+RENEW=""
+for a in "$@"; do [ "$a" = "--renew" ] && RENEW=1; done
+# A certificate, key or authority that's missing or unreadable (e.g. left empty by an interrupted run) is
+# made again, as with --renew.
+valid() {
+  openssl x509 -in "$DIR/localhost.pem" -noout 2>/dev/null && openssl pkey -in "$DIR/localhost-key.pem" -noout 2>/dev/null &&
+    openssl x509 -in "$DIR/sf-desk-ca.pem" -noout 2>/dev/null
+}
+if [ -f "$DIR/localhost.pem" ] && [ -z "$RENEW" ] && ! valid; then
+  echo "$DIR/localhost.pem (or its key or authority) can't be read; making a new one."
+  RENEW=1
+fi
+
+if [ ! -f "$DIR/localhost.pem" ] || [ -n "$RENEW" ]; then
+  # Made in a scratch folder and moved in only when complete, so an interrupted run leaves no broken files.
+  OUT="$DIR"
+  DIR="$(mktemp -d "$OUT/.new.XXXXXX")"
+  trap 'rm -rf "$DIR"' EXIT
   cat > "$DIR/leaf.ext" <<'EOF'
 basicConstraints = CA:FALSE
 keyUsage = digitalSignature, keyEncipherment
@@ -32,12 +49,18 @@ EOF
     -CAcreateserial -days 825 -sha256 -extfile "$DIR/leaf.ext" -out "$DIR/localhost.pem" 2>/dev/null
   rm -f "$DIR"/*.csr "$DIR"/*.ext "$DIR"/*.srl
   chmod 600 "$DIR"/*-key.pem
+  valid || { echo "openssl didn't make a usable certificate." >&2; exit 1; }
+  for f in sf-desk-ca-key.pem sf-desk-ca.pem localhost-key.pem localhost.pem; do mv -f "$DIR/$f" "$OUT/$f"; done
+  rm -rf "$DIR"; trap - EXIT
+  DIR="$OUT"
   echo "Made $DIR/localhost.pem, signed by $DIR/sf-desk-ca.pem."
 else
   echo "$DIR/localhost.pem already exists (use --renew to make a new one)."
 fi
 
-if [ "${1:-}" = "--trust" ]; then
+TRUST=""
+for a in "$@"; do [ "$a" = "--trust" ] && TRUST=1; done
+if [ -n "$TRUST" ]; then
   # Trust the authority for your user only (login keychain), so Outlook and Safari accept https://localhost.
   security add-trusted-cert -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" "$DIR/sf-desk-ca.pem"
   echo "Trusted \"SF Desk local CA\" in your login keychain."

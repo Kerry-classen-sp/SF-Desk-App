@@ -12,7 +12,7 @@ OUT="$ROOT/dist"
 ZIP=SF-Desk-windows.zip
 ARCHES="x64 arm64"
 STAGE="$OUT/SF Desk for Windows"
-NODE_VERSION="${1:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0))[0].version')}"
+NODE_VERSION="${1:-$(curl -fsS https://nodejs.org/dist/index.json | node -p 'JSON.parse(require("fs").readFileSync(0)).find((r) => !r.version.includes("-")).version')}"
 
 rm -rf "$STAGE" "$OUT/$ZIP"
 mkdir -p "$STAGE/app" "$STAGE/runtime"
