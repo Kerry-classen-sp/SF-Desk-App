@@ -12,7 +12,9 @@ meeting with the same form as the **Time Entry** tab, prefilled from that meetin
 The panel also shows the Deal Supports that already cover the meeting (made from it, or yours on the same day
 for the same opportunity, account or name). A meeting with a Deal Support gets a green **Deal Support** category
 in Outlook, so it stands out in your calendar without opening it (the category is added to your Outlook
-category list the first time). Everything runs through SF Desk on your Mac, so SF Desk must be running for the
+category list the first time). **No DS Required** (in the form, where Cancel would be) marks a meeting that
+doesn't need one, as on the Time Entry tab, and gives it a gray **No DS Required** category in Outlook; for a
+meeting synced into Salesforce the mark shows on Time Entry too. Everything runs through SF Desk on your Mac, so SF Desk must be running for the
 button to work. It only reads the meeting you click it on, and nothing is saved to Salesforce until you click
 **Create Deal Support**; in Outlook it only ever adds that category.
 

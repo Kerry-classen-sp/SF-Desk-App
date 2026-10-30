@@ -7,6 +7,18 @@
   **SF Desk > Set Up Outlook Add-in** makes a new certificate, which it now does whenever the old one can't
   be read. New certificates are written only once complete, so an interrupted setup leaves nothing broken.
 
+Build 2 (October 30, 2026), Outlook add-in:
+
+- **No DS Required:** the create form's Cancel button marks the meeting as needing no Deal Support (and
+  **Needs a Deal Support after all** undoes it).
+- **Green and gray:** a meeting with a Deal Support gets the green "Deal Support" category, one marked No DS
+  Required the gray "No DS Required" category, and any other meeting loses both. Recurring meetings get
+  neither, since Outlook would put it on every occurrence.
+- **Same view as Time Entry:** marks and Deal Supports created from a meeting are saved under a key from its
+  start and subject, so the add-in and Time Entry agree whichever calendar they read. The add-in matches
+  against the whole day's meetings, so each meeting has one Deal Support or none and no Deal Support is on
+  two meetings, and each occurrence of a recurring meeting is its own.
+
 ## 1.7.0 (October 28, 2026)
 
 - **Deals follow the forecast period:** the Closing table and the Pipeline by stage chart show the month,
