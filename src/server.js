@@ -2186,16 +2186,50 @@ async function localEvents(req, calendarId, { from, to }) {
 // Meetings synced into Salesforce (e.g. by Outreach) carry the account and opportunity. For each Mac
 // event, find the Salesforce event at the same start with the same or a similar subject (or the only one
 // at that start) and use its links for matching and to preselect the opportunity.
+const simpleSubject = (s) => cleanSubject(s).toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
+
+// One meeting has a different Id in each calendar (Outlook add-in, Mac, Microsoft 365, Salesforce), so each
+// event also gets a key of its own from its start and subject, "mt_" plus a hash, among its copies. Marks
+// ("No Deal Support needed", and the Deal Support created from it) are saved under it too, so the Outlook
+// add-in and Time Entry agree whichever calendar they read.
+function meetingKey(e) {
+  const when = e.allDay ? `d:${e.date}` : `t:${Number.isNaN(Date.parse(e.start)) ? e.start : new Date(Date.parse(e.start)).toISOString()}`;
+  return 'mt_' + crypto.createHash('sha1').update(`${when}|${simpleSubject(e.subject)}`).digest('hex').slice(0, 24);
+}
+function addMeetingKeys(events) {
+  for (const e of events) e.copies = [...new Set([...e.copies, meetingKey(e)])];
+}
+
+// The calendar Time Entry last showed, so the Outlook add-in matches against the same meetings.
+const CAL_SOURCE_SETTING = 'calendarSource';
+
+// My meetings in a range from that calendar (Salesforce when it's that, unknown or can't be read), with
+// Salesforce links borrowed and meeting keys added, as Time Entry has them.
+async function calendarEvents(req, range) {
+  const source = store.getSetting(orgOf(req), CAL_SOURCE_SETTING)?.source;
+  let events = null;
+  if (source && source !== 'salesforce' && readerFor(source)) {
+    events = await localEvents(req, source, range).catch(() => null);
+    if (events) await borrowSalesforceLinks(req, events, range);
+  }
+  events ||= await salesforceEvents(req, range).catch(() => []);
+  addMeetingKeys(events);
+  return events;
+}
+
 async function borrowSalesforceLinks(req, events, range) {
   const sfEvents = await salesforceEvents(req, range).catch(() => []);
-  const simple = (s) => cleanSubject(s).toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
+  const simple = simpleSubject;
   for (const e of events) {
     const at = Date.parse(e.start);
     const same = sfEvents.filter((x) => x.allDay === e.allDay && (e.allDay ? x.date === e.date : Date.parse(x.start) === at));
     const a = simple(e.subject);
-    const hit = same.find((x) => { const b = simple(x.subject); return a && b && (a === b || a.includes(b) || b.includes(a)); }) ||
-      (same.length === 1 ? same[0] : null);
+    const named = same.find((x) => { const b = simple(x.subject); return a && b && (a === b || a.includes(b) || b.includes(a)); });
+    const hit = named || (same.length === 1 ? same[0] : null);
     if (!hit) continue;
+    // The same meeting by name: its Salesforce records count as copies, so "No Deal Support needed" (and a
+    // Deal Support created from it) set in the Outlook add-in, Time Entry or the Salesforce calendar show in all.
+    if (named) e.copies = [...new Set([...e.copies, hit.id, ...hit.copies])];
     e.accountIds = hit.accountIds;
     e.oppId = hit.oppId;
     e.what = hit.what;
@@ -2259,11 +2293,13 @@ api.get('/calendar', wrap(async (req, res) => {
   const source = String(req.query.source || 'salesforce').slice(0, 300);
   if (source !== 'salesforce' && !readerFor(source)) throw new HttpError(400, 'Calendars from this computer are only available when SF Desk runs on a Mac or on Windows.');
   const kind = `calendar:${source}:${range.d0}:${range.d1}`;
+  store.saveSetting(orgOf(req), CAL_SOURCE_SETTING, { source });
   res.json(await withCacheFallback(req, res, async () => {
     const ds = await dealSupportMeta(req);
     const cm = await calendarMeta(req);
     const events = source === 'salesforce' ? await salesforceEvents(req, range) : await localEvents(req, source, range);
     if (source !== 'salesforce') await borrowSalesforceLinks(req, events, range);
+    addMeetingKeys(events);
 
     const marks = store.eventMarks(orgOf(req), events.flatMap((e) => [e.id, ...e.copies]));
     const linkedIds = [...new Set(Object.values(marks).map((m) => m.dsId).filter(Boolean))];
@@ -2273,6 +2309,16 @@ api.get('/calendar', wrap(async (req, res) => {
     // Covered: a Deal Support created from the event (or a copy of it), or one of mine on the same date
     // with the event's opportunity, the event's account, or the event's title as its name. Mac events
     // have no Salesforce links, so for those the account is found from the title and attendee domains.
+    // Marks saved before meetings had keys are copied to the key, so the Outlook add-in sees them too.
+    for (const e of events) {
+      const key = e.copies.find((id) => id.startsWith('mt_'));
+      const old = [e.id, ...e.copies].map((id) => marks[id]).filter(Boolean);
+      if (!key || marks[key] || !old.length) continue;
+      const dsId = old.find((m) => m.dsId)?.dsId;
+      if (dsId) store.linkEvent(orgOf(req), key, dsId);
+      if (old.some((m) => m.skipped)) store.skipEvent(orgOf(req), key, true);
+      marks[key] = { dsId: dsId || null, skipped: old.some((m) => m.skipped) };
+    }
     const covers = coverEvents(req, events, marks, linkedById, mine);
     const out = events.map((e, i) => {
       const { oppId, ...shown } = e;
@@ -2301,7 +2347,7 @@ api.get('/calendar', wrap(async (req, res) => {
 // A meeting with a Deal Support created from it gets no matched ones. Ties go to the earlier meeting.
 function coverEvents(req, events, marks, linkedById, mine) {
   const norm = (s) => cleanSubject(s).toLowerCase();
-  const created = events.map((e) => {
+  const createdAll = events.map((e) => {
     const out = [];
     for (const id of [e.id, ...e.copies]) {
       const m = marks[id];
@@ -2309,13 +2355,15 @@ function coverEvents(req, events, marks, linkedById, mine) {
     }
     return out;
   });
-  // Taken: created from one of these events, or from another event of the same calendar outside them.
-  const taken = new Set(created.flat().map((r) => r.Id));
-  const kind = (id) => /^(mac|win|gr|ol)_/.exec(id)?.[1] || 'sf';
+  // One Deal Support per meeting: of several created from it, the first (from the event itself, then its copies).
+  const created = createdAll.map((list) => list.slice(0, 1));
+  // Taken: created from one of these events (even the ones not shown), or from another meeting outside them,
+  // known by its key. Calendar Ids alone don't say that: a Mac or Outlook event's Id can change when the
+  // meeting is updated, which would leave its Deal Support matching nothing.
+  const taken = new Set(createdAll.flat().map((r) => r.Id));
   const shown = new Set(events.flatMap((e) => [e.id, ...e.copies]));
-  const kinds = new Set(events.map((e) => kind(e.id)));
   for (const [dsId, ids] of Object.entries(store.eventsOfDealSupports(orgOf(req), mine.map((r) => r.Id)))) {
-    if (ids.some((id) => !shown.has(id) && kinds.has(kind(id)))) taken.add(dsId);
+    if (ids.some((id) => id.startsWith('mt_') && !shown.has(id))) taken.add(dsId);
   }
   const score = (e, r) => {
     if (r.date !== e.date) return 0;
@@ -2343,11 +2391,11 @@ function coverEvents(req, events, marks, linkedById, mine) {
   return events.map((e, i) => created[i].length ? created[i] : matched[i] ? [matched[i]] : []);
 }
 
-// Event Ids: Salesforce Ids, or "mac_" (Mac calendar), "win_" (Outlook on Windows), "gr_" (Microsoft 365)
-// or "ol_" (Outlook add-in) plus a hash.
+// Event Ids: Salesforce Ids, or "mac_" (Mac calendar), "win_" (Outlook on Windows), "gr_" (Microsoft 365),
+// "ol_" (Outlook add-in) or "mt_" (a meeting's key, see meetingKey) plus a hash.
 function eventId(value) {
   const id = String(value || '');
-  if (/^(mac|win|gr|ol)_[0-9a-f]{24}$/.test(id)) return id;
+  if (/^(mac|win|gr|ol|mt)_[0-9a-f]{24}$/.test(id)) return id;
   return sfId(id);
 }
 
@@ -2365,9 +2413,11 @@ api.post('/outlook/event', wrap(async (req, res) => {
   const attendees = (Array.isArray(b.attendees) ? b.attendees : []).slice(0, 200)
     .map((a) => ({ name: str(a?.name, 120), email: str(a?.email, 254).toLowerCase() }));
   const others = attendees.filter((a) => a.email && !a.email.endsWith('@' + myDomain));
+  // Occurrences of a recurring meeting share the series' itemId (Outlook for Mac), so theirs adds the start.
+  const itemKey = str(b.itemId, 1000) ? (b.recurring ? `${str(b.itemId, 1000)}|${start}` : str(b.itemId, 1000)) : `${subject}|${start}`;
   const e = {
-    id: 'ol_' + crypto.createHash('sha1').update(str(b.itemId, 1000) || `${subject}|${start}`).digest('hex').slice(0, 24),
-    copies: [], sfEvent: false,
+    id: 'ol_' + crypto.createHash('sha1').update(itemKey).digest('hex').slice(0, 24),
+    copies: [], sfEvent: false, recurring: !!b.recurring,
     subject: subject || '(no subject)', title: cleanSubject(subject) || '(no subject)', start, end,
     allDay: !!b.allDay, date, minutes: null, location: str(b.location, 255),
     description: str(b.body, 32000), who: others.map((a) => a.name || a.email).join(', '), showAs: '',
@@ -2378,12 +2428,22 @@ api.post('/outlook/event', wrap(async (req, res) => {
   const cm = await calendarMeta(req);
   const to = Date.parse(end) > Date.parse(start) ? end : new Date(Date.parse(start) + 60_000).toISOString().replace(/\.\d+Z$/, 'Z');
   await borrowSalesforceLinks(req, [e], { from: start, to, d0: date, d1: date, tz });
-  const marks = store.eventMarks(orgOf(req), [e.id]);
+  addMeetingKeys([e]);
+  // Matched with the rest of that day's meetings, as on Time Entry, so a Deal Support that belongs to another
+  // meeting isn't shown here too. The same meeting in that calendar lends its Ids (and so its marks).
+  const dayStart = Date.parse(`${date}T00:00:00Z`) + tz * 60_000;
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
+  const day = await calendarEvents(req, { from: iso(dayStart), to: iso(dayStart + 86_400_000), d0: date, d1: date, tz });
+  const key = meetingKey(e);
+  const twin = day.find((x) => x.copies.includes(key) || e.copies.some((id) => id === x.id));
+  if (twin) e.copies = [...new Set([...e.copies, twin.id, ...twin.copies])];
+  const list = [...day.filter((x) => x !== twin), e].sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  const marks = store.eventMarks(orgOf(req), list.flatMap((x) => [x.id, ...x.copies]));
   const linkedIds = [...new Set(Object.values(marks).map((m) => m.dsId).filter(Boolean))];
   const [linked, mine] = await Promise.all([dealSupportsById(req, ds, linkedIds),
     myDealSupportsBetween(req, ds, cm, date, date)]);
-  const [supports] = coverEvents(req, [e], marks, new Map(linked.map((r) => [r.Id, r])), mine);
-  res.json({ event: { ...e, supports, skipped: !!marks[e.id]?.skipped }, prefill: cm,
+  const supports = coverEvents(req, list, marks, new Map(linked.map((r) => [r.Id, r])), mine)[list.indexOf(e)];
+  res.json({ event: { ...e, supports, skipped: [e.id, ...e.copies].some((id) => marks[id]?.skipped) }, prefill: cm,
     dealSupport: { object: ds.object, label: ds.label, labelPlural: ds.labelPlural } });
 }));
 
@@ -2400,7 +2460,11 @@ api.post('/calendar/events/:id/deal-support', wrap(async (req, res) => {
   const cm = await calendarMeta(req);
   const extra = cm.userField && !cm.userField.onForm ? { [cm.userField.name]: me } : {};
   const rec = await createDealSupport(req, ds, oppId, req.body?.fields, extra);
-  store.linkEvent(orgOf(req), evId, rec.Id);
+  // Its copies too (other calendars' records and its key), so every calendar shows it as created from there.
+  const copies = Array.isArray(req.body?.copies) ? req.body.copies.slice(0, 20) : [];
+  for (const id of [evId, ...copies]) {
+    try { store.linkEvent(orgOf(req), eventId(id), rec.Id); } catch { /* not an event Id: skip it */ }
+  }
   res.status(201).json(rec);
 }));
 

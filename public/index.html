@@ -1857,7 +1857,7 @@ function dsValue(f, n) {
 // passes oppCombobox's suggestions; save(opp, fields) creates the record, then onCreated(rec, opp) runs.
 // Requested Activity starts as Demo when `subject` (a calendar event's) mentions a demo, else Discussion.
 // Role follows the picked opportunity, Lead SE when I'm its Lead SE and SME otherwise, until it's picked by hand.
-function newDsForm({ picked = null, find = {}, values, descAround, title, subject = '', save, onCreated, close }) {
+function newDsForm({ picked = null, find = {}, values, descAround, title, subject = '', save, onCreated, close, cancel }) {
   let roleTicket = 0, roleTouched = false, settingRole = false, role = null;
   const setRole = async (o) => {
     const rd = dsMeta.roleDefault, my = ++roleTicket;
@@ -1875,6 +1875,7 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
   const activityValue = (name) => activityF?.picklist?.find((v) => v.toLowerCase() === name);
   const activity = activityValue(/\bdemo(s|nstrations?)?\b/i.test(subject) ? 'demo' : 'discussion');
   const form = dealSupportForm(null, close, {
+    cancel,
     title: title || `New ${dsMeta.label}`,
     values: { ...(activity && { [activityF.name]: activity }), ...values },
     descAround,
@@ -2087,7 +2088,8 @@ function dealSupportForm(o, close, opts = {}) {
     time.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, time.map(cell),
       time.length > 1 ? el('label', {}, el('span', {}, 'Total time'), total) : null) : null,
     requests.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, requests.map(cell)) : null,
-    el('div', { class: 'form-actions' }, opts.remove ? remove : null, el('button', { onclick: close }, 'Cancel'), create),
+    // opts.cancel: a button in Cancel's place (the Outlook panel's "No DS Required").
+    el('div', { class: 'form-actions' }, opts.remove ? remove : null, opts.cancel || el('button', { onclick: close }, 'Cancel'), create),
   );
   create.addEventListener('click', async () => {
     const body = {}, now = new Map();
@@ -4056,7 +4058,7 @@ const dsTitle = (e) => meetingSubject(e.sf?.title ? { title: e.sf.title } : e);
 const dsNotes = (e) => meetingNotes(e.sf?.description) || meetingNotes(e.description);
 
 // onCreated(rec, opp) runs after the save; by default the Time Entry calendar reloads.
-function createFromEvent(e, close, onCreated = () => loadCalendar()) {
+function createFromEvent(e, close, onCreated = () => loadCalendar(), cancel = null) {
   // The event's opportunity (its own, or borrowed from the Salesforce copy of a Mac or Outlook event) is preselected.
   const oppId = e.oppId || (e.what?.type === 'Opportunity' || String(e.what?.id || '').startsWith('006') ? e.what.id : null);
   const picked = oppId ? { Id: oppId, Name: e.what?.id === oppId ? e.what.name || oppId : oppId } : null;
@@ -4074,9 +4076,10 @@ function createFromEvent(e, close, onCreated = () => loadCalendar()) {
     // The description starts with the meeting's subject and ends with what was written about it.
     descAround: { before: dsTitle(e), after: dsNotes(e) },
     subject: [dsTitle(e), e.title, e.subject].filter(Boolean).join(' '),
-    save: (opp, fields) => api(`/calendar/events/${e.id}/deal-support`, { method: 'POST', body: { opportunityId: opp.Id, fields } }),
+    save: (opp, fields) => api(`/calendar/events/${e.id}/deal-support`, { method: 'POST', body: { opportunityId: opp.Id, fields, copies: e.copies || [] } }),
     onCreated,
     close,
+    cancel,
   });
 }
 
@@ -4191,16 +4194,19 @@ function officeGet(prop, ...args) {
 async function outlookMeeting() {
   const item = Office.context.mailbox.item;
   if (!item || item.itemType !== 'appointment') return null;
-  const [subject, start, end, location, body, required, optional, organizer] = await Promise.all([
+  const [subject, start, end, location, body, required, optional, organizer, recurrence] = await Promise.all([
     officeGet(item.subject), officeGet(item.start), officeGet(item.end), officeGet(item.location),
     officeGet(item.body, Office.CoercionType.Text), officeGet(item.requiredAttendees), officeGet(item.optionalAttendees),
-    officeGet(item.organizer)]);
+    officeGet(item.organizer), officeGet(item.recurrence)]);
   const s = new Date(start), e = new Date(end);
   // Office.js doesn't say whether a meeting is all-day when reading it: midnight to midnight is.
   const allDay = s.getHours() === 0 && s.getMinutes() === 0 && e.getHours() === 0 && e.getMinutes() === 0 && e - s >= 86400_000;
   const people = [...(required || []), ...(optional || []), organizer].filter(Boolean)
     .map((a) => ({ name: a.displayName || '', email: a.emailAddress || '' }));
-  return { itemId: item.itemId || '', subject: subject || '', start: s.toISOString(), end: e.toISOString(), allDay,
+  // An occurrence of a recurring meeting: Outlook for Mac gives every occurrence the series' itemId, and a
+  // category put on one goes on the whole series.
+  const recurring = !!(item.seriesId || recurrence);
+  return { itemId: item.itemId || '', recurring, subject: subject || '', start: s.toISOString(), end: e.toISOString(), allDay,
     date: localDay(s), tz: s.getTimezoneOffset(), location: location || '', body: body || '', attendees: people };
 }
 
@@ -4230,7 +4236,10 @@ async function showOutlookPane() {
 
 // Meetings with a Deal Support get an Outlook category of that name, so they stand out by color in the calendar
 // without being opened. Categories need Mailbox 1.8; the category itself is added to Outlook's list the first time.
-async function tagMeeting(name) {
+// Meetings marked as needing none get a gray "No DS Required" category instead. color is a CategoryColor preset
+// name (Preset4 green, Preset12 gray); untag takes a category off again.
+const NO_DS_CATEGORY = 'No DS Required';
+async function tagMeeting(name, color = 'Preset4') {
   const item = Office.context.mailbox.item;
   if (!Office.context.requirements.isSetSupported('Mailbox', '1.8') || !item?.categories) return 'unsupported';
   const call = (fn, arg) => new Promise((resolve) => fn(arg, (r) => resolve(r)));
@@ -4239,28 +4248,60 @@ async function tagMeeting(name) {
   const master = Office.context.mailbox.masterCategories;
   const list = await call((a, cb) => master.getAsync(cb));
   if (list.status === 'succeeded' && !(list.value || []).some((c) => c.displayName === name)) {
-    await call((a, cb) => master.addAsync(a, cb), [{ displayName: name, color: Office.MailboxEnums.CategoryColor.Preset4 }]);
+    await call((a, cb) => master.addAsync(a, cb), [{ displayName: name, color: Office.MailboxEnums.CategoryColor[color] }]);
   }
   const r = await call((a, cb) => item.categories.addAsync(a, cb), [name]);
   return r.status === 'succeeded' ? 'tagged' : 'failed';
+}
+async function untagMeeting(name) {
+  const item = Office.context.mailbox.item;
+  if (!Office.context.requirements.isSetSupported('Mailbox', '1.8') || !item?.categories) return 'unsupported';
+  const call = (fn, arg) => new Promise((resolve) => fn(arg, (r) => resolve(r)));
+  const has = await call((a, cb) => item.categories.getAsync(cb));
+  if (has.status === 'succeeded' && !(has.value || []).some((c) => c.displayName === name)) return 'untagged';
+  const r = await call((a, cb) => item.categories.removeAsync(a, cb), [name]);
+  return r.status === 'succeeded' ? 'untagged' : 'failed';
 }
 
 function renderOutlookPane(e, reload) {
   const when = e.allDay ? `${localDate(e.date).toLocaleDateString()} (all day)`
     : `${evTime(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`;
-  const st = e.supports.length ? 'covered' : 'open';
+  const st = e.supports.length ? 'covered' : e.skipped ? 'skipped' : 'open';
   const formBox = el('div');
+  const skip = el('button', { onclick: async () => {
+    skip.disabled = true;
+    try {
+      await api(`/calendar/events/${e.id}/skip`, { method: 'POST', body: { skip: !e.skipped, copies: e.copies || [] } });
+      e.skipped = !e.skipped;
+      renderOutlookPane(e, reload);
+    } catch (err) { skip.disabled = false; toast(err.message, 'err'); }
+  } }, e.skipped ? `Needs a ${dsMeta.label} after all` : 'No DS Required');
   const open = () => formBox.replaceChildren(createFromEvent(e, () => formBox.replaceChildren(again), async (rec, opp) => {
     formBox.replaceChildren(el('section', {}, el('h3', {}, `Created ${dsMeta.label} ${rec?.Name || ''}`.trim()),
       el('p', { style: 'margin:0 0 10px' }, `On ${opp.Name}.`),
       el('a', { href: `${me.instanceUrl}/${rec.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗')));
     setTimeout(reload, 1500);
-  }));
+  }, skip));
   const again = el('button', { class: 'primary', onclick: open }, `Create ${dsMeta.label}`);
+  // Skipped meetings carry the gray category in Outlook; any other meeting loses it (e.g. undone on Time Entry).
+  // A recurring meeting gets neither category: Outlook puts it on every occurrence of the series, so it comes off.
+  const grayNote = document.createTextNode('');
+  const seriesNote = `This is a recurring meeting, so it isn't marked with a category in Outlook: the category would go on every occurrence.`;
+  if (e.recurring) {
+    Promise.all([untagMeeting(dsMeta.label), untagMeeting(NO_DS_CATEGORY)]).then(() => { grayNote.textContent = seriesNote; }).catch(() => {});
+  } else {
+    (st === 'skipped' ? tagMeeting(NO_DS_CATEGORY, 'Preset12') : untagMeeting(NO_DS_CATEGORY)).then((t) => {
+      grayNote.textContent = t === 'tagged' ? `Marked with the gray "${NO_DS_CATEGORY}" category in your calendar.`
+        : t === 'failed' ? `Couldn't ${st === 'skipped' ? 'add' : 'remove'} the "${NO_DS_CATEGORY}" category in Outlook.` : '';
+    }).catch(() => {});
+    // Not covered (any more): the Deal Support category comes off too.
+    if (st !== 'covered') untagMeeting(dsMeta.label).catch(() => {});
+  }
   document.getElementById('app').replaceChildren(
     el('section', {},
       el('h3', {}, e.title || e.subject),
       el('div', { style: 'margin:-6px 0 10px' }, el('span', { class: 'status-pill ' + st }, STATUS_TEXT[st])),
+      st === 'skipped' ? el('div', { style: 'margin:0 0 10px' }, skip, el('div', { class: 'sub', style: 'margin:8px 0 0' }, grayNote)) : null,
       el('dl', {},
         el('dt', {}, 'When'), el('dd', {}, when),
         e.who ? [el('dt', {}, 'With'), el('dd', {}, e.who)] : null,
@@ -4283,13 +4324,15 @@ function renderOutlookPane(e, reload) {
       el('h3', {}, dsMeta.label, dsMeta.canUpdate ? el('button', { style: 'margin-left:10px', onclick: edit }, 'Edit') : null),
       el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
       dsSummary(r.Id), note);
-    tagMeeting(dsMeta.label).then((t) => {
+    if (e.recurring) note.textContent = seriesNote;
+    else tagMeeting(dsMeta.label).then((t) => {
       note.textContent = t === 'tagged' ? `Marked with the "${dsMeta.label}" category in your calendar.`
         : t === 'failed' ? `Couldn't add the "${dsMeta.label}" category to this meeting in Outlook.` : '';
     }).catch(() => {});
     function show() { document.getElementById('app').replaceChildren(host.editing?.box || summary); }
     return show();
   }
+  if (st === 'skipped') return;
   if (!dsMeta.canCreate) return formBox.replaceChildren(el('div', { class: 'empty' }, `Your Salesforce user can't create ${dsMeta.labelPlural}.`));
   // A meeting with nothing yet opens straight into the form.
   open();
