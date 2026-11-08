@@ -208,8 +208,9 @@ darkQuery.addEventListener('change', applyTheme);
 
   body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; } #app { flex: 1 0 auto; min-width: 0; }
   footer#ver { height: 24px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
-  #toast { position: fixed; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: var(--tip); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
+  #toast { position: fixed; inset: auto; margin: 0; border: 0; right: 16px; bottom: 32px; max-width: min(420px, calc(100vw - 32px)); z-index: 30; padding: 10px 14px; border-radius: 8px; background: var(--tip); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; }
   #toast.ok { background: var(--ok); } #toast.err { background: var(--err); }
+  .form-error { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }
 
   /* ---------- dashboard ---------- */
   header { position: sticky; top: 0; z-index: 20; }
@@ -221,6 +222,7 @@ darkQuery.addEventListener('change', applyTheme);
     max-width: 1720px; margin: 0 auto; padding: 18px clamp(12px, 2vw, 32px) 48px; height: calc(100vh - var(--chrome)); height: calc(100dvh - var(--chrome)); overflow: auto; }
   .dash-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 2px; }
   .dash-head h2 { margin: 0; font-size: 20px; }
+  .dash-head .h2-select { font: inherit; font-weight: 600; padding: 2px 26px 2px 6px; }
   .dash-head label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
   .dash-head input, .dash-head select { width: auto; }
   .tiles { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
@@ -295,12 +297,6 @@ darkQuery.addEventListener('change', applyTheme);
   .cal-empty { border-style: dashed; text-align: center; padding: 28px 20px; }
   .cal-empty h3 { justify-content: center; }
   #calWeekDs { margin: 18px 0 0; }
-  .agenda { display: grid; gap: 10px; }
-  .agenda-day { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
-  .agenda-head { font-size: 13px; font-weight: 600; color: var(--muted); }
-  .agenda-day.today .agenda-head { color: var(--accent); }
-  .agenda .ev { position: static; display: block; width: 100%; padding: 8px 10px; font-size: 14px; }
-  .agenda .ev .t { font-size: 12px; }
   .mobile-only { display: none; }
   .cal-main { min-width: 0; }
   .cal-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
@@ -458,7 +454,7 @@ darkQuery.addEventListener('change', applyTheme);
 </header>
 <div id="app"></div>
 <footer id="ver">SF Desk</footer>
-<div id="toast" role="status"></div>
+<div id="toast" role="status" popover="manual"></div>
 <div id="tip" role="tooltip"></div>
 
 <script src="xlsx.js"></script>
@@ -664,11 +660,20 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 let toastTimer;
+// Shown as a popover, so it sits above an open dialog (a modal dialog is above everything else on the page);
+// shown again each time, so it's above a dialog opened since.
 function toast(msg, kind = '') {
   const t = document.getElementById('toast');
   t.textContent = msg; t.className = kind; t.style.display = 'block';
+  if (t.showPopover) {
+    if (t.matches(':popover-open')) t.hidePopover();
+    t.showPopover();
+  }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.style.display = 'none'), kind === 'err' ? 8000 : 3000);
+  toastTimer = setTimeout(() => {
+    t.style.display = 'none';
+    if (t.hidePopover && t.matches(':popover-open')) t.hidePopover();
+  }, kind === 'err' ? 8000 : 3000);
 }
 
 const money = (n) => n == null ? '' : n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -1481,21 +1486,27 @@ function renderAccountForm() {
 
 // An account's opportunities, newest created first (copies saved before CreatedDate was read keep their order).
 const newestFirst = (x, y) => String(y.CreatedDate || '').localeCompare(String(x.CreatedDate || ''));
+// Opportunity lists show open ones other than contract renewals ("Acme - CON-21565 - Renewal") and those
+// on a Professional Services price book unless "Show all" is ticked, like the Deal Support opportunity picker.
+const contractRenewal = (o) => /CON-/i.test(o.Name || '') && /renewal/i.test(o.Name || '');
+const servicesOnly = (o) => /professional services/i.test(o.Pricebook2?.Name || '');
+const listedByDefault = (o) => !o.IsClosed && !contractRenewal(o) && !servicesOnly(o);
+const SHOW_ALL_TIP = 'Also show closed opportunities, contract renewals and Professional Services price book opportunities';
 
 function renderOpps() {
   renderSub();
   const sec = document.getElementById('oppSection');
   const all = [...current.opportunities].sort(newestFirst);
-  // Hidden ones go first (unless "Show hidden"), then closed ones (unless "Show closed").
+  // Hidden ones go first (unless "Show hidden"), then closed ones and contract renewals (unless "Show all").
   const visible = showHiddenOpps ? all : all.filter((o) => !isHidden(o.Id));
   const hiddenCount = all.length - visible.length;
-  const shown = showClosed ? visible : visible.filter((o) => !o.IsClosed);
-  const closed = visible.length - visible.filter((o) => !o.IsClosed).length;
+  const shown = showClosed ? visible : visible.filter(listedByDefault);
+  const closed = visible.length - visible.filter(listedByDefault).length;
   for (const id of [...pickedOpps]) if (!shown.some((o) => o.Id === id)) pickedOpps.delete(id);
   const tbody = el('tbody', {}, shown.map(oppRow));
   if (!shown.length) {
     const msg = !all.length ? 'No opportunities on this account yet.'
-      : closed ? `No open opportunities. Tick "Show closed" to see the ${closed} closed one${closed === 1 ? '' : 's'}.`
+      : closed ? `No open opportunities. Tick "Show all" to see the ${closed} closed, contract renewal or Professional Services one${closed === 1 ? '' : 's'}.`
       : 'All opportunities on this account are hidden.';
     tbody.append(el('tr', {}, el('td', { colspan: OPP_UI.length + 2, class: 'empty' }, msg)));
   }
@@ -1508,7 +1519,7 @@ function renderOpps() {
   sec.replaceChildren(
     el('h3', {}, showClosed ? `Opportunities (${shown.length})` : `Open opportunities (${shown.length})`,
       el('span', { class: 'spacer' }), bar,
-      el('label', { class: 'selbar' }, toggle, `Show closed (${closed})`),
+      el('label', { class: 'selbar', title: SHOW_ALL_TIP }, toggle, `Show all (${closed})`),
       hiddenCount ? el('label', { class: 'selbar' }, showHidden, `Show hidden (${hiddenCount})`) : null),
     el('div', { class: 'tablewrap' }, el('table', {},
       el('thead', {}, el('tr', {}, el('th', { class: 'pick' }, ''), OPP_UI.map(([f, , c]) => el('th', { class: c }, label(f))), el('th', {}, ''))),
@@ -1623,13 +1634,13 @@ function openAcctPopup(openOpp) {
   const oppSec = el('section');
   const renderOppList = () => {
     const all = current.opportunities.filter((o) => !isHidden(o.Id));
-    const closed = all.filter((o) => o.IsClosed).length;
-    const list = (withClosed ? all : all.filter((o) => !o.IsClosed)).sort(newestFirst);
+    const closed = all.filter((o) => !listedByDefault(o)).length;
+    const list = (withClosed ? all : all.filter(listedByDefault)).sort(newestFirst);
     const toggle = el('input', { type: 'checkbox', checked: withClosed, onchange: (e) => { withClosed = e.target.checked; renderOppList(); } });
     const pick = (o) => el('a', { href: '#', onclick: (ev) => { ev.preventDefault(); dlg.close(); openOpp(o.Id); } }, o.Name);
     oppSec.replaceChildren(
       el('h3', {}, withClosed ? `Opportunities (${list.length})` : `Open opportunities (${list.length})`, el('span', { class: 'spacer' }),
-        closed ? el('label', { class: 'selbar' }, toggle, `Show closed (${closed})`) : null),
+        closed ? el('label', { class: 'selbar', title: SHOW_ALL_TIP }, toggle, `Show all (${closed})`) : null),
       el('div', { class: 'tablewrap' }, el('table', {},
         el('thead', {}, el('tr', {}, ['Name', 'Stage', 'Amount', 'Close date', 'Probability', 'Owner'].map((t) => el('th', {}, t)))),
         el('tbody', {}, list.length ? list.map((o) => el('tr', { class: o.IsClosed ? 'closed' : null },
@@ -1866,8 +1877,10 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
     try { lead = (await api(`/opportunities/${o.Id}/lead-se`)).me; } catch { /* keep the default */ }
     // null means the Lead SE field couldn't be read, so leave whatever is already chosen.
     if (my !== roleTicket || roleTouched || lead == null) return;
+    const want = lead ? rd.leadSe : rd.value || '';
+    if (want && ![...role.options].some((x) => x.value === want)) return;
     settingRole = true;
-    role.value = lead ? rd.leadSe : rd.value || '';
+    role.value = want;
     settingRole = false;
   };
   const picker = oppCombobox({ picked, ...find, onPick: (o) => { picked = o; setRole(o); form?.bindOpportunity(o); } });
@@ -1891,7 +1904,7 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
   form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
     el('div', { class: 'opp-search' },
       el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input),
-      el('label', { class: 'show-closed' }, showClosed, 'Show Closed Opportunities')),
+      el('label', { class: 'show-closed' }, showClosed, 'Show all Opportunities')),
     picker.list, picker.status));
   role = dsMeta.roleDefault && form.inputFor(dsMeta.roleDefault.field);
   role?.addEventListener('change', () => { if (!settingRole) roleTouched = true; });
@@ -1950,6 +1963,10 @@ function dealSupportForm(o, close, opts = {}) {
     }
     const v = opts.values?.[f.name];
     if (v == null || v === '') continue;
+    // A saved record's value stays offered even when it isn't among the values listed (another record type).
+    if (f.type === 'multipicklist') {
+      for (const x of String(v).split(';')) if (![...n.querySelectorAll('input')].some((i) => i.value === x)) n.append(el('label', {}, el('input', { type: 'checkbox', value: x }), x));
+    } else if (f.type === 'picklist' && ![...n.options].some((o) => o.value === String(v))) n.append(el('option', { value: String(v) }, String(v)));
     if (f.type === 'boolean') n.checked = !!v;
     else if (f.type === 'multipicklist') for (const x of n.querySelectorAll('input')) x.checked = String(v).split(';').includes(x.value);
     else if (f.type === 'datetime') n.value = `${localDay(new Date(v))}T${hhmm24(new Date(v))}`;
@@ -1958,6 +1975,34 @@ function dealSupportForm(o, close, opts = {}) {
       n.append(el('option', { value: String(v) }, name || String(v)));
       n.value = String(v);
     } else n.value = v;
+  }
+  // A dependent picklist lists only the values allowed for its controlling field's value (see dependsOn),
+  // following it as it changes; values no longer allowed are cleared. A saved value stays shown. When the
+  // controlling field isn't on the form, every value is listed.
+  const kept = new Map([...inputs].map(([f, n]) => [f, new Set(String(dsValue(f, n) ?? '').split(';').filter(Boolean))]));
+  for (const f of fields.filter((x) => x.dependsOn)) {
+    const ctrlF = fields.find((x) => x.name === f.dependsOn.field), ctrl = ctrlF && inputs.get(ctrlF), n = inputs.get(f);
+    if (!ctrl || !n) continue;
+    const ok = (v) => (f.dependsOn.valid[v] || []).includes(String(dsValue(ctrlF, ctrl) ?? '')) || (opts.edit && kept.get(f).has(v));
+    const allOptions = n.options ? [...n.options] : [];
+    const filter = () => {
+      const before = JSON.stringify(dsValue(f, n));
+      if (f.type === 'multipicklist') {
+        for (const box of n.querySelectorAll('input')) {
+          const show = !(box.value in f.dependsOn.valid) || ok(box.value);
+          box.closest('label').hidden = !show;
+          if (!show) box.checked = false;
+        }
+      } else {
+        // Options are removed rather than hidden: Safari shows hidden options.
+        const v = n.value;
+        n.replaceChildren(...allOptions.filter((o) => !o.value || !(o.value in f.dependsOn.valid) || ok(o.value)));
+        n.value = [...n.options].some((o) => o.value === v) ? v : '';
+      }
+      if (JSON.stringify(dsValue(f, n)) !== before) n.dispatchEvent(new Event('change'));
+    };
+    ctrl.addEventListener('change', filter);
+    filter();
   }
   // The record's name is never shown: Salesforce renames each Deal Support itself, but the name can't be
   // empty, so new ones are sent as "X".
@@ -2073,6 +2118,13 @@ function dealSupportForm(o, close, opts = {}) {
     requests.forEach(paintRequest);
   };
   const create = el('button', { class: 'primary' }, opts.edit ? 'Save changes' : `Create ${dsMeta.label}`);
+  // Why the last save failed, kept in the form (beside its buttons) until the next try.
+  const formError = el('div', { class: 'form-error', role: 'alert', hidden: true });
+  const fail = (msg) => {
+    formError.textContent = msg; formError.hidden = false;
+    formError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    toast(msg, 'err');
+  };
   // opts.remove deletes the record, after asking.
   const remove = el('button', { class: 'danger', style: 'margin-right:auto' }, 'Remove');
   remove.addEventListener('click', async () => {
@@ -2088,6 +2140,7 @@ function dealSupportForm(o, close, opts = {}) {
     time.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, time.map(cell),
       time.length > 1 ? el('label', {}, el('span', {}, 'Total time'), total) : null) : null,
     requests.length ? el('div', { class: 'grid', style: 'margin-top:10px' }, requests.map(cell)) : null,
+    formError,
     // opts.cancel: a button in Cancel's place (the Outlook panel's "No DS Required").
     el('div', { class: 'form-actions' }, opts.remove ? remove : null, opts.cancel || el('button', { onclick: close }, 'Cancel'), create),
   );
@@ -2100,7 +2153,8 @@ function dealSupportForm(o, close, opts = {}) {
       else if (v !== null && !(f.type === 'boolean' && v === false && f.defaultValue !== true)) body[f.name] = v;
     }
     const missing = fields.filter((f) => f.required && now.get(f) == null);
-    if (missing.length) return toast('Required: ' + missing.map((f) => f.label).join(', '), 'err');
+    formError.hidden = true;
+    if (missing.length) return fail('Required: ' + missing.map((f) => f.label).join(', '));
     create.disabled = true;
     if (nameF && !opts.edit && !body.Name) body.Name = 'X';
     try {
@@ -2109,7 +2163,7 @@ function dealSupportForm(o, close, opts = {}) {
       toast(`Created ${dsMeta.label}${rec?.Name ? ` "${rec.Name}"` : ''} in Salesforce`, 'ok');
       loadDealSupports(o);
     } catch (e) {
-      toast(e.message, 'err'); create.disabled = false;
+      fail(e.message); create.disabled = false;
     }
   });
   box.inputFor = (name) => inputs.get(fields.find((f) => f.name === name));
@@ -2148,9 +2202,20 @@ const weighted = (list) => list.reduce((s, o) => s + amt(o) * (Number(o.Probabil
 const compact = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n >= 1e6 ? 1 : 0 });
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-// pick: a clicked stage ({ kind: 'stage', key, label }); period: the key of a clicked forecast column.
-const dash = { all: [], view: 'month', pick: null, period: null, filters: null, loads: 0, value: 'acv' };
+// The deals the whole page covers, picked in its heading (and remembered): open ones, or those won
+// (100-Won) or lost (999-Lost) since the start of last fiscal year.
+const DEAL_STATUS = { open: { label: 'Pipeline', deals: 'open deals', by: 'stage' },
+  won: { label: 'Wins', deals: 'won deals', by: 'type' }, lost: { label: 'Losses', deals: 'lost deals', by: 'type' } };
+const DEAL_STATUS_KEY = 'sfdesk.dealStatus';
+const dealStatus = () => DEAL_STATUS[dash.status] || DEAL_STATUS.open;
+const isOpenView = () => dealStatus() === DEAL_STATUS.open;
+// The stage chart groups open deals by stage; won and lost ones (all at one stage) by opportunity type.
+const groupOf = (o) => (isOpenView() ? o.StageName || 'No stage' : o.Type || 'No type');
+
+// pick: a clicked stage or type ({ kind: 'stage', key, label }); period: the key of a clicked forecast column.
+const dash = { all: [], from: '', view: 'month', pick: null, period: null, filters: null, loads: 0, value: 'acv', status: 'open' };
 try { if (DEAL_VALUES[localStorage.getItem(DEAL_VALUE_KEY)]) dash.value = localStorage.getItem(DEAL_VALUE_KEY); } catch {}
+try { if (DEAL_STATUS[localStorage.getItem(DEAL_STATUS_KEY)]) dash.status = localStorage.getItem(DEAL_STATUS_KEY); } catch {}
 
 async function showDashboard() {
   setNav('dash');
@@ -2172,9 +2237,19 @@ async function showDashboard() {
     try { localStorage.setItem(DEAL_VALUE_KEY, dash.value); } catch {}
     if (dash.all.length) renderDashboard();
   });
+  const status = el('select', { class: 'h2-select', 'aria-label': 'Deals shown' }, Object.entries(DEAL_STATUS).map(([v, s]) =>
+    el('option', { value: v, selected: dash.status === v }, s.label)));
+  status.addEventListener('change', () => {
+    dash.status = status.value;
+    try { localStorage.setItem(DEAL_STATUS_KEY, dash.status); } catch {}
+    Object.assign(dash, { all: [], pick: null, period: null });
+    document.getElementById('dashSub').textContent = 'Loading…';
+    document.getElementById('dashBody').replaceChildren();
+    loadDashboard();
+  });
   document.getElementById('app').replaceChildren(el('div', { class: 'dash' },
     el('div', { class: 'dash-head' },
-      el('h2', {}, 'Pipeline'),
+      el('h2', {}, status),
       el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep, value),
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: loadDashboard }, 'Reload'),
@@ -2203,9 +2278,10 @@ async function dashReps() {
 async function loadDashboard() {
   const seq = ++dash.loads;
   try {
-    const { opportunities } = await api('/pipeline?' + new URLSearchParams(filterQuery()));
-    if (seq !== dash.loads) return; // a newer filter choice is loading
+    const { opportunities, from } = await api('/pipeline?' + new URLSearchParams({ ...filterQuery(), status: dash.status }));
+    if (seq !== dash.loads) return; // a newer filter or status choice is loading
     dash.all = opportunities.filter((o) => o.CloseDate);
+    dash.from = from || '';
     if (document.getElementById('dashBody')) renderDashboard();
   } catch (e) {
     const sub = document.getElementById('dashSub');
@@ -2219,33 +2295,45 @@ function renderDashboard() {
   const opps = inRep.filter((o) => !isHidden(o.Id) && !isHidden(o.AccountId));
   const hiddenCount = inRep.length - opps.length;
   const today = todayStr(), now = fiscal(today);
+  const open = isOpenView(), st = dealStatus();
+  const since = !open && dash.from
+    ? ` closed since ${new Date(dash.from + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : '';
   document.getElementById('dashSub').textContent =
-    `${plural(opps.length, 'open opportunity', 'open opportunities')} · ${filterText(dash.filters)}` +
+    `${open ? plural(opps.length, 'open opportunity', 'open opportunities') : plural(opps.length, st.deals.replace(/s$/, ''), st.deals)}${since} · ${filterText(dash.filters)}` +
     (hiddenCount ? `, not counting ${hiddenCount} hidden` : '') +
     ` · Fiscal years start Feb 1 and are named for the year they end in (${fyName(now.fy)} = Feb ${now.fy - 1} – Jan ${now.fy})`;
 
   const inQ = opps.filter((o) => { const f = fiscal(o.CloseDate); return f.fy === now.fy && f.q === now.q; });
   const inFy = opps.filter((o) => fiscal(o.CloseDate).fy === now.fy);
+  const lastFy = opps.filter((o) => fiscal(o.CloseDate).fy === now.fy - 1);
   const late = opps.filter((o) => o.CloseDate < today);
   const tile = (k, v, d, cls = '') => el('div', { class: 'tile ' + cls }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v), el('div', { class: 'd' }, d));
+  const deals = (list) => plural(list.length, 'deal');
+  const tiles = open ? [
+    tile('Open pipeline', compact(sum(opps)), `${money(sum(opps))} · ${plural(opps.length, 'opportunity', 'opportunities')}`, 'hero'),
+    tile('Weighted pipeline', compact(weighted(opps)), `${dealValue().label} × probability`),
+    tile(`This quarter (${fyName(now.fy)} Q${now.q})`, compact(sum(inQ)), `${deals(inQ)} · ${compact(weighted(inQ))} weighted`),
+    tile(`This fiscal year (${fyName(now.fy)})`, compact(sum(inFy)), `${deals(inFy)} · ${compact(weighted(inFy))} weighted`),
+    tile('Past close date', compact(sum(late)), late.length ? `⚠ ${deals(late)} still open` : 'None overdue', late.length ? 'warn' : ''),
+  ] : [
+    tile(`${st.label} since ${fyName(now.fy - 1)}`, compact(sum(opps)), `${money(sum(opps))} · ${deals(opps)}`, 'hero'),
+    tile(`This quarter (${fyName(now.fy)} Q${now.q})`, compact(sum(inQ)), deals(inQ)),
+    tile(`This fiscal year (${fyName(now.fy)})`, compact(sum(inFy)), deals(inFy)),
+    tile(`Last fiscal year (${fyName(now.fy - 1)})`, compact(sum(lastFy)), deals(lastFy)),
+    tile('Average deal', compact(opps.length ? sum(opps) / opps.length : 0), `${dealValue().label} per ${st.deals.replace(/s$/, '')}`),
+  ];
 
   // The stage chart and the deal list cover one period of the forecast chart's view: the whole calendar month,
   // fiscal quarter or fiscal year. That's the picked one (a clicked column, or ‹ ›), else the current one.
   const fc = forecastPeriods(opps, now, today);
   const nowKey = periodKey(dash.view, now);
-  const current = fc.all[0];
+  const current = fc.all.find((x) => x.key === nowKey) || fc.all[0];
   const period = fc.selected;
   const inPick = period ? opps.filter((o) => periodKey(dash.view, fiscal(o.CloseDate)) === period.key) : [];
   const nameOf = (x) => !x ? '' : x.key === nowKey ? `this ${dash.view} (${x.short})` : x.short;
 
   document.getElementById('dashBody').replaceChildren(
-    el('div', { class: 'tiles' },
-      tile('Open pipeline', compact(sum(opps)), `${money(sum(opps))} · ${plural(opps.length, 'opportunity', 'opportunities')}`, 'hero'),
-      tile('Weighted pipeline', compact(weighted(opps)), `${dealValue().label} × probability`),
-      tile(`This quarter (${fyName(now.fy)} Q${now.q})`, compact(sum(inQ)), `${plural(inQ.length, 'deal')} · ${compact(weighted(inQ))} weighted`),
-      tile(`This fiscal year (${fyName(now.fy)})`, compact(sum(inFy)), `${plural(inFy.length, 'deal')} · ${compact(weighted(inFy))} weighted`),
-      tile('Past close date', compact(sum(late)), late.length ? `⚠ ${plural(late.length, 'deal')} still open` : 'None overdue', late.length ? 'warn' : ''),
-    ),
+    el('div', { class: 'tiles' }, tiles),
     el('div', { class: 'charts' },
       el('section', { id: 'stageChart' }),
       el('section', { id: 'forecastChart' }),
@@ -2261,24 +2349,26 @@ function renderDashboard() {
 // The forecast chart's periods for its view: from the current one (earlier close dates are counted in
 // "Past close date") through the last one with a close date, each with its first and last day. `selected`
 // is the picked period (dash.period), else the current one; months show 12 at a time, the 12 holding it.
+// Won and lost deals start from the first period they were loaded for (dash.from) instead.
 function forecastPeriods(opps, now, today) {
   const view = dash.view;
   const end = fiscal(opps.reduce((m, o) => (o.CloseDate > m ? o.CloseDate : m), today));
+  const start = !isOpenView() && dash.from ? fiscal(dash.from) : now;
   const day = (y, m, d) => ymd(new Date(y, m, d, 12));
   let periods = [];
   if (view === 'month') {
-    for (let i = now.y * 12 + now.m; i <= end.y * 12 + end.m; i++) {
+    for (let i = start.y * 12 + start.m; i <= end.y * 12 + end.m; i++) {
       const y = Math.floor(i / 12), m = i % 12, fy = m >= FY_START ? y + 1 : y;
-      const label = i === now.y * 12 + now.m || m === 0 ? `${MONTHS[m]} '${String(y % 100).padStart(2, '0')}` : MONTHS[m];
+      const label = i === now.y * 12 + now.m || i === start.y * 12 + start.m || m === 0 ? `${MONTHS[m]} '${String(y % 100).padStart(2, '0')}` : MONTHS[m];
       periods.push({ key: periodKey('month', { y, m }), label, long: `${MONTHS[m]} ${y} (${fyName(fy)})`, short: `${MONTHS[m]} ${y}`,
         y, m, from: day(y, m, 1), to: day(y, m + 1, 0) });
     }
   } else {
-    for (let fy = now.fy; fy <= end.fy; fy++) {
+    for (let fy = start.fy; fy <= end.fy; fy++) {
       if (view === 'year') {
         periods.push({ key: fyName(fy), label: fyName(fy), long: `${fyName(fy)} (Feb ${fy - 1} – Jan ${fy})`, short: fyName(fy),
           from: day(fy - 1, FY_START, 1), to: day(fy, FY_START, 0) });
-      } else for (let q = fy === now.fy ? now.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
+      } else for (let q = fy === start.fy ? start.q : 1; q <= (fy === end.fy ? end.q : 4); q++) {
         const qm = FY_START + (q - 1) * 3;
         periods.push({ key: `${fyName(fy)} Q${q}`, label: `Q${q} ${fyName(fy)}`, long: `${fyName(fy)} Q${q}`, short: `${fyName(fy)} Q${q}`,
           from: day(fy - 1, qm, 1), to: day(fy - 1, qm + 3, 0) });
@@ -2286,22 +2376,25 @@ function forecastPeriods(opps, now, today) {
     }
   }
   const all = periods;
-  const index = Math.max(0, all.findIndex((x) => x.key === dash.period));
+  const index = Math.max(0, all.findIndex((x) => x.key === (dash.period || periodKey(view, now))));
   if (view === 'month') periods = all.slice(Math.floor(index / 12) * 12, Math.floor(index / 12) * 12 + 12);
   return { all, periods, index, selected: all[index] };
 }
 
-// Pipeline by stage: one horizontal bar per stage, in the org's stage order.
+// Pipeline by stage: one horizontal bar per stage, in the org's stage order. Wins and losses: per
+// opportunity type, largest first.
 function renderStageChart(opps, label) {
   const sec = document.getElementById('stageChart');
+  const open = isOpenView(), st = dealStatus();
   const by = new Map();
   for (const o of opps) {
-    const k = o.StageName || 'No stage';
+    const k = groupOf(o);
     if (!by.has(k)) by.set(k, []);
     by.get(k).push(o);
   }
   const order = meta.picklists.StageName || [];
-  const stages = [...by.keys()].sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
+  const stages = [...by.keys()].sort(open ? (a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999)
+    : (a, b) => sum(by.get(b)) - sum(by.get(a)));
   const max = Math.max(1, ...stages.map((k) => sum(by.get(k))));
   const pick = dash.pick?.kind === 'stage' ? dash.pick.key : null;
   const grid = el('div', { class: 'hbars' });
@@ -2312,11 +2405,12 @@ function renderStageChart(opps, label) {
     const track = el('div', { class: 'track' + dim, onclick: choose },
       el('div', { class: 'bar', style: `width: calc((100% - 96px) * ${total / max})` }),
       el('div', { class: 'val' }, compact(total), el('span', {}, ` · ${list.length}`)));
-    hover(track, () => tipHtml(k, [['Total', money(total)], ['Weighted', money(weighted(list))], ['Opportunities', list.length]]));
+    hover(track, () => tipHtml(k, [['Total', money(total)], ...(open ? [['Weighted', money(weighted(list))]] : []), ['Opportunities', list.length]]));
     grid.append(el('div', { class: 'lbl' + dim, title: k, onclick: choose }, k), track);
   }
-  sec.replaceChildren(el('h3', {}, 'Pipeline by stage', el('span', { class: 'spacer' }), el('span', { class: 'sub', style: 'margin:0' }, `Closing ${label}`)),
-    stages.length ? grid : el('div', { class: 'empty' }, 'No open opportunities closing then.'));
+  sec.replaceChildren(el('h3', {}, `${st.label} by ${st.by}`, el('span', { class: 'spacer' }),
+    el('span', { class: 'sub', style: 'margin:0' }, `${open ? 'Closing' : 'Closed'} ${label}`)),
+    stages.length ? grid : el('div', { class: 'empty' }, `No ${st.deals} ${open ? 'closing' : 'closed'} then.`));
 }
 
 // Forecast by close date: stacked columns per fiscal month / quarter / year, by forecast category.
@@ -2332,6 +2426,7 @@ function renderForecastChart(opps, now, fc, selected) {
   // One series in the same blue as the other charts; the tooltip still splits it by forecast category.
   const cats = [[dealValue().label, 'var(--s1)']];
   const catOf = () => dealValue().label;
+  const open = isOpenView();
   const byCat = (list) => [...FORECAST.map(([c]) => c), 'Other'].map((c) => [c,
     sum(list.filter((o) => (FORECAST.some(([f]) => f === o.ForecastCategoryName) ? o.ForecastCategoryName : 'Other') === c))])
     .filter(([c, v]) => v > 0 && (c !== 'Other' || list.some((o) => o.ForecastCategoryName)));
@@ -2339,7 +2434,7 @@ function renderForecastChart(opps, now, fc, selected) {
   const seg = el('div', { class: 'seg' }, [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']].map(([v, t]) =>
     el('button', { class: view === v ? 'on' : null, onclick: () => { dash.view = v; dash.period = null; renderDashboard(); } }, t)));
   // ‹ › step the selected month, quarter or year (the deal list and stage chart follow).
-  const go = (i) => { dash.period = i ? all[i].key : null; renderDashboard(); };
+  const go = (i) => { dash.period = all[i].key === nowKey ? null : all[i].key; renderDashboard(); };
   const fynav = all.length ? el('span', { class: 'fynav' },
     el('button', { disabled: index <= 0, onclick: () => go(index - 1), title: `Previous ${view}`, 'aria-label': `Previous ${view}` }, '‹'),
     el('span', { class: 'range' }, fc.selected.short),
@@ -2347,7 +2442,7 @@ function renderForecastChart(opps, now, fc, selected) {
   const legend = cats.length > 1 ? el('div', { class: 'legend' },
     cats.map(([c, color]) => el('span', {}, el('i', { style: `background:${color}` }), c))) : null;
   const box = el('div');
-  sec.replaceChildren(el('h3', {}, 'Forecast by close date', el('span', { class: 'spacer' }), fynav, seg), legend || '', box);
+  sec.replaceChildren(el('h3', {}, open ? 'Forecast by close date' : `${dealStatus().label} by close date`, el('span', { class: 'spacer' }), fynav, seg), legend || '', box);
 
   // Draw once the section is in the page, so its width is known.
   const W = Math.max(320, box.clientWidth || 600), H = 250, top = 18, bottom = 26, left = 46, right = 4;
@@ -2359,7 +2454,7 @@ function renderForecastChart(opps, now, fc, selected) {
   const bw = Math.min(140, slot * 0.75);
   const pick = selected || null;
   const g = svgEl('svg', { class: 'cols', viewBox: `0 0 ${W} ${H}`, height: H, role: 'img',
-    'aria-label': 'Open pipeline by close date' });
+    'aria-label': `${open ? 'Open pipeline' : dealStatus().label} by close date` });
   for (const t of ticks) {
     g.append(svgEl('line', { x1: left, x2: W - right, y1: y(t), y2: y(t), stroke: t ? 'var(--grid)' : 'var(--line)', 'stroke-width': 1 }),
       svgEl('text', { x: left - 6, y: y(t) + 4, 'text-anchor': 'end' }, t ? compact(t) : '$0'));
@@ -2387,8 +2482,8 @@ function renderForecastChart(opps, now, fc, selected) {
       renderDashboard();
     });
     hover(hit, () => tipHtml(p.long + (p.key === nowKey ? ' · now' : ''), [
-      ...(list.some((o) => o.ForecastCategoryName) ? byCat(list).map(([c, v]) => [c, money(v)]) : []),
-      ['Total', money(totals[i])], ['Weighted', money(weighted(list))], ['Opportunities', list.length]]));
+      ...(open && list.some((o) => o.ForecastCategoryName) ? byCat(list).map(([c, v]) => [c, money(v)]) : []),
+      ['Total', money(totals[i])], ...(open ? [['Weighted', money(weighted(list))]] : []), ['Opportunities', list.length]]));
     g.append(hit);
   });
   box.append(g);
@@ -2509,28 +2604,31 @@ new MutationObserver((records) => {
 function renderDeals(opps, today, label, back) {
   const sec = document.getElementById('dealList');
   const p = dash.pick;
-  const list = p?.kind === 'stage' ? opps.filter((o) => (o.StageName || 'No stage') === p.key) : [...opps];
-  const what = p?.kind === 'stage' ? `${p.label}, closing ${label}` : `Closing ${label}`;
+  const open = isOpenView(), st = dealStatus();
+  const closing = open ? 'closing' : 'closed';
+  const list = p?.kind === 'stage' ? opps.filter((o) => groupOf(o) === p.key) : [...opps];
+  const what = p?.kind === 'stage' ? `${p.label}, ${closing} ${label}` : `${open ? 'Closing' : `${st.label}, closed`} ${label}`;
   const title = `${what}: ${plural(list.length, 'deal')}, ${money(sum(list))}`;
   list.sort((a, b) => amt(b) - amt(a));
-  const showCat = list.some((o) => o.ForecastCategoryName);
+  const showCat = open && list.some((o) => o.ForecastCategoryName);
+  const late = (o) => open && o.CloseDate < today;
   const tbody = el('tbody', {}, list.map((o) => el('tr', { onclick: () => openDeal(o), title: 'Open this opportunity' },
     el('td', { class: 'wrap' }, o.Name),
     el('td', { class: 'wrap' }, o.Account?.Name || ''),
     el('td', {}, o.StageName || ''),
     el('td', { class: 'n' }, o.Probability != null ? o.Probability + '%' : ''),
-    el('td', { class: o.CloseDate < today ? 'pastdue' : null }, o.CloseDate + (o.CloseDate < today ? ' ⚠' : '')),
+    el('td', { class: late(o) ? 'pastdue' : null }, o.CloseDate + (late(o) ? ' ⚠' : '')),
     el('td', {}, o.Owner?.Name || ''),
     showCat ? el('td', {}, o.ForecastCategoryName || '') : null,
     el('td', { class: 'n' }, money(amt(o))),
   )));
   const ncols = showCat ? 8 : 7;
-  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No open deals here.')));
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, `No ${st.deals} here.`)));
   sec.replaceChildren(
     el('h3', {}, title, el('span', { class: 'spacer' }),
-      p ? el('button', { onclick: () => { dash.pick = null; renderDashboard(); } }, 'All stages') : null,
+      p ? el('button', { onclick: () => { dash.pick = null; renderDashboard(); } }, open ? 'All stages' : 'All types') : null,
       back ? el('button', { onclick: () => { dash.period = null; renderDashboard(); } }, `Show ${back}`) : null,
-      !p && !back ? el('span', { class: 'sub', style: 'margin:0' }, `Click a ${dash.view} or a stage to change this list`) : null,
+      !p && !back ? el('span', { class: 'sub', style: 'margin:0' }, `Click a ${dash.view} or a ${st.by} to change this list`) : null,
       el('button', { disabled: !list.length, onclick: () => exportDeals(list, showCat, what) }, 'Export to Excel')),
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
       el('thead', {}, el('tr', {}, el('th', {}, 'Opportunity'), el('th', {}, 'Account'), el('th', {}, 'Stage'),
@@ -2553,7 +2651,7 @@ function exportDeals(list, showCat, what) {
   ];
   const rows = list.map((o) => [o.Name, o.Account?.Name, o.StageName, o.Probability, o.CloseDate, o.Owner?.Name,
     ...(showCat ? [o.ForecastCategoryName] : []), amt(o), `${me.instanceUrl}/${o.Id}`]);
-  downloadXlsx(`Pipeline ${dealValue().label} - ${what} - ${todayStr()}.xlsx`, 'Pipeline', cols, rows, { totals: true })
+  downloadXlsx(`${dealStatus().label} ${dealValue().label} - ${what} - ${todayStr()}.xlsx`, dealStatus().label, cols, rows, { totals: true })
     .catch((e) => toast("Couldn't build the Excel file: " + e.message, 'err'));
 }
 
@@ -3431,7 +3529,8 @@ function exportTeam(d, cats, ranked, rankOf, all) {
 // Your Salesforce calendar (Events you own), a week at a time. Events covered by a Deal Support are
 // green, the rest red (grey once marked "No Deal Support needed"). Pick an event to create a Deal
 // Support from it: choose the opportunity, and the form is prefilled from the event.
-const cal = { week: null, data: null, sel: null, loading: 0, sources: null, source: null };
+// day: the one day shown on phones (CAL_NARROW), in the week loaded.
+const cal = { week: null, day: null, data: null, sel: null, loading: 0, sources: null, source: null };
 const CAL_SOURCE = 'sfdesk.calSource';
 const evTime = (s) => new Date(String(s).replace(/\+0000$/, 'Z'));
 const hhmm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -3448,10 +3547,10 @@ function showCalendar() {
       el('div', { class: 'dash-head' },
         el('h2', {}, 'Time Entry'),
         el('span', { class: 'fynav' },
-          el('button', { onclick: () => moveWeek(-7), title: 'Previous week', 'aria-label': 'Previous week' }, '‹'),
+          el('button', { id: 'calPrev', onclick: () => CAL_NARROW.matches ? moveDay(-1) : moveWeek(-7) }, '‹'),
           el('span', { id: 'calWeek' }),
-          el('button', { onclick: () => moveWeek(7), title: 'Next week', 'aria-label': 'Next week' }, '›')),
-        el('button', { onclick: () => { cal.week = mondayOf(todayStr()); loadCalendar(); } }, 'This week'),
+          el('button', { id: 'calNext', onclick: () => CAL_NARROW.matches ? moveDay(1) : moveWeek(7) }, '›')),
+        el('button', { id: 'calNow', onclick: () => { cal.day = todayStr(); cal.week = mondayOf(cal.day); cal.sel = null; loadCalendar(); } }, 'This week'),
         el('select', { id: 'calSource', 'aria-label': 'Calendar', style: 'width:auto;max-width:280px', hidden: true }),
         el('span', { class: 'cal-legend' },
           el('span', {}, el('i', { style: 'background:var(--covered);border-color:var(--covered-line)' }), 'Has a Deal Support'),
@@ -3602,11 +3701,37 @@ async function markOutlook(auto) {
 }
 
 function moveWeek(days) { cal.week = addDays(cal.week, days); cal.sel = null; loadCalendar(); }
+// Phones: a day at a time, loading the next or previous week when the day leaves this one.
+function moveDay(n) {
+  cal.day = addDays(calDay(), n);
+  cal.sel = null;
+  if (mondayOf(cal.day) !== cal.week) { cal.week = mondayOf(cal.day); return loadCalendar(); }
+  renderCalendar();
+}
+// The day shown on phones: the one picked, if it's in the week loaded, else today, else the week's Monday.
+function calDay() {
+  const inWeek = (d) => d && d >= cal.week && d <= addDays(cal.week, 6);
+  return cal.day = inWeek(cal.day) ? cal.day : inWeek(todayStr()) ? todayStr() : cal.week;
+}
+// The ‹ › label and buttons: the week, or the day on phones.
+function calNav() {
+  const byDay = CAL_NARROW.matches, week = cal.week;
+  const label = document.getElementById('calWeek');
+  if (!label) return;
+  label.textContent = byDay
+    ? localDate(calDay()).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    : `${monDay(week)} – ${monDay(addDays(week, 6))}, ${addDays(week, 6).slice(0, 4)}`;
+  for (const [id, text] of [['calPrev', byDay ? 'Previous day' : 'Previous week'], ['calNext', byDay ? 'Next day' : 'Next week']]) {
+    const b = document.getElementById(id);
+    b.title = text; b.setAttribute('aria-label', text);
+  }
+  document.getElementById('calNow').textContent = byDay ? 'Today' : 'This week';
+}
 
 async function loadCalendar() {
   const week = cal.week, ticket = ++cal.loading;
   const end = addDays(week, 7);
-  document.getElementById('calWeek').textContent = `${monDay(week)} – ${monDay(addDays(week, 6))}, ${addDays(week, 6).slice(0, 4)}`;
+  calNav();
   const params = new URLSearchParams({ from: localDate(week).toISOString(), to: localDate(end).toISOString(),
     d0: week, d1: addDays(week, 6), tz: new Date().getTimezoneOffset(), source: cal.source || 'salesforce' });
   document.getElementById('calSub').textContent = 'Loading…';
@@ -3643,11 +3768,14 @@ function renderCalendar() {
     : fromMac ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Outlook or Google calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here.');
 
-  // Monday to Friday, plus the weekend days that have something on them.
-  const days = Array.from({ length: 7 }, (_, i) => addDays(cal.week, i))
+  // Monday to Friday, plus the weekend days that have something on them; on phones, the one day picked.
+  calNav();
+  const byDay = CAL_NARROW.matches;
+  const days = byDay ? [calDay()] : Array.from({ length: 7 }, (_, i) => addDays(cal.week, i))
     .filter((d, i) => i < 5 || events.some((e) => e.date === d));
-  const timed = events.filter((e) => !e.allDay), allDay = events.filter((e) => e.allDay);
-  // Hours shown: 8:00 to 18:00, widened to fit the week's events.
+  const shown = byDay ? events.filter((e) => e.date === days[0]) : events;
+  const timed = shown.filter((e) => !e.allDay), allDay = shown.filter((e) => e.allDay);
+  // Hours shown: 8:00 to 18:00, widened to fit the events shown.
   let h0 = 8, h1 = 18;
   for (const e of timed) {
     const s = evTime(e.start), en = evTime(e.end);
@@ -3706,20 +3834,7 @@ function renderCalendar() {
     gutter.append(el('div', { class: 'hl-label', style: `top:${(h - h0) * hourPx}px` },
       new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })));
   }
-  const dayName = (d) => localDate(d).toLocaleDateString([], { weekday: 'short' });
-  // Phones get a list of the week's days instead of the time grid.
-  if (CAL_NARROW.matches) {
-    const at = (e) => e.allDay ? '' : e.start;
-    document.getElementById('calBody').replaceChildren(el('div', { class: 'agenda' }, days.map((d) => {
-      const list = events.filter((e) => e.date === d).sort((x, y) => at(x).localeCompare(at(y)));
-      return el('div', { class: 'agenda-day' + (d === today ? ' today' : '') },
-        el('div', { class: 'agenda-head' }, localDate(d).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })),
-        list.length ? list.map(evBox) : el('div', { class: 'sub', style: 'margin:0' }, 'Nothing scheduled'));
-    })), el('section', { id: 'calWeekDs' }));
-    renderWeekDealSupports();
-    renderEventPanel();
-    return;
-  }
+  const dayName = (d) => localDate(d).toLocaleDateString([], { weekday: byDay ? 'long' : 'short' });
   document.getElementById('calBody').replaceChildren(el('div', { class: 'week', style: `--days:${days.length}` },
     el('div', { class: 'week-row' }, el('div', { class: 'day-head' }),
       days.map((d) => el('div', { class: 'day-head' + (d === today ? ' today' : '') }, dayName(d), el('b', {}, +d.slice(8, 10))))),

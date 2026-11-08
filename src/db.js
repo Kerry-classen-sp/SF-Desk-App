@@ -185,16 +185,18 @@ export function openDb(file) {
     },
 
     // Open opportunities for the Deals tab, kept to those whose saved account passes the same
-    // `mine` / `groups` / `match` rules as listAccounts.
-    listOpenOpportunities(orgId, { mine = null, groups = [], match = [] } = {}) {
-      const params = { orgId };
+    // `mine` / `groups` / `match` rules as listAccounts. With `stage` (and `from`, the earliest close
+    // date), the closed ones at that stage instead.
+    listOpenOpportunities(orgId, { mine = null, groups = [], match = [], stage = '', from = '' } = {}) {
+      const params = { orgId, stage, from };
       const where = accountWhere(params, { groups: mine ? [mine, ...groups] : groups, match });
       const rows = db.prepare(`
         SELECT o.data, o.synced_at, a.name AS account_name, json_extract(a.data, '$.OwnerId') AS account_owner,
           json_extract(a.data, '$.Owner.Name') AS account_owner_name FROM opportunities o
         LEFT JOIN accounts a ON a.org_id = o.org_id AND a.id = o.account_id
         WHERE o.org_id = @orgId
-          AND NOT coalesce(json_extract(o.data, '$.IsClosed'), 0)
+          AND (CASE WHEN @stage = '' THEN NOT coalesce(json_extract(o.data, '$.IsClosed'), 0)
+            ELSE json_extract(o.data, '$.StageName') = @stage AND json_extract(o.data, '$.CloseDate') >= @from END)
           ${where.map((w) => 'AND ' + w).join('\n          ')}
         ORDER BY json_extract(o.data, '$.CloseDate') ASC
       `).all(params);
