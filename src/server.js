@@ -46,7 +46,7 @@ const ACCOUNT_FIELDS = ['Name', 'Type', 'Industry', 'Phone', 'Website', 'AnnualR
   'NumberOfEmployees', 'BillingCity', 'BillingState', 'Description'];
 const OPP_FIELDS = ['Name', 'StageName', 'Amount', 'CloseDate', 'Probability', 'NextStep', 'Description'];
 const ACCOUNT_READ = ['Id', ...ACCOUNT_FIELDS, 'OwnerId', 'Owner.Name', 'LastModifiedDate'];
-const OPP_READ = ['Id', 'AccountId', ...OPP_FIELDS, 'IsClosed', 'Owner.Name', 'CreatedDate', 'LastModifiedDate'];
+const OPP_READ = ['Id', 'AccountId', ...OPP_FIELDS, 'IsClosed', 'Owner.Name', 'Pricebook2.Name', 'CreatedDate', 'LastModifiedDate'];
 
 // The "Deal Support" object attached to opportunities. Found by its label unless these name it:
 // SF_DEAL_SUPPORT_OBJECT is its API name (e.g. Deal_Support__c), SF_DEAL_SUPPORT_OPP_FIELD its
@@ -1087,6 +1087,8 @@ async function dealSupportMeta(req) {
     entry.upFront = true;
   }
 
+  await restrictPicklists(req, d, fields);
+
   // New Deal Supports default Role to "SME", or "Lead SE" when I'm the opportunity's Lead SE (the form
   // asks /opportunities/:id/lead-se). Both are matched ignoring case, when the picklist has them.
   const role = fields.find((f) => f.picklist && (f.name === 'Role__c' || /^role$/i.test(f.label)));
@@ -1117,6 +1119,40 @@ async function dealSupportMeta(req) {
   };
   req.session.dealSupport = meta;
   return meta;
+}
+
+// Picklists offer only what Salesforce accepts on a new record: the values of my default record type (a
+// restricted picklist refuses others), and for a dependent picklist the values allowed for each value of
+// its controlling field, as dependsOn { field, valid: { value: [controller values] } } (controller values
+// of a checkbox are "true" and "false"). From the UI API; if that fails, every active value stays.
+async function restrictPicklists(req, d, fields) {
+  const rt = (d.recordTypeInfos || []).find((r) => r.defaultRecordTypeMapping && r.available);
+  const rtId = rt?.recordTypeId || '012000000000000AAA';
+  let pv;
+  try {
+    pv = (await sf(req, 'GET', `/services/data/${API}/ui-api/object-info/${d.name}/picklist-values/${sfId(rtId)}`)).picklistFieldValues || {};
+  } catch (err) {
+    if (err.status === 401) throw err;
+    console.warn(`Couldn't read ${d.name} picklist values for its record type: ${err.message}`);
+    return;
+  }
+  const byName = new Map(d.fields.map((f) => [f.name, f]));
+  for (const f of fields) {
+    const p = f.picklist && pv[f.name];
+    if (!p) continue;
+    f.picklist = p.values.map((v) => v.value);
+    const def = p.defaultValue?.value;
+    if (def != null && f.picklist.includes(def)) f.defaultValue = def;
+    else if (f.defaultValue != null && !String(f.defaultValue).split(';').every((v) => f.picklist.includes(v))) f.defaultValue = null;
+    const controller = byName.get(f.name)?.controllerName;
+    const ctrl = Object.entries(p.controllerValues || {});
+    if (!controller || !ctrl.length) continue;
+    const byIndex = new Map(ctrl.map(([value, i]) => [i, value]));
+    f.dependsOn = {
+      field: controller,
+      valid: Object.fromEntries(p.values.map((v) => [v.value, (v.validFor || []).map((i) => byIndex.get(i)).filter((x) => x != null)])),
+    };
+  }
 }
 
 // The fields to show for Deal Support, as [{ name, required, onForm }]: SF_DEAL_SUPPORT_FIELDS if set,
@@ -1417,13 +1453,22 @@ const PIPELINE_READ = ['Id', 'Name', 'AccountId', 'Account.Name', 'StageName', '
 const SKIP_TYPE = 'Renewal';
 const NOT_SKIPPED = `Type != '${SKIP_TYPE}'`;
 
+// ?status=won or lost: the deals closed at that stage instead, since the start of last fiscal year
+// (fiscal years start Feb 1).
+const CLOSED_STAGES = { won: '100-Won', lost: '999-Lost' };
+const lastFyStart = () => {
+  const d = new Date();
+  return `${d.getFullYear() - (d.getMonth() >= 1 ? 1 : 2)}-02-01`;
+};
+
 api.get('/pipeline', wrap(async (req, res) => {
   const known = await knownLeadSeFields(req);
   const af = await accountFilters(req);
   const filter = await accountFilter(req, af, 'Account.');
-  const where = ['IsClosed = false', NOT_SKIPPED, ...filter.soql];
+  const stage = CLOSED_STAGES[req.query.status] || '', from = stage ? lastFyStart() : '';
+  const where = [stage ? `StageName = '${stage}' AND CloseDate >= ${from}` : 'IsClosed = false', NOT_SKIPPED, ...filter.soql];
   const run = (fields) => query(req, `SELECT ${withField(fields, known.Opportunity).join(', ')} FROM Opportunity ` +
-    `WHERE ${where.join(' AND ')} ORDER BY CloseDate ASC`, 5000);
+    `WHERE ${where.join(' AND ')} ORDER BY CloseDate ${stage ? 'DESC' : 'ASC'}`, stage ? 20000 : 5000);
   res.json(await withCacheFallback(req, res, async () => {
     let opportunities;
     try {
@@ -1434,10 +1479,10 @@ api.get('/pipeline', wrap(async (req, res) => {
       opportunities = await run(PIPELINE_READ.filter((f) => f !== 'ForecastCategoryName' && !PIPELINE_VALUES.includes(f)));
     }
     store.saveOpportunities(orgOf(req), opportunities, { merge: true });
-    return { opportunities };
+    return { opportunities, from };
   }, () => {
-    const saved = store.listOpenOpportunities(orgOf(req), { groups: filter.groups, match: filter.match });
-    return { data: { opportunities: saved.records.filter((o) => o.Type !== SKIP_TYPE) }, syncedAt: saved.syncedAt };
+    const saved = store.listOpenOpportunities(orgOf(req), { groups: filter.groups, match: filter.match, stage, from });
+    return { data: { opportunities: saved.records.filter((o) => o.Type !== SKIP_TYPE), from }, syncedAt: saved.syncedAt };
   }));
 }));
 
@@ -2487,14 +2532,17 @@ async function openOpportunities(req, refresh) {
   const org = orgOf(req);
   let cached = openOpps.get(org) || store.getSetting(org, 'openOpps');
   if (cached && !openOpps.has(org)) openOpps.set(org, cached);
-  if (cached && !refresh && Date.now() - Date.parse(cached.at) < OPEN_OPPS_MAX_AGE) return cached;
+  // v: copies saved before the price book was kept (v 2) are read again.
+  if (cached && !refresh && cached.v === 2 && Date.now() - Date.parse(cached.at) < OPEN_OPPS_MAX_AGE) return cached;
   try {
-    const recs = await query(req, 'SELECT Id, Name, AccountId, Account.Name, StageName, CloseDate, Owner.Name ' +
+    const recs = await query(req, 'SELECT Id, Name, AccountId, Account.Name, StageName, CloseDate, Owner.Name, Pricebook2.Name ' +
       'FROM Opportunity WHERE IsClosed = false ORDER BY Name ASC', 50000);
     cached = {
+      v: 2,
       at: new Date().toISOString(),
       records: recs.map((o) => ({ Id: o.Id, Name: o.Name, AccountId: o.AccountId, Account: { Name: o.Account?.Name || '' },
-        StageName: o.StageName, CloseDate: o.CloseDate, Owner: { Name: o.Owner?.Name || '' } })),
+        StageName: o.StageName, CloseDate: o.CloseDate, Owner: { Name: o.Owner?.Name || '' },
+        Pricebook2: o.Pricebook2?.Name ? { Name: o.Pricebook2.Name } : null })),
     };
     store.saveSetting(org, 'openOpps', cached);
     openOpps.set(org, cached);
@@ -2504,10 +2552,17 @@ async function openOpportunities(req, refresh) {
   return cached;
 }
 
+// Contract renewals ("Acme - CON-21565 - Renewal") and Professional Services price book opportunities
+// don't get Deal Supports, so the picker leaves them out unless it shows all opportunities (closed=1).
+const noDealSupport = (o) => (/CON-/i.test(o.Name || '') && /renewal/i.test(o.Name || ''))
+  || /professional services/i.test(o.Pricebook2?.Name || '');
+
 // Type-ahead over the open opportunities: every word typed must appear in the opportunity or account
 // name. Sorted by name; opportunities on the accounts in `accounts` (Ids) or named in `title` come first.
 api.get('/opportunities/open', wrap(async (req, res) => {
-  const { at, records } = await openOpportunities(req, req.query.refresh === '1');
+  const opps = await openOpportunities(req, req.query.refresh === '1');
+  const all = req.query.closed === '1';
+  const at = opps.at, records = all ? opps.records : opps.records.filter((o) => !noDealSupport(o));
   const words = String(req.query.q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
   const accounts = new Set(String(req.query.accounts || '').split(',').filter(Boolean));
   const title = String(req.query.title || '').slice(0, 300);

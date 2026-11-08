@@ -19,6 +19,20 @@ Build 2 (October 30, 2026), Outlook add-in:
   against the whole day's meetings, so each meeting has one Deal Support or none and no Deal Support is on
   two meetings, and each occurrence of a recurring meeting is its own.
 
+Build 3 (November 7, 2026):
+
+- **Pipeline, Wins or Losses:** on the Deals tab, the heading is a dropdown. Wins (100-Won) and Losses
+  (999-Lost) cover deals closed since the start of last fiscal year, with their own tiles, a chart by
+  opportunity type, and the close-date chart running back through last fiscal year.
+- **Deal Support picklists offer only valid values:** each picklist lists the values of your default
+  record type, and a dependent picklist (like Role) only those allowed for its controlling field, so saving
+  no longer fails with "bad value for restricted picklist".
+- **Fewer opportunities to wade through:** the Deal Support opportunity picker and the Accounts page's
+  opportunity lists leave out contract renewals ("CON-" and "Renewal" in the name) and Professional
+  Services price book opportunities. **Show all** (formerly Show closed) adds them back, with closed ones.
+- **Errors can be read:** a Deal Support form's errors show in the form and above it, not behind it.
+- **Phones:** in a narrow window, Time Entry shows one day at a time.
+
 ## 1.7.0 (October 28, 2026)
 
 - **Deals follow the forecast period:** the Closing table and the Pipeline by stage chart show the month,
