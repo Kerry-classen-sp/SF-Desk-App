@@ -621,7 +621,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     let env = ProcessInfo.processInfo.environment.merging(["SF_DESK_CERTS": certs.path, "PATH": server.path]) { $1 }
     Thread.detachNewThread {
       let cert = certs.appendingPathComponent("localhost.pem").path
-      let trusted = fm.fileExists(atPath: cert) &&
+      // An authority whose private key is still there is from before it was limited to localhost: replaced.
+      let trusted = fm.fileExists(atPath: cert) && !fm.fileExists(atPath: certs.appendingPathComponent("sf-desk-ca-key.pem").path) &&
         run("/usr/bin/security", ["verify-cert", "-c", cert, "-p", "ssl", "-s", "localhost"], timeout: 30).status == 0
       if !trusted {
         let r = run("/bin/sh", [appDir.appendingPathComponent("scripts/outlook-cert.sh").path, "--trust"], env: env, timeout: 300)

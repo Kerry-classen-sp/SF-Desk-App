@@ -19,24 +19,16 @@ Microsoft's "Microsoft Graph Command Line Tools" client or for an SF Desk app re
 
 ## iOS app
 
-A native iPhone app, without the Outlook add-in (so no HTTPS listener, certificates or manifest).
+Built in `ios/` (see [ios/README.md](ios/README.md)): the shared core in JavaScriptCore, the page in a web
+view, and the Salesforce CLI's connected app for sign-in. Still to do:
 
-- **Salesforce sign-in:** the Connected App flow SF Desk already supports (OAuth authorization code with
-  PKCE, no client secret), opened in `ASWebAuthenticationSession`, returning to a custom scheme such as
-  `sfdesk://oauth/callback`, with tokens kept in the Keychain. Salesforce's Mobile SDK for iOS can do this
-  instead. The Salesforce CLI login doesn't work on iOS.
-- **Salesforce admin setup:** a Connected App (or External Client App) for SF Desk iOS: that callback URL,
-  scopes `api` and `refresh_token, offline_access`, PKCE required, refresh-token policy and permitted users.
-  Its Consumer Key is built into the app.
-- **What moves into the app:** everything `src/server.js` does besides Outlook: the Salesforce queries and
-  saves, the Deal Support form's field and layout logic, matching meetings to Deal Supports (one per
-  meeting), and the local SQLite store (offline copies, hidden records, event marks). Either rewritten in
-  Swift, or the existing JavaScript run in JavaScriptCore with Swift doing networking, storage and calendar.
-- **Calendar:** EventKit (as the Mac's calendar reader does) for the phone's calendars, or Microsoft 365
-  through Graph once approved.
-- **UI:** the existing page in a `WKWebView` (it already adapts to phones, with the single-day Time Entry
-  view), or native SwiftUI screens.
-- **Distribution:** an Apple Developer account, then TestFlight, the App Store or company device management.
+- **Distribution:** TestFlight or company device management, through the company's Apple Developer account.
+- **Own connected app:** if Salesforce or IT ever limits the CLI's `PlatformCLI` app, an SF Desk connected
+  app (or External Client App) with a `sfdesk://` callback, opened in `ASWebAuthenticationSession`.
+- **Touch wording:** Time Entry says "right-click it to create…". On a phone, say "tap it", and offer the
+  quick menu on a long press.
+- **Microsoft 365 calendar through Graph** once IT approves it, for phones without the Exchange account
+  added.
 
 ## Smaller ideas offered along the way
 
