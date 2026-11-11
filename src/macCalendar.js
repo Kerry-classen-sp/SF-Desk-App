@@ -1,8 +1,7 @@
-// Reads the Mac's own calendars (System Settings > Internet Accounts: Exchange, iCloud, Google...)
-// for My Calendar. Uses a small EventKit helper (mac/calendar.swift), compiled with the Xcode
-// Command Line Tools on first use into data/bin; without them, falls back to asking Calendar.app
-// through JavaScript for Automation, which is slower, can't name accounts and skips repeats of
-// repeating events. Only available on macOS.
+// Reads the Mac's Exchange calendars (the Exchange account in System Settings > Internet Accounts) for
+// Time Entry. Other calendars on the Mac (iCloud, Google, birthdays, subscriptions...) are left out. Uses
+// a small EventKit helper (mac/calendar.swift), compiled with the Xcode Command Line Tools on first use
+// into data/bin; the Mac app ships it prebuilt. Only available on macOS.
 
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -28,10 +27,11 @@ export function macCalendar(rootDir, dataDir) {
   // The Mac app ships the helper prebuilt (SF_DESK_CALENDAR_HELPER), so it needs no Command Line Tools.
   const prebuilt = process.env.SF_DESK_CALENDAR_HELPER;
   const bin = prebuilt || path.join(dataDir, 'bin', 'sfdesk-calendar');
-  let ready = null; // Promise of 'eventkit' | 'jxa'
+  let ready = null;
+  let exchangeIds = new Set();
 
   async function build() {
-    if (prebuilt && fs.existsSync(prebuilt)) return 'eventkit';
+    if (prebuilt && fs.existsSync(prebuilt)) return;
     try {
       const stale = !fs.existsSync(bin) || fs.statSync(bin).mtimeMs < fs.statSync(src).mtimeMs;
       if (stale) {
@@ -40,17 +40,16 @@ export function macCalendar(rootDir, dataDir) {
         await run('xcrun', ['swiftc', '-O', '-swift-version', '5', src, '-o', bin,
           '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', plist], 300_000);
       }
-      return 'eventkit';
     } catch (err) {
-      console.warn(`Couldn't build the calendar helper (${(err.stderr || err.message).trim().split('\n')[0]}); ` +
-        'using Calendar.app instead. Install the Command Line Tools (xcode-select --install) for faster, fuller results.');
-      return 'jxa';
+      ready = null;
+      console.warn(`Couldn't build the calendar helper: ${(err.stderr || err.message).trim().split('\n')[0]}`);
+      throw new CalendarError('Reading your Exchange calendar needs the Xcode Command Line Tools when SF Desk runs from a ' +
+        'checkout. Install them (xcode-select --install), then reload, or use the SF Desk app.');
     }
   }
 
-  const how = () => (ready ||= build());
-
   async function helper(args) {
+    await (ready ||= build());
     const text = await run(bin, args).catch((err) => {
       throw new CalendarError(`Calendar helper failed: ${(err.stderr || err.message).trim()}`);
     });
@@ -59,47 +58,19 @@ export function macCalendar(rootDir, dataDir) {
     return data;
   }
 
-  async function jxa(fn, ...args) {
-    const script = `function run(argv) { return JSON.stringify((${fn})(...argv.map((a) => JSON.parse(a)))); }`;
-    const text = await run('osascript', ['-l', 'JavaScript', '-e', script, ...args.map((a) => JSON.stringify(a))], 180_000)
-      .catch((err) => {
-        const msg = (err.stderr || err.message).trim();
-        throw new CalendarError(/-1743|not allowed|Not authorized/i.test(msg)
-          ? 'SF Desk isn\'t allowed to control Calendar. In System Settings > Privacy & Security > Automation, allow it, then reload.'
-          : `Calendar.app failed: ${msg}`, /-1743|not allowed|Not authorized/i.test(msg) ? 403 : 502);
-      });
-    return JSON.parse(text);
-  }
-
-  // [{ id, title, account, type }], Exchange accounts first.
+  // [{ id, title, account, type }]: the Exchange account's calendars only.
   async function calendars() {
-    const list = (await how()) === 'eventkit'
-      ? await helper(['calendars'])
-      : (await jxa(() => Application('Calendar').calendars.name())).map((name) => ({ id: 'name:' + name, title: name, account: 'Calendar app', type: 'other' }));
-    const rank = (c) => (c.type === 'exchange' ? 0 : c.type === 'birthdays' || c.type === 'subscribed' ? 2 : 1);
-    return list.sort((a, b) => rank(a) - rank(b) || a.account.localeCompare(b.account) || a.title.localeCompare(b.title));
+    const list = (await helper(['calendars'])).filter((c) => c.type === 'exchange');
+    exchangeIds = new Set(list.map((c) => c.id));
+    return list.sort((a, b) => a.account.localeCompare(b.account) || a.title.localeCompare(b.title));
   }
 
-  // Events between two instants in the given calendars, each with a stable id for its occurrence.
+  // Events between two instants in the given Exchange calendars, each with a stable id for its occurrence.
   async function events(fromIso, toIso, ids) {
-    let list;
-    if ((await how()) === 'eventkit') {
-      list = await helper(['events', fromIso, toIso, ids.join(',')]);
-    } else {
-      list = (await jxa((names, from, to) => {
-        const Cal = Application('Calendar'), out = [];
-        const pad = (n) => String(n).padStart(2, '0');
-        for (const name of names) {
-          const evs = Cal.calendars.byName(name).events.whose({ _and: [{ startDate: { _lessThan: new Date(to) } }, { endDate: { _greaterThan: new Date(from) } }] });
-          const [uid, title, start, end, allDay, location, notes] =
-            [evs.uid(), evs.summary(), evs.startDate(), evs.endDate(), evs.alldayEvent(), evs.location(), evs.description()];
-          uid.forEach((u, i) => out.push({ uid: u, title: title[i] || '', start: start[i].toISOString(), end: end[i].toISOString(),
-            date: `${start[i].getFullYear()}-${pad(start[i].getMonth() + 1)}-${pad(start[i].getDate())}`, allDay: allDay[i],
-            location: location[i] || '', notes: notes[i] || '', calendar: name, calendarId: 'name:' + name, organizer: '', attendees: [] }));
-        }
-        return out;
-      }, ids.filter((id) => id.startsWith('name:')).map((id) => id.slice(5)), fromIso, toIso));
-    }
+    if (ids.some((id) => !exchangeIds.has(id))) await calendars();
+    const wanted = ids.filter((id) => exchangeIds.has(id));
+    if (!wanted.length) throw new CalendarError('SF Desk only reads Exchange calendars. Pick one from the list.', 400);
+    const list = await helper(['events', fromIso, toIso, wanted.join(',')]);
     return list.filter((e) => !e.canceled).map((e) => ({
       ...e,
       id: 'mac_' + crypto.createHash('sha1').update(`${e.uid}|${e.start}`).digest('hex').slice(0, 24),

@@ -36,16 +36,20 @@ export function windowsCalendar(rootDir) {
     });
   }
 
-  // [{ id, title, account, type }], Exchange mailboxes first.
+  // [{ id, title, account, type }]: Exchange mailboxes' calendars only, not data files or public folders.
+  let exchangeIds = new Set();
   async function calendars() {
-    const list = await helper(['calendars']);
-    const rank = (c) => (c.type === 'exchange' ? 0 : c.type === 'subscribed' ? 2 : 1);
-    return list.sort((a, b) => rank(a) - rank(b) || a.account.localeCompare(b.account) || a.title.localeCompare(b.title));
+    const list = (await helper(['calendars'])).filter((c) => c.type === 'exchange');
+    exchangeIds = new Set(list.map((c) => c.id));
+    return list.sort((a, b) => a.account.localeCompare(b.account) || a.title.localeCompare(b.title));
   }
 
-  // Events between two instants in the given calendars, each with a stable id for its occurrence.
+  // Events between two instants in the given Exchange calendars, each with a stable id for its occurrence.
   async function events(fromIso, toIso, ids) {
-    const data = await helper(['events', fromIso, toIso, ids.join(',')]);
+    if (ids.some((id) => !exchangeIds.has(id))) await calendars();
+    const wanted = ids.filter((id) => exchangeIds.has(id));
+    if (!wanted.length) throw new CalendarError('SF Desk only reads Exchange calendars. Pick one from the list.', 400);
+    const data = await helper(['events', fromIso, toIso, wanted.join(',')]);
     // With no events, the helper says what Outlook shows instead (data.diag), for the page to show.
     const list = (Array.isArray(data) ? data : data?.events || []).filter((e) => !e.canceled).map((e) => ({
       ...e,

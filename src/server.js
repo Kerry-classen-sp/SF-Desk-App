@@ -44,7 +44,7 @@ const CLI_INSTANCE_URL = process.env.SF_INSTANCE_URL || 'https://sailpoint.my.sa
 const b64url = (buf) => buf.toString('base64url');
 
 const store = openDb(DB_FILE);
-// This computer's own calendar for Time Entry: the Mac's Internet Accounts, or classic Outlook on Windows.
+// This computer's Exchange calendar for Time Entry: the Mac's Exchange account, or classic Outlook's on Windows.
 const localCal = isMac ? macCalendar(ROOT, path.dirname(DB_FILE)) : isWindows ? windowsCalendar(ROOT) : null;
 const LOCAL_CAL_NAME = isWindows ? 'Outlook (classic)' : 'Mac calendar';
 // Microsoft 365 calendars through Microsoft Graph, for the new Outlook (Windows; SF_DESK_GRAPH=1 elsewhere), and

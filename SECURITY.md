@@ -14,7 +14,7 @@ users and for IT or security reviewers. For setup, see [INSTALL.md](INSTALL.md);
 - It only writes to Salesforce when you click **Save**, **Add**, **Create** or confirm a bulk change, and
   it only writes a fixed set of fields.
 - On the desktop, its web server only answers on this computer (`localhost`); other computers on the
-  network can't reach it.
+  network can't reach it.  This is needed to support the Outlook plugin.
 - It keeps a local copy of the accounts and opportunities you've loaded, so you can browse them offline.
   That copy is protected by your computer account and disk encryption (FileVault, BitLocker), not by SF Desk.
 
@@ -91,8 +91,10 @@ locally. To clear the local copy, quit SF Desk and delete `sf-desk.db`. It is re
 
 ### Calendar
 
-Time Entry reads your calendar on your own computer: through macOS Calendar access (EventKit, which macOS asks
-you to allow), classic Outlook's COM API on Windows, or Microsoft Graph if you've signed in to Microsoft 365.
+Time Entry reads only your Exchange calendar, on your own computer: the Mac's Exchange account through macOS
+Calendar access (EventKit, which macOS asks you to allow), your Exchange mailbox through classic Outlook's COM
+API on Windows, or Microsoft 365 through Microsoft Graph if you've signed in. Other calendars on the computer
+(iCloud, Google, Outlook data files and the like) are never read.
 Meetings are read when you open the tab and are not stored, apart from the links described above.
 
 ## How the local server is protected

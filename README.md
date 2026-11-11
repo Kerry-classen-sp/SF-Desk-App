@@ -33,13 +33,14 @@ calendar permission and troubleshooting.
 - **Export to Excel** on the Pipeline deal list and the My Time activity list downloads the rows shown (after
   filters, hidden records and any clicked bar, tile or opportunity) as an .xlsx with typed dates, amounts and
   hours, a total row and a link to each record
-- **Time Entry** shows your calendar a week at a time. On a Mac it reads the calendars from your Internet
-  Accounts (System Settings > Internet Accounts), starting with the Exchange account's calendar if there is
-  one; pick another calendar, or **Salesforce events** (the Event records you own), from the list at the top.
+- **Time Entry** shows your calendar a week at a time. It reads your Exchange calendar only: on a Mac, the Exchange
+  account in System Settings > Internet Accounts; on Windows, your Exchange mailbox in classic Outlook or
+  Microsoft 365. Other calendars aren't offered. The list at the top picks between the Exchange account's
+  calendars and **Salesforce events** (the Event records you own).
   The first time, macOS asks to let SF Desk access your calendars (when you run the server yourself, it asks
   for the app you started it from, e.g. Terminal); if you say no, the tab says so and shows Salesforce events.
   The calendar reader (`mac/calendar.swift`) is built into the Mac app; a checkout builds it with the Xcode
-  Command Line Tools on first use, and without them asks Calendar.app instead, which is slower.
+  Command Line Tools on first use, and needs them to read the calendar.
   Events with a Deal Support are green, events without one are red, and ones you mark **No Deal Support needed**
   turn grey. Click an event to see its details, then **Create Deal Support**: type to find the opportunity among
   all open opportunities (opportunities on accounts named in the meeting title come first), and the form is

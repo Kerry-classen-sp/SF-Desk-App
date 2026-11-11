@@ -177,6 +177,13 @@ darkQuery.addEventListener('change', applyTheme);
   .tes-show-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; color: var(--ink); cursor: pointer; }
   .tes-create div.field { display: flex; flex-direction: column; }
   .tes-create .tes-create-opp { grid-column: 1 / -1; }
+  .linked-ds { margin: 8px 0 14px; }
+  .linked-ds h3 { font-size: 14px; margin: 0 0 8px; }
+  tr.linked-mine td { font-weight: 600; }
+  h4.req-head { display: flex; align-items: center; gap: 10px; }
+  h4.req-head .spacer { flex: 1; }
+  .tes-create label.req-check { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .tes-create label.req-check input { margin: 0; }
   .tes-create .tes-create-opp .opp-pick { max-height: 160px; }
   .tes-create div.field fieldset.checklist { flex: 1 1 0; height: auto; min-height: 12em; }
   @media (max-width: 760px) { .grid.tes-create { grid-template-columns: minmax(0, 1fr); } }
@@ -256,6 +263,10 @@ darkQuery.addEventListener('change', applyTheme);
   .charts section { margin-bottom: 0; }
   .dash section { margin-bottom: 18px; }
   .dash .charts { margin-bottom: 18px; } .dash .charts section { margin-bottom: 0; }
+  .opp-tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .opp-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; margin-bottom: -1px;
+    font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .opp-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 13px; }
   .seg button + button { border-left: 1px solid var(--line); }
@@ -1577,6 +1588,10 @@ function renderOpps() {
 // My time on each opportunity: the hours of my Deal Supports on it (where I'm the Assigned SE), read once
 // per account and filled into the list's My time column.
 const MY_TIME_TIP = 'Total hours of your Deal Supports on the opportunity (where you are the Assigned SE)';
+// A Deal Support hours value in hours, for the hours field's unit (hours, minutes or text like "30 min").
+const unitHours = (unit, v) => v == null || v === '' ? 0 : unit === 'text' ? parseDuration(v) : unit === 'minutes' ? Number(v) / 60 : Number(v) || 0;
+// "12.5 h (3)": the total and count of a list of hours values, or — when there are none.
+const hoursText = (unit, list) => list.length ? `${fmtH(list.reduce((s, v) => s + unitHours(unit, v), 0))} (${list.length})` : '—';
 async function loadAcctMyHours() {
   const a = current?.account;
   if (!a) return;
@@ -1589,11 +1604,8 @@ async function loadAcctMyHours() {
   });
   try {
     const d = await current.myHours.data;
-    const toHours = (v) => v == null || v === '' ? 0 : d.hoursUnit === 'text' ? parseDuration(v) : d.hoursUnit === 'minutes' ? Number(v) / 60 : Number(v) || 0;
-    fill((id) => {
-      const list = d.byOpp[id] || [];
-      return list.length ? `${fmtH(list.reduce((s, v) => s + toHours(v), 0))} (${list.length})` : '—';
-    }, `${d.hoursLabel} of your ${d.labelPlural} on this opportunity (where you are the ${d.mineLabel}), and how many`);
+    fill((id) => hoursText(d.hoursUnit, d.byOpp[id] || []),
+      `${d.hoursLabel} of your ${d.labelPlural} on this opportunity (where you are the ${d.mineLabel}), and how many`);
   } catch (e) {
     current.myHours = null;
     fill(() => '—', e.message);
@@ -1667,15 +1679,37 @@ function openOpportunity(id) {
     ),
     oppSub(a, o, openOpportunity),
     el('section', { id: 'focusOpp' }),
-    el('section', { id: 'oppTes', hidden: true }),
-    el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
+    ...oppTabs(),
   );
   renderFocusOpp(o);
   loadOppTes(o);
   loadDealSupports(o);
 }
 
-// Above the opportunity's Deal Supports: its TES Requests (each opening its details in a dialog) and RFP
+// Under the opportunity's details, a tab for its Deal Supports and one for its TES/RFP Requests. Each
+// opportunity opens on Deal Supports. The TES/RFP tab goes when the org has no TES Requests.
+function oppTabs() {
+  const tab = (which, label) => el('button', { role: 'tab', id: which === 'ds' ? 'oppTabDs' : 'oppTabTes', onclick: () => showOppTab(which) }, label);
+  const bar = el('div', { class: 'opp-tabs', role: 'tablist', 'aria-label': 'Opportunity' },
+    tab('ds', 'Deal Supports'), tab('tes', 'TES/RFP Requests'));
+  const tes = el('section', { id: 'oppTes', role: 'tabpanel', 'aria-labelledby': 'oppTabTes' }, el('div', { class: 'empty' }, 'Loading…'));
+  const ds = el('section', { id: 'dealSupports', role: 'tabpanel', 'aria-labelledby': 'oppTabDs' },
+    el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…'));
+  queueMicrotask(() => showOppTab('ds'));
+  return [bar, ds, tes];
+}
+function showOppTab(which) {
+  const tesTab = document.getElementById('oppTabTes');
+  if (which === 'tes' && tesTab?.hidden) which = 'ds';
+  document.getElementById('dealSupports')?.toggleAttribute('hidden', which !== 'ds');
+  document.getElementById('oppTes')?.toggleAttribute('hidden', which !== 'tes');
+  for (const [id, on] of [['oppTabDs', which === 'ds'], ['oppTabTes', which === 'tes']]) {
+    const b = document.getElementById(id);
+    if (b) { b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+  }
+}
+
+// In the opportunity's TES/RFP tab: its TES Requests (each opening its details in a dialog) and RFP
 // Requests, with New TES Request and Show all at the top. Nothing shows when the org has no TES Requests.
 async function loadOppTes(o) {
   const sec = document.getElementById('oppTes');
@@ -1685,8 +1719,11 @@ async function loadOppTes(o) {
       dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
     if (document.getElementById('oppTes') === sec) renderOppTes(sec, o, d);
   } catch (e) {
-    if (e.status !== 404 && document.getElementById('oppTes') === sec) {
-      sec.hidden = false;
+    if (document.getElementById('oppTes') !== sec) return;
+    if (e.status === 404) {
+      document.getElementById('oppTabTes').hidden = true;
+      if (!document.getElementById('oppTes').hidden) showOppTab('ds');
+    } else {
       sec.replaceChildren(el('h3', {}, 'TES/RFP Requests'), el('div', { class: 'empty' }, e.message));
     }
   }
@@ -1701,7 +1738,8 @@ function renderOppTes(sec, o, d) {
   const tesShown = oppTesAll.on ? d.records : d.records.filter((r) => r.open);
   const rfpShown = oppTesAll.on ? rfp : rfp.filter((r) => r.open);
   const total = d.records.length + rfp.length, open = d.records.concat(rfp).filter((r) => r.open).length;
-  sec.hidden = false;
+  const tab = document.getElementById('oppTabTes');
+  if (tab) tab.textContent = open ? `TES/RFP Requests (${open})` : 'TES/RFP Requests';
   const text = (x) => (r) => (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—';
   const f = d.fields;
   const tesDateOf = (r) => (f.activityDate && r[f.activityDate.name]) || (f.requestDate && r[f.requestDate.name])
@@ -1724,10 +1762,19 @@ function renderOppTes(sec, o, d) {
     if (document.getElementById('oppTes') === sec) renderOppTes(sec, o, fresh);
     return fresh;
   };
-  const table = (title, rows, cols, nameCell) => rows.length ? [el('h4', {}, `${title} (${rows.length})`),
-    el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, el('th', {}, 'Name'), cols.map(([h]) => el('th', {}, h)))),
-      el('tbody', {}, rows.map((r) => el('tr', {}, el('td', {}, nameCell(r)), cols.map(([, v]) => el('td', {}, v(r))))))))] : [];
+  const mt = d.myTime;
+  const timeTip = mt && `${mt.hoursLabel} of your ${mt.labelPlural} linked to this request (where you are the ${mt.mineLabel}), and how many`;
+  const timeHead = () => el('th', { class: 'n col-time', title: timeTip }, 'My time');
+  const timeCell = (r) => el('td', { class: 'n col-time', title: timeTip }, hoursText(mt.hoursUnit, r.myHours || []));
+  // Each list with my time on each request and in all, and its New button (shown even when the list is empty).
+  const table = (title, rows, cols, nameCell, add) => rows.length || add ? [
+    el('h4', { class: 'req-head' }, `${title} (${rows.length})`, add ? [el('span', { class: 'spacer' }), add] : ''),
+    rows.length ? el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, el('th', {}, 'Name'), cols.map(([h]) => el('th', {}, h)), mt ? timeHead() : '')),
+      el('tbody', {}, rows.map((r) => el('tr', {}, el('td', {}, nameCell(r)), cols.map(([, v]) => el('td', {}, v(r))), mt ? timeCell(r) : ''))),
+      mt ? el('tfoot', {}, el('tr', {}, el('td', { colspan: cols.length + 1 }, 'My total'),
+        el('td', { class: 'n col-time', title: timeTip }, hoursText(mt.hoursUnit, rows.flatMap((r) => r.myHours || []))))) : '',
+    )) : el('div', { class: 'empty' }, `No ${oppTesAll.on ? '' : 'open '}${title}.`)] : [];
   const all = el('input', { type: 'checkbox', checked: oppTesAll.on,
     onchange: () => { oppTesAll.on = all.checked; renderOppTes(sec, o, d); } });
   sec.replaceChildren(
@@ -1737,43 +1784,53 @@ function renderOppTes(sec, o, d) {
       d.createForm ? el('button', { class: 'primary', onclick: () => openTesCreate(o, d) }, 'New TES Request') : ''),
     ...table('TES Requests', tesShown, tesCols, (r) => el('a', { href: '#', title: 'Show this TES Request',
       onclick: (ev) => { ev.preventDefault(); openTesDialog(r, d, reload); } }, r.Name)),
-    ...table('RFP Requests', rfpShown, rfpCols, (r) => el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener',
-      title: 'Open this RFP Request in Salesforce' }, r.Name, ' ↗')),
+    ...table('RFP Requests', rfpShown, rfpCols, (r) => el('a', { href: '#', title: 'Show this RFP Request and its Deal Supports',
+      onclick: (ev) => { ev.preventDefault(); openRfpDialog(r, d.rfp); } }, r.Name),
+      d.rfp?.createForm ? el('button', { class: 'primary', onclick: () => openRfpCreate(o, d.rfp) }, 'New RFP Request') : null),
     d.rfp?.error ? el('div', { class: 'sub' }, `RFP Requests: ${d.rfp.error}`) : '',
-    tesShown.length || rfpShown.length ? '' : el('div', { class: 'empty' }, total
+    tesShown.length || rfpShown.length || d.rfp?.createForm ? '' : el('div', { class: 'empty' }, total
       ? 'No open TES or RFP Requests. Show all to see the finished ones.' : 'No TES or RFP Requests on this opportunity yet.'),
   );
 }
 
 // A new TES Request on the opportunity: the TES Request section of its Salesforce page layout. With no
 // opportunity (from the TES tab), the form starts with a picker for one. onCreated runs after the save.
-function openTesCreate(o, d, onCreated = () => { loadOppTes(o); if (document.getElementById('dealSupports')) loadDealSupports(o); }) {
-  const form = d.createForm;
-  const dlg = el('dialog', { class: 'popup', 'aria-label': 'Create TES Request' });
+function openTesCreate(o, d, onCreated) {
+  openRequestCreate(o, { form: d.createForm, kind: 'TES Request', path: 'tes' }, onCreated);
+}
+// A new RFP Request on the opportunity: the fields its submitter supplies.
+function openRfpCreate(o, rfp, onCreated) {
+  openRequestCreate(o, { form: rfp.createForm, kind: 'RFP Request', path: 'rfp' }, onCreated);
+}
+function openRequestCreate(o, { form, kind, path }, onCreated = () => { loadOppTes(o); if (document.getElementById('dealSupports')) loadDealSupports(o); }) {
+  const dlg = el('dialog', { class: 'popup', 'aria-label': `Create ${kind}` });
   dlg.addEventListener('close', () => dlg.remove());
   let opp = o;
   const picker = o ? null : oppCombobox({ picked: null, onPick: (x) => { opp = x; } });
   const inputs = new Map(form.fields.map((f) => [f, dsInput(f)]));
   const wide = (f) => f.type === 'textarea' || f.type === 'multipicklist';
   // A checklist sits in a div, not a label: a label would tick its first box when its title is clicked.
-  const cell = (f) => el(f.type === 'multipicklist' ? 'div' : 'label', { class: ['field', wide(f) && 'wide'].filter(Boolean).join(' ') },
-    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null), inputs.get(f));
+  // A checkbox sits before its label, on one line.
+  const cell = (f) => f.type === 'boolean'
+    ? el('label', { class: 'field req-check', title: f.help }, inputs.get(f), el('span', {}, f.label))
+    : el(f.type === 'multipicklist' ? 'div' : 'label', { class: ['field', wide(f) && 'wide'].filter(Boolean).join(' '), title: f.help },
+      el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null), inputs.get(f));
   const cancel = el('button', { onclick: () => dlg.close() }, 'Cancel');
-  const create = el('button', { class: 'primary' }, 'Create TES Request');
+  const create = el('button', { class: 'primary' }, `Create ${kind}`);
   create.addEventListener('click', async () => {
     const fields = Object.fromEntries(form.fields.map((f) => [f.name, dsValue(f, inputs.get(f))]));
-    const missing = [!opp && 'Opportunity', ...form.fields.filter((f) => f.required && (fields[f.name] == null || fields[f.name] === '')).map((f) => f.label)];
+    const missing = [!opp && 'Opportunity', ...form.fields.filter((f) => f.required && f.type !== 'boolean' && (fields[f.name] == null || fields[f.name] === '')).map((f) => f.label)];
     if (missing.some(Boolean)) return toast('Required: ' + missing.filter(Boolean).join(', '), 'err');
     create.disabled = true;
     try {
-      const rec = await api(`/opportunities/${opp.Id}/tes`, { method: 'POST', body: { fields } });
-      toast(`Created ${rec.Name || 'a TES Request'} on ${opp.Name} in Salesforce`, 'ok');
+      const rec = await api(`/opportunities/${opp.Id}/${path}`, { method: 'POST', body: { fields } });
+      toast(`Created ${rec.Name || `a ${kind}`} on ${opp.Name} in Salesforce`, 'ok');
       dlg.close();
       onCreated(rec, opp);
     } catch (e) { toast(e.message, 'err'); create.disabled = false; }
   });
   dlg.append(
-    el('div', { class: 'title-row' }, el('h2', {}, 'Create TES Request'), el('span', { class: 'spacer', style: 'flex:1' })),
+    el('div', { class: 'title-row' }, el('h2', {}, `Create ${kind}`), el('span', { class: 'spacer', style: 'flex:1' })),
     o ? el('div', { class: 'sub' }, `On ${o.Name}`) : '',
     // Single-line fields down the left, the checklists on the right, text areas full width below.
     el('div', { class: 'grid tes-create' },
@@ -1810,11 +1867,60 @@ function openTesDialog(r, d, reload) {
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
     sub ? el('div', { class: 'sub' }, sub) : '',
+    linkedDealSupports(r.Id, 'TES Request'),
     box,
   );
   document.body.append(dlg);
   dlg.showModal();
   renderTesPanel(r, box, { d, open: true, onAdded: refresh });
+}
+
+// One RFP Request in a dialog: its status and type, and the Deal Supports linked to it.
+function openRfpDialog(r, rfp) {
+  const f = rfp.fields;
+  const val = (x) => x && (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name]));
+  const dlg = el('dialog', { class: 'popup', 'aria-label': r.Name });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });
+  const sub = [['status', ''], ['type', ''], ['due', 'Due '], ['manager', ''], ['assignedSe', '']]
+    .map(([k, pre]) => val(f[k]) ? pre + val(f[k]) : '').filter(Boolean).join(' · ');
+  dlg.append(
+    el('div', { class: 'title-row' },
+      el('h2', {}, r.Name),
+      el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
+    sub ? el('div', { class: 'sub' }, sub) : '',
+    linkedDealSupports(r.Id, 'RFP Request'),
+  );
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// The Deal Supports linked to a TES or RFP Request (everyone's; mine in bold), with their hours and mine.
+function linkedDealSupports(requestId, kind) {
+  const box = el('div', { class: 'linked-ds' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…'));
+  api(`/requests/${requestId}/deal-supports`).then((d) => {
+    const head = el('h3', {}, `${d.labelPlural} linked to this ${kind} (${d.records.length})`);
+    if (!d.records.length) return box.replaceChildren(head, el('div', { class: 'empty' }, `No ${d.labelPlural} are linked to this ${kind} yet.`));
+    const sum = (list) => hoursText(d.hoursUnit, list.map((r) => r.hours));
+    const mine = d.records.filter((r) => r.mine);
+    box.replaceChildren(head, el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, el('th', {}, 'Name'), el('th', {}, d.dateLabel), d.byLabel ? el('th', {}, d.byLabel) : '',
+        d.activityLabel ? el('th', {}, d.activityLabel) : '', el('th', {}, 'Opportunity'), d.hoursLabel ? el('th', { class: 'n col-time' }, 'Hours') : '')),
+      el('tbody', {}, d.records.map((r) => el('tr', { class: r.mine ? 'linked-mine' : null, title: r.mine ? 'Yours' : null },
+        el('td', {}, el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: 'Open in Salesforce' }, dsNum(r.Name) || r.Name, ' ↗')),
+        el('td', {}, r.date ? shortDate(r.date + 'T12:00:00') : '—'),
+        d.byLabel ? el('td', {}, r.who || '—') : '',
+        d.activityLabel ? el('td', {}, r.activity || '—') : '',
+        el('td', {}, r.oppName || '—'),
+        d.hoursLabel ? el('td', { class: 'n col-time' }, r.hours == null || r.hours === '' ? '—' : fmtH(unitHours(d.hoursUnit, r.hours))) : ''))),
+      d.hoursLabel ? el('tfoot', {},
+        el('tr', {}, el('td', { colspan: 3 + !!d.byLabel + !!d.activityLabel }, 'My total'), el('td', { class: 'n col-time' }, sum(mine))),
+        el('tr', {}, el('td', { colspan: 3 + !!d.byLabel + !!d.activityLabel }, 'Everyone'), el('td', { class: 'n col-time' }, sum(d.records)))) : '',
+    )));
+  }, (e) => box.replaceChildren(el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, e.message)));
+  return box;
 }
 
 // The TES Stage as a dropdown, saved with its button; read-only when the user can't change it.
@@ -3055,7 +3161,8 @@ function renderTesRequests(list) {
   const dateHead = el('th', { class: 'tes-date', title: `${[...dates.map((x) => x.label), 'Created Date'].join(', else ')}; hover a date to see which` },
     f.activityDate?.label || 'Date');
   const heads = [nameField?.label || dsMeta.label, dateHead, f.tesStatus?.label, 'Opportunity',
-    ...cols.map(([h, x]) => el('th', { title: x.label, class: x === f.lastStatus ? 'tes-date' : null }, h)), 'Created by', 'Created'].filter(Boolean);
+    ...cols.map(([h, x]) => el('th', { title: x.label, class: x === f.lastStatus ? 'tes-date' : null }, h)), 'Created by', 'Created',
+    d.myTime && el('th', { class: 'n col-time', title: tesTimeTip(d) }, 'My time')].filter(Boolean);
   const ncols = heads.length;
   const tbody = el('tbody');
   // Rows come sorted by stage, then customer, so each group's requests are together.
@@ -3100,7 +3207,8 @@ function renderTesRequests(list) {
   }
   if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
   sec.replaceChildren(
-    el('h3', {}, `TES Requests (${list.length})`),
+    el('h3', {}, `TES Requests (${list.length})`, d.myTime ? el('span', { class: 'sub', style: 'font-weight:normal;margin-left:10px', title: tesTimeTip(d).replace('this TES Request', 'these TES Requests') },
+      `My time: ${hoursText(d.myTime.hoursUnit, list.flatMap((r) => r.myHours || []))}`) : ''),
     el('div', { class: 'tablewrap' }, el('table', {},
       el('thead', {}, el('tr', {}, heads.map((h) => h instanceof Node ? h : el('th', {}, h)))),
       tbody,
@@ -3119,6 +3227,8 @@ function tesLastUpdateCell(r) {
   return el('td', { class: 'tes-date', title: tone ? `${age} days since the last update` : null },
     tone ? el('span', { class: 'tes-chip ' + tone }, dsText(x, v)) : dsText(x, v));
 }
+
+const tesTimeTip = (d) => `${d.myTime.hoursLabel} of your ${d.myTime.labelPlural} linked to this TES Request (where you are the ${d.myTime.mineLabel}), and how many`;
 
 // One TES Request's row; clicking it opens the request in a dialog, as on the opportunity screen.
 function tesRow(r, cols) {
@@ -3142,6 +3252,7 @@ function tesRow(r, cols) {
           : el('td', {}, (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—')),
         el('td', {}, r.CreatedBy?.Name || ''),
         el('td', {}, shortDate(r.CreatedDate)),
+        d.myTime ? el('td', { class: 'n col-time', title: tesTimeTip(d) }, hoursText(d.myTime.hoursUnit, r.myHours || [])) : null,
       ),
     ];
   }
@@ -3227,8 +3338,7 @@ async function openOppPopup(oppId, accountId) {
         closeBtn),
       oppSub(a, o, (id) => { dlg.close(); openOppPopup(id, a.Id); }),
       el('section', { id: 'focusOpp' }),
-      el('section', { id: 'oppTes', hidden: true }),
-      el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
+      ...oppTabs(),
     );
     renderFocusOpp(o);
     loadOppTes(o);
@@ -3842,8 +3952,8 @@ function showCalendar() {
   loadSources().then(loadCalendar);
 }
 
-// Calendars to show: your Salesforce events, or any calendar on this computer: the Mac's Internet Accounts
-// when SF Desk runs on a Mac, or classic Outlook's when it runs on Windows; on Windows also your Microsoft 365
+// Calendars to show: your Salesforce events, or your Exchange calendar: the Mac's Exchange account
+// when SF Desk runs on a Mac, or classic Outlook's Exchange mailbox when it runs on Windows; on Windows also your Microsoft 365
 // calendars through Microsoft Graph (for the new Outlook), after a one-time sign-in. The choice is remembered
 // on this machine; the first time, the Microsoft 365 or Exchange main calendar is picked if there is one.
 async function loadSources() {
@@ -3877,7 +3987,7 @@ async function loadSources() {
       list.map((c) => el('option', { value: c.id }, c.title)))),
     // On Windows, say why there are no classic Outlook calendars rather than leaving the group out.
     cal.sources.platform === 'win32' && !cal.sources.calendars.length ? el('optgroup', { label: 'Outlook (classic)' },
-      el('option', { disabled: true, title: error || '' }, error ? `Not available: ${error.length > 90 ? error.slice(0, 90) + '…' : error}` : 'No calendars found in classic Outlook')) : null,
+      el('option', { disabled: true, title: error || '' }, error ? `Not available: ${error.length > 90 ? error.slice(0, 90) + '…' : error}` : 'No Exchange calendars found in classic Outlook')) : null,
     graph ? el('optgroup', { label: 'Microsoft 365' },
       graph.signedIn ? el('option', { value: 'graph:signout' }, `Sign out of Microsoft 365${graph.account ? ` (${graph.account})` : ''}`)
         : el('option', { value: 'graph:signin' }, 'Sign in to Microsoft 365…')) : null);
@@ -4038,7 +4148,7 @@ function renderCalendar() {
   document.getElementById('calSub').textContent = (cal.sourceNote && !fromMac ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
       (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed'
-    : fromMac ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Outlook or Google calendar reaches Salesforce through Einstein Activity Capture, ' +
+    : fromMac ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here.');
 
   // Monday to Friday, plus the weekend days that have something on them; on phones, the one day picked.
