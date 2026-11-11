@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the iPhone app's host as a Mac app, to test it without Xcode or an iPhone:
+# Builds the iPad app's host as a Mac app, to test it without Xcode or an iPad:
 #   ios/build-mac-test.sh            builds ios/build/SF Desk iPhone Test.app
 #   ios/build-mac-test.sh --run      and opens it, signing in with the Salesforce login page
 #   ios/build-mac-test.sh --selftest builds it and runs its self-test with the Salesforce CLI's token

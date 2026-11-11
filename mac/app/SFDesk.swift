@@ -603,7 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
   }
 
-  // One-click Outlook add-in setup (OUTLOOK.md): make and trust the HTTPS certificate, restart the server so
+  // One-click Outlook add-in setup (docs/OUTLOOK.md): make and trust the HTTPS certificate, restart the server so
   // it listens on HTTPS, save the add-in's manifest to Downloads and open Outlook's add-in page. Adding the
   // file there has to be done by hand: Microsoft doesn't let an app install add-ins by itself.
   @objc func setUpOutlook(_ sender: Any?) {
@@ -703,7 +703,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   @objc func outlookHelp(_ sender: Any?) {
-    NSWorkspace.shared.open(URL(string: "https://github.com/Kerry-classen-sp/SF-Desk-App/blob/main/OUTLOOK.md")!)
+    NSWorkspace.shared.open(URL(string: "https://github.com/Kerry-classen-sp/SF-Desk-App/blob/main/docs/OUTLOOK.md")!)
   }
 
   func buildMenu() {

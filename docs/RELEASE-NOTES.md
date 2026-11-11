@@ -25,9 +25,9 @@
   - The Outlook certificate's authority now only works for `localhost`, and its private key is deleted once
     it has signed SF Desk's certificate. **Set Up Outlook Add-in** replaces an older one (macOS asks for
     your password once).
-  - [SECURITY.md](SECURITY.md) explains how SF Desk signs in, what it stores and how it keeps data safe.
+  - [docs/SECURITY.md](SECURITY.md) explains how SF Desk signs in, what it stores and how it keeps data safe.
 - **iPad and iPhone (preview):** an iOS version of SF Desk runs the same core on the device, with no
-  server (see [ios/README.md](ios/README.md)). It isn't distributed yet.
+  server (see [docs/IOS.md](IOS.md)). It isn't distributed yet.
 
 Build 2 (November 10, 2026):
 
@@ -47,6 +47,14 @@ Build 3 (November 10, 2026):
 
 - **iPad and iPhone:** Time Entry reads only the Exchange calendar there too, and the app has the same
   version and build number as the desktop apps (`ios/build-device.sh` builds and installs it).
+
+Build 4 (November 10, 2026):
+
+- **iPad app on TestFlight:** the iOS app is now iPad only (it also runs on Apple silicon Macs) and is
+  ready for TestFlight: `ios/testflight.sh` archives and uploads it, Release builds log less, and it has a
+  privacy manifest. See [docs/IOS.md](IOS.md#testflight) and, for encryption,
+  [docs/EXPORT-COMPLIANCE.md](EXPORT-COMPLIANCE.md).
+- **Docs:** all the documentation is now in `docs/`.
 
 ## 1.7.1 (October 30, 2026)
 

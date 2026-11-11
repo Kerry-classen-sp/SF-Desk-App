@@ -41,7 +41,7 @@ cp "$TMP/$NODE_NAME/LICENSE" "$STAGE/runtime/node/LICENSE"
 rm -rf "$TMP"
 
 cp "$ROOT/mac/package/Install SF Desk.command" "$ROOT/mac/package/READ ME FIRST.txt" "$STAGE/"
-cp "$ROOT/RELEASE-NOTES.md" "$STAGE/Release Notes.txt"
+cp "$ROOT/docs/RELEASE-NOTES.md" "$STAGE/Release Notes.txt"
 chmod +x "$STAGE/Install SF Desk.command" "$STAGE/app/mac/package/"*.command "$STAGE/runtime/node/bin/node"
 printf 'SF Desk %s build %s (%s, %s), Node.js %s\n' "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)" \
   "$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$STAGE/app/package.json" | head -1 | grep . || echo 0)" \

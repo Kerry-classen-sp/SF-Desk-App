@@ -26,7 +26,7 @@ const { version: VERSION } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package
 
 const PORT = Number(process.env.PORT || 3000);
 // The Outlook add-in needs HTTPS. When the certificate made by scripts/outlook-cert.sh is there, SF Desk also
-// listens on https://localhost:HTTPS_PORT (see OUTLOOK.md).
+// listens on https://localhost:HTTPS_PORT (see docs/OUTLOOK.md).
 const HTTPS_PORT = Number(process.env.HTTPS_PORT || 3443);
 const CERT_DIR = process.env.SF_DESK_CERTS || path.join(ROOT, 'certs');
 const LOGIN_URL = (process.env.SF_LOGIN_URL || 'https://login.salesforce.com').replace(/\/$/, '');
@@ -104,7 +104,7 @@ function runCli(args, { targetOrg = true, timeout = 60_000 } = {}) {
     const done = (err, stdout) => {
       // cmd.exe reports a missing sf as "not recognized" (exit code 1) rather than ENOENT.
       if (err?.code === 'ENOENT' || (isWindows && !String(stdout).trim() && /not recognized/i.test(String(err?.message)))) {
-        return reject(new HttpError(400, 'Salesforce CLI (sf) not found. Install it, or set SF_CLI_PATH in .env. See README.md.'));
+        return reject(new HttpError(400, 'Salesforce CLI (sf) not found. Install it, or set SF_CLI_PATH in .env. See docs/README.md.'));
       }
       let out = null;
       try { out = JSON.parse(stdout); } catch { /* handled below */ }
@@ -137,7 +137,7 @@ async function cliToken() {
 app.get('/login', (req, res, next) => {
   if (USE_CLI) return cliLogin(req, res).catch(next);
   // The OAuth callback is registered on http://localhost, whose session the task pane doesn't share.
-  if (req.secure) return next(new HttpError(400, 'The Outlook add-in can only connect with the Salesforce CLI login. See OUTLOOK.md.'));
+  if (req.secure) return next(new HttpError(400, 'The Outlook add-in can only connect with the Salesforce CLI login. See docs/OUTLOOK.md.'));
   const verifier = b64url(crypto.randomBytes(32));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
   const state = b64url(crypto.randomBytes(16));

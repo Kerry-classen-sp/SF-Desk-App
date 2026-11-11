@@ -1,7 +1,7 @@
 #!/bin/sh
-# Builds the iPhone/iPad app and installs it on a connected device, with the same version and build number
+# Builds the iPad app and installs it on a connected device, with the same version and build number
 # as the desktop apps (package.json "version" and "build", copied into project.yml first).
-#   ios/build-device.sh [device-id]    default: the first connected iPhone or iPad
+#   ios/build-device.sh [device-id]    default: the first connected iPad
 # Needs Xcode (not only the Command Line Tools) and XcodeGen.
 set -eu
 cd "$(dirname "$0")"

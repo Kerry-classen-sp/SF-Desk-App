@@ -2,7 +2,8 @@
 
 How SF Desk works, what data it touches, where that data is kept, and how it is protected. It is written for
 users and for IT or security reviewers. For setup, see [INSTALL.md](INSTALL.md); for the Outlook add-in, see
-[OUTLOOK.md](OUTLOOK.md).
+[OUTLOOK.md](OUTLOOK.md); for the iOS app's encryption and export compliance (TestFlight), see
+[EXPORT-COMPLIANCE.md](EXPORT-COMPLIANCE.md).
 
 ## Summary
 
@@ -25,7 +26,7 @@ users and for IT or security reviewers. For setup, see [INSTALL.md](INSTALL.md);
 | Mac app | A small Node.js server inside **SF Desk.app**, on `http://localhost:3000` | The app's own window (WebKit) |
 | Windows | The same Node.js server, installed per user with no admin rights | Microsoft Edge in app mode, with its own profile |
 | From a Git checkout | `npm start` | Any browser on the same computer |
-| iPad / iPhone | The same core code in JavaScriptCore, inside the app; there is no network server | The app's own window, at `sfdesk://app/` |
+| iPad | The same core code in JavaScriptCore, inside the app; there is no network server | The app's own window, at `sfdesk://app/` |
 
 In every client the page asks the local core for data, and the core calls the Salesforce REST API with your
 access token. The page never holds the token.
@@ -48,7 +49,7 @@ With `SF_CLIENT_ID` set, SF Desk uses the OAuth web server flow with PKCE (S256)
 checked on return, and the callback `http://localhost:3000/oauth/callback`. **Disconnect** revokes the token
 with Salesforce.
 
-### iPad and iPhone
+### iPad
 
 The iOS app signs in with the Salesforce CLI's public client (`PlatformCLI`) and PKCE. The sign-in page
 (your My Domain, then SSO) is shown in the app; the redirect to `http://localhost:1717/OauthRedirect` is

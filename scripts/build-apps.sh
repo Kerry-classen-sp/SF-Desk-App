@@ -1,7 +1,7 @@
 #!/bin/bash
 # Makes a new build of every client SF Desk hands out, start to finish:
 #   1. pulls (git pull --tags), then commits anything uncommitted, so nothing is left out;
-#   2. raises the build number in package.json ("build"), keeping the version, sets the iPhone app's version
+#   2. raises the build number in package.json ("build"), keeping the version, sets the iPad app's version
 #      and build number to match (ios/project.yml), and commits that;
 #   3. pushes, opens a pull request into main and merges it;
 #   4. tags main v<version>-build.<build> and pushes the tag;
@@ -34,7 +34,7 @@ BRANCH="$(git branch --show-current)"
 
 # Dependencies are checked before anything is committed or pushed.
 if [ -z "$USE_NPM" ]; then
-  [ -d node_modules ] || die "No node_modules in $ROOT. Get them (INSTALL.md step 4), or use --npm where the registry is reachable."
+  [ -d node_modules ] || die "No node_modules in $ROOT. Get them (docs/INSTALL.md step 4), or use --npm where the registry is reachable."
   node -e '
     const fs = require("fs");
     const lock = require("./package-lock.json");
@@ -47,7 +47,7 @@ if [ -z "$USE_NPM" ]; then
     }
     if (bad.length) {
       console.error("node_modules doesn\x27t match package-lock.json:\n  " + bad.join("\n  "));
-      console.error("Refresh it (INSTALL.md step 4), or use --npm where the registry is reachable.");
+      console.error("Refresh it (docs/INSTALL.md step 4), or use --npm where the registry is reachable.");
       process.exit(1);
     }
   '
