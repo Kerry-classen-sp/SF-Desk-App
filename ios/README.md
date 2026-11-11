@@ -23,8 +23,8 @@ The same app as the Mac's, without the Outlook add-in. Nothing in Salesforce nee
 - **Salesforce sign-in:** uses the Salesforce CLI's connected app (`PlatformCLI`, which every org has), with
   PKCE. The org's login page (`SFDeskLoginURL` in `SFDesk/Info.plist`, the My Domain) opens in the app and
   continues to SSO. The refresh token stays in the Keychain. **Disconnect** revokes it.
-- **Calendar:** Time Entry reads the calendars added under Settings > Calendar > Accounts on the device,
-  such as Exchange or iCloud.
+- **Calendar:** Time Entry reads the Exchange account added under Settings > Calendar > Accounts on the
+  device. Other calendars (iCloud, Google...) aren't listed or read.
 
 ## Build for an iPhone
 
@@ -37,6 +37,10 @@ cd ios && xcodegen && open SFDesk.xcodeproj
 
 In Xcode, pick your team under Signing & Capabilities, connect your iPhone (or pick a simulator), and click
 Run. Each build first runs `build-core.sh`, so it always has the current `src/` and `public/`.
+
+Or, with an iPhone or iPad connected, `ios/build-device.sh` builds and installs it in one go. It first sets
+the app's version and build number (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`)
+from `package.json`, so it matches the desktop apps; `scripts/build-apps.sh` keeps them in step too.
 
 The first time you run a build from your own Mac on an iPhone, you have to trust it on the phone. On the
 iPhone, go to Settings > General > VPN & Device Management.

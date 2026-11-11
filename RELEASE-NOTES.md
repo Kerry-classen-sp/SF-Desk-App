@@ -43,6 +43,11 @@ Build 2 (November 10, 2026):
 - **Exchange calendar only:** Time Entry reads only your Exchange calendar, on a Mac and on Windows. iCloud,
   Google and other calendars on the computer aren't listed or read.
 
+Build 3 (November 10, 2026):
+
+- **iPad and iPhone:** Time Entry reads only the Exchange calendar there too, and the app has the same
+  version and build number as the desktop apps (`ios/build-device.sh` builds and installs it).
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
