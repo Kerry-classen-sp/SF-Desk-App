@@ -1,5 +1,34 @@
 # SF Desk release notes
 
+## 1.7.5 (November 10, 2026)
+
+- **TES and RFP Requests on the opportunity:** above its Deal Supports, an opportunity shows a **TES/RFP
+  Requests** box with its open TES Requests and RFP Requests. **Show all** adds completed and cancelled ones,
+  and **New TES Request** creates one. Click a TES Request to see it in a dialog, where its TES Stage can be
+  changed. RFP Requests link to Salesforce.
+- **Create TES Requests:** the form has TES Stage, TES Type, Tech Specialist Role and Preferred TES Start
+  Date on the left, Products on the right and Notes across the bottom.
+- **TES tab:** lists TES Requests on all open opportunities (no longer only the last 90 days), open ones by
+  default; **Show all** adds completed and cancelled ones. Click a request to open the same dialog to see
+  and update it, and **New TES Request** asks for the opportunity first.
+- **Deal Support form:** Related TES Link and RFP Request only list open requests.
+- **DS Time activities by opportunity:** the activity list is grouped by opportunity with a subtotal for
+  each and a total at the bottom. Click a group to open it, or tick **Expand all**.
+- **My time on opportunities:** the account's opportunity table has a **My time** column (your hours on its
+  Deal Supports) in place of Next Step, with a narrower Probability column. An opened opportunity shows your
+  time too.
+- **Refresh:** a refresh button in the header reloads the current view. On iPad and iPhone, pull down.
+- **Move My Time:** a message stays up while the move runs, so you don't switch away part way through.
+- **Security:**
+  - SF Desk only answers requests addressed to `localhost`, so a website can't reach it by pointing its own
+    domain name at your computer.
+  - The Outlook certificate's authority now only works for `localhost`, and its private key is deleted once
+    it has signed SF Desk's certificate. **Set Up Outlook Add-in** replaces an older one (macOS asks for
+    your password once).
+  - [SECURITY.md](SECURITY.md) explains how SF Desk signs in, what it stores and how it keeps data safe.
+- **iPad and iPhone (preview):** an iOS version of SF Desk runs the same core on the device, with no
+  server (see [ios/README.md](ios/README.md)). It isn't distributed yet.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
