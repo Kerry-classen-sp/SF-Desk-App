@@ -138,7 +138,7 @@ Use this if you'd rather work from a Git checkout, for example to change the cod
 | Salesforce CLI (`sf`) | SF Desk borrows its login, because we can't create our own Salesforce app | `sf --version` |
 | A Salesforce login to `sailpoint.my.salesforce.com` with API access | Your normal SSO login is fine | |
 | Your SailPoint Exchange account added to the Mac and syncing in Calendar.app | The **Time Entry** tab reads your meetings from it | Your meetings show in Calendar.app |
-| Xcode Command Line Tools (recommended) | Builds the small calendar reader; without them the calendar is slower and less complete | `xcode-select -p` |
+| Xcode Command Line Tools | Builds the small calendar reader; without them Time Entry can't read the calendar | `xcode-select -p` |
 
 Run every command below in **Terminal.app** (Applications > Utilities > Terminal). Calendar
 permission is granted to the app that starts SF Desk, and Terminal is the one that's known to work.
@@ -369,9 +369,7 @@ Work through these in order:
    from Terminal.app and opening Time Entry makes macOS ask.
 4. **Did the calendar reader build?** Look in the Terminal window running SF Desk for
    `Couldn't build the calendar helper`. That means the Xcode Command Line Tools are missing or
-   broken: run `xcode-select --install`, delete `data/bin`, restart SF Desk. Without the tools SF Desk
-   falls back to asking Calendar.app, which needs a separate permission under **Privacy & Security >
-   Automation** (Terminal > Calendar).
+   broken: run `xcode-select --install`, delete `data/bin`, restart SF Desk.
 
 ### macOS says the installer, `node` or `better_sqlite3.node` can't be opened
 

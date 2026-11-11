@@ -1649,9 +1649,25 @@ const TES_CREATE_FIELDS = [
   ['Notes', 'RFP_Notes__c'],
 ];
 
-// The form for a new TES Request: those fields with the record type's picklist values and defaults, required
-// as on its page layout. Null when the user can't create one.
-async function tesCreateForm(req, d, rt) {
+// The fields of a new RFP Request: its page layout's "Supplied by Submitter" fields, then the positioning
+// and notes. The Deal Advancement team fills in the rest.
+const RFP_CREATE_FIELDS = [
+  ['Date Due to Customer', 'Date_Due_to_Customer__c'],
+  ['Platform Request', 'Platform_Request__c'],
+  ['Partner(s)', 'Partner_s__c'],
+  ['Executive Summary Needed', 'Executive_Summary_Needed__c'],
+  ['Signature Needed? (RFP)', 'Signature_Needed_RFP__c'],
+  ['SailPoint Evaluator Guide Used?', 'Customer_Used_SailPoint_RFP_Template__c'],
+  ['Customer received SSJ?', 'Customer_Received_SSJ__c'],
+  ['RFP Document uploaded?', 'RFP_Document_uploaded__c'],
+  ['Is this request from a Portal?', 'Is_this_request_from_a_Portal__c'],
+  ['Describe Positioning for this Sale', 'Describe_Positioning_for_this_Sale__c'],
+  ['Notes', 'RFP_Notes__c'],
+];
+
+// The form for a new TES or RFP Request (spec: [label, API name] pairs): those fields with the record type's
+// picklist values and defaults, required as on its page layout. Null when the user can't create one.
+async function requestCreateForm(req, d, rt, spec) {
   if (!d.createable || !rt.available) return null;
   const read = (path) => sf(req, 'GET', `/services/data/${API}${path}`).catch((err) => {
     if (err.status === 401 || err.status >= 502) throw err;
@@ -1663,14 +1679,14 @@ async function tesCreateForm(req, d, rt) {
   ]);
   const onLayout = new Map((layout?.editLayoutSections || []).flatMap((s) => s.layoutRows.flatMap((r) => r.layoutItems))
     .flatMap((i) => (i.layoutComponents || []).filter((c) => c.type === 'Field').map((c) => [c.value, !!i.required])));
-  const fields = TES_CREATE_FIELDS.map(([label, name]) => d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name))
+  const fields = spec.map(([label, name]) => d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name))
     .filter((f) => f?.createable)
     .map((f) => {
       const p = pv?.picklistFieldValues?.[f.name];
       const picklist = /picklist/.test(f.type)
         ? (p ? p.values.map((v) => v.value) : (f.picklistValues || []).filter((v) => v.active).map((v) => v.value)) : null;
       const def = p?.defaultValue?.value ?? f.defaultValue ?? null;
-      return { name: f.name, label: f.label, type: f.type, length: f.length || null, picklist,
+      return { name: f.name, label: f.label, type: f.type, length: f.length || null, picklist, help: f.inlineHelpText || null,
         required: onLayout.get(f.name) ?? (!f.nillable && !f.defaultedOnCreate && f.type !== 'boolean'),
         defaultValue: def != null && (!picklist || String(def).split(';').every((v) => picklist.includes(v))) ? def : null };
     });
@@ -1679,36 +1695,40 @@ async function tesCreateForm(req, d, rt) {
   return fields.length ? { fields, accountField: account?.name || null, setName: !!d.fields.find((f) => f.name === 'Name')?.createable } : null;
 }
 
-// A new TES Request on an opportunity, from the create form's fields: { fields: { apiName: value } }.
-api.post('/opportunities/:id/tes', wrap(async (req, res) => {
+// A new TES or RFP Request on an opportunity, from its create form's fields: { fields: { apiName: value } }.
+async function createRequest(req, res, kind, meta) {
   const oppId = sfId(req.params.id);
-  const ds = await dealSupportMeta(req), tm = await tesMeta(req);
-  if (!tm.createForm) throw new HttpError(403, `Your Salesforce user can't create ${TES_RECORD_TYPE}s.`);
-  const byName = new Map(tm.createForm.fields.map((f) => [f.name, f]));
-  const body = { RecordTypeId: tm.recordTypeId, [ds.oppField]: oppId };
+  const ds = await dealSupportMeta(req);
+  const form = meta?.createForm;
+  if (!form) throw new HttpError(403, `Your Salesforce user can't create ${kind}s.`);
+  const byName = new Map(form.fields.map((f) => [f.name, f]));
+  const body = { RecordTypeId: meta.recordTypeId, [ds.oppField]: oppId };
   for (const [k, v] of Object.entries(req.body?.fields || {})) {
     const f = byName.get(k);
     if (!f) throw new HttpError(400, `Field not settable here: ${k}`);
+    if (f.type === 'boolean') { body[k] = v === true || v === 'true'; continue; }
     if (v === '' || v == null) continue;
     const value = String(v);
     if (f.picklist && !value.split(';').every((x) => f.picklist.includes(x))) throw new HttpError(400, `${f.label}: pick from the list.`);
     if (f.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpError(400, `${f.label} must be a date.`);
     body[k] = f.length ? value.slice(0, f.length) : value;
   }
-  const missing = tm.createForm.fields.filter((f) => f.required && body[f.name] === undefined);
+  const missing = form.fields.filter((f) => f.required && f.type !== 'boolean' && body[f.name] === undefined);
   if (missing.length) throw new HttpError(400, 'Required: ' + missing.map((f) => f.label).join(', '));
   const [opp] = await query(req, `SELECT AccountId FROM Opportunity WHERE Id = '${oppId}'`);
   if (!opp) throw new HttpError(404, 'Opportunity not found');
   // Salesforce names each Deal Support itself, but the name can't be empty; the account is the opportunity's.
-  if (tm.createForm.setName) body.Name = 'X';
-  if (tm.createForm.accountField && opp.AccountId) body[tm.createForm.accountField] = opp.AccountId;
-  const created = await sf(req, 'POST', `/services/data/${API}/sobjects/${tm.object}`, { body });
-  const [rec] = await query(req, `SELECT Id, Name FROM ${tm.object} WHERE Id = '${sfId(created.id)}'`);
+  if (form.setName) body.Name = 'X';
+  if (form.accountField && opp.AccountId) body[form.accountField] = opp.AccountId;
+  const created = await sf(req, 'POST', `/services/data/${API}/sobjects/${ds.object}`, { body });
+  const [rec] = await query(req, `SELECT Id, Name FROM ${ds.object} WHERE Id = '${sfId(created.id)}'`);
   res.json(rec || { Id: created.id });
-}));
+}
+api.post('/opportunities/:id/tes', wrap(async (req, res) => createRequest(req, res, TES_RECORD_TYPE, await tesMeta(req))));
+api.post('/opportunities/:id/rfp', wrap(async (req, res) => createRequest(req, res, RFP_RECORD_TYPE, await rfpMeta(req))));
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 7) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 8) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
@@ -1722,10 +1742,10 @@ async function tesMeta(req) {
         isUser: isUserRef(f) };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 7, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
+  req.session.tesMeta = { v: 8, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
     recordTypeId: rt.available ? rt.recordTypeId : null, canCreate: !!d.createable,
     fields, missing, updates: await tesUpdatesMeta(req, d), stageEdit: await tesStageEdit(req, d, rt, fields.stage),
-    createForm: await tesCreateForm(req, d, rt) };
+    createForm: await requestCreateForm(req, d, rt, TES_CREATE_FIELDS) };
   return req.session.tesMeta;
 }
 
@@ -1837,7 +1857,7 @@ const RFP_FIELDS = [['status', 'Status__c', /^status$/i], ['type', 'RFP_Type__c'
   ['due', 'Date_Due_to_Customer__c', /^date due to customer$/i], ['manager', 'Assigned_To__c', /^proposal manager$/i],
   ['assignedSe', 'Regional_SE_IDN__c', /^assigned se$/i]];
 async function rfpMeta(req) {
-  if (req.session.rfpMeta?.v === 1) return req.session.rfpMeta.meta;
+  if (req.session.rfpMeta?.v === 2) return req.session.rfpMeta.meta;
   const ds = await dealSupportMeta(req);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
   const rt = (d.recordTypeInfos || []).find((r) => lower(r.name) === lower(RFP_RECORD_TYPE));
@@ -1846,16 +1866,59 @@ async function rfpMeta(req) {
     const f = d.fields.find((x) => x.name === name) || d.fields.find((x) => label.test(x.label));
     if (f) fields[key] = { name: f.name, label: f.label, type: f.type, rel: f.type === 'reference' ? f.relationshipName || null : null };
   }
-  const meta = rt ? { recordType: rt.name, label: d.label, fields } : null;
-  req.session.rfpMeta = { v: 1, meta };
+  const meta = rt ? { recordType: rt.name, label: d.label, fields, recordTypeId: rt.available ? rt.recordTypeId : null,
+    createForm: rt.available ? await requestCreateForm(req, d, rt, RFP_CREATE_FIELDS) : null } : null;
+  req.session.rfpMeta = { v: 2, meta };
   return meta;
+}
+
+// My time on TES and RFP Requests: the hours of my Deal Supports (Assigned SE = me) whose Related TES Link
+// or RFP Request names the request, as { myTime: { labels }, byRequest: { requestId: [hours] } }. Null
+// when the org has neither link or no hours field.
+async function myRequestHours(req) {
+  const [rr, tm, ds] = await Promise.all([relatedRequestMeta(req), timeMeta(req), dealSupportMeta(req)]);
+  const by = tm.userFields[0], hours = tm.hoursFields[0];
+  if (!rr.kinds.length || !by || !hours) return null;
+  const links = rr.kinds.map((k) => k.field);
+  const records = await query(req, `SELECT ${[...new Set([...links, hours.name])].join(', ')} FROM ${rr.object} ` +
+    `WHERE ${by.name} = '${sfId(req.session.sf.user.id)}' AND (${links.map((f) => `${f} != null`).join(' OR ')})`, 10000);
+  const byRequest = {};
+  for (const r of records) for (const f of links) if (r[f]) (byRequest[r[f]] ||= []).push(r[hours.name] ?? null);
+  return { myTime: { labelPlural: ds.labelPlural, mineLabel: by.label, hoursLabel: hours.label, hoursUnit: hours.unit }, byRequest };
+}
+// Everyone's Deal Supports linked to one TES or RFP Request (by Related TES Link or RFP Request), newest first,
+// with the date, who they're assigned to, the activity and the hours; `mine` marks mine.
+api.get('/requests/:id/deal-supports', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const [rr, tm, ds] = await Promise.all([relatedRequestMeta(req), timeMeta(req), dealSupportMeta(req)]);
+  if (!rr.kinds.length) throw new HttpError(404, `${ds.label} has no Related TES Link or RFP Request field.`);
+  const by = tm.userFields[0], hours = tm.hoursFields[0], date = tm.dateFields[0], activity = activityField(ds);
+  const cols = ['Id', 'Name', ds.oppField, ...(ds.oppRel ? [`${ds.oppRel}.Name`] : []), date.name,
+    ...(hours ? [hours.name] : []), ...(by ? [by.name, ...(by.rel ? [`${by.rel}.Name`] : [])] : []), ...(activity ? [activity.name] : [])];
+  const records = await query(req, `SELECT ${[...new Set(cols)].join(', ')} FROM ${ds.object} ` +
+    `WHERE ${rr.kinds.map((k) => `${k.field} = '${id}'`).join(' OR ')} ORDER BY ${date.name} DESC NULLS LAST LIMIT 500`, 500);
+  const me = String(req.session.sf.user.id).slice(0, 15);
+  res.json({
+    label: ds.label, labelPlural: ds.labelPlural, dateLabel: date.label, activityLabel: activity?.label || null,
+    hoursLabel: hours?.label || null, hoursUnit: hours?.unit || null, byLabel: by?.label || null,
+    records: records.map((r) => ({ Id: r.Id, Name: r.Name, oppId: r[ds.oppField] || null, oppName: ds.oppRel ? r[ds.oppRel]?.Name || null : null,
+      date: String(r[date.name] || '').slice(0, 10), hours: hours ? r[hours.name] ?? null : null,
+      who: by?.rel ? r[by.rel]?.Name || '' : '', mine: !!by && String(r[by.name] || '').slice(0, 15) === me,
+      activity: activity ? String(r[activity.name] ?? '').split(';').join(', ') : '' })),
+  });
+}));
+
+// Each record with its myHours; my time is extra, so the list still loads when it can't be read.
+async function withMyHours(req, lists) {
+  const mh = await myRequestHours(req).catch((err) => { if (err.status === 401) throw err; return null; });
+  return { myTime: mh?.myTime || null, lists: lists.map((list) => list.map((r) => ({ ...r, myHours: mh?.byRequest[r.Id] || [] }))) };
 }
 
 // The TES Requests and RFP Requests on one opportunity, for its page; `open` marks the unfinished ones.
 api.get('/opportunities/:id/tes', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const ds = await dealSupportMeta(req), tm = await tesMeta(req);
-  const records = (await queryTes(req, ds, tm, [`RecordType.Name = ${soqlStr(TES_RECORD_TYPE)}`, `${ds.oppField} = '${id}'`]))
+  let records = (await queryTes(req, ds, tm, [`RecordType.Name = ${soqlStr(TES_RECORD_TYPE)}`, `${ds.oppField} = '${id}'`]))
     .map((r) => ({ ...r, open: tesOpen(tm.fields.stage && r[tm.fields.stage.name]) }));
   let rfp = null;
   try {
@@ -1871,7 +1934,10 @@ api.get('/opportunities/:id/tes', wrap(async (req, res) => {
     if (err.status === 401) throw err;
     rfp = { error: err.message, records: [] };
   }
-  res.json({ ...tm, oppField: ds.oppField, oppRel: ds.oppRel, records, rfp });
+  const { myTime, lists: [tesMine, rfpMine] } = await withMyHours(req, [records, rfp?.records || []]);
+  records = tesMine;
+  if (rfp) rfp.records = rfpMine;
+  res.json({ ...tm, oppField: ds.oppField, oppRel: ds.oppRel, records, rfp, myTime });
 }));
 
 // Every TES Request on an open opportunity, newest first. team = mine (the default; I'm its Opportunity Lead SE or Assigned
@@ -1897,8 +1963,9 @@ api.get('/tes', wrap(async (req, res) => {
       const ids = people.map((id) => `'${sfId(id)}'`).join(', ');
       where.push(`(${se.map((x) => `${x.name} IN (${ids})`).join(' OR ')})`);
     }
-    const records = await queryTes(req, ds, tm, where);
-    const out = { ...tm, oppField: ds.oppField, oppRel: o, team, truncated: records.length >= TES_MAX, records };
+    const found = await queryTes(req, ds, tm, where);
+    const { myTime, lists: [records] } = await withMyHours(req, [found]);
+    const out = { ...tm, oppField: ds.oppField, oppRel: o, team, truncated: found.length >= TES_MAX, records, myTime };
     store.saveSetting(orgOf(req), kind, out);
     return out;
   }, () => {

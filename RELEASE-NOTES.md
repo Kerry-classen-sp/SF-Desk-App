@@ -29,6 +29,20 @@
 - **iPad and iPhone (preview):** an iOS version of SF Desk runs the same core on the device, with no
   server (see [ios/README.md](ios/README.md)). It isn't distributed yet.
 
+Build 2 (November 10, 2026):
+
+- **Tabs on the opportunity:** under its details, an opportunity has a **Deal Supports** tab (where it
+  opens) and a **TES/RFP Requests** tab, which shows how many requests are open.
+- **New RFP Request:** the RFP Requests list has a button to create one, asking for what the submitter
+  supplies: Date Due to Customer, Platform Request, Partner(s) and Executive Summary Needed (required), plus
+  Signature Needed, Evaluator Guide Used, the SSJ, RFP document and portal checkboxes, positioning and notes.
+- **The Deal Supports behind a request:** click a TES or RFP Request to see the Deal Supports linked to it
+  (by Related TES Link or RFP Request), everyone's, with yours in bold and your total and everyone's.
+- **My time on requests:** the TES and RFP Requests lists, on the opportunity and on the TES tab, show your
+  hours on the Deal Supports linked to each request, and your total.
+- **Exchange calendar only:** Time Entry reads only your Exchange calendar, on a Mac and on Windows. iCloud,
+  Google and other calendars on the computer aren't listed or read.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
