@@ -46,7 +46,13 @@ final class CoreRuntime {
     native.setObject(version, forKeyedSubscript: "version" as NSString)
     native.setObject(calendar != nil, forKeyedSubscript: "hasCalendar" as NSString)
 
-    let log: @convention(block) (String, String) -> Void = { level, text in NSLog("SF Desk core [%@] %@", level, text) }
+    let log: @convention(block) (String, String) -> Void = { level, text in
+      #if !DEBUG
+      // Release builds (TestFlight) keep warnings and errors only: other messages can name records.
+      guard level == "warn" || level == "error" else { return }
+      #endif
+      NSLog("SF Desk core [%@] %@", level, text)
+    }
     native.setObject(log, forKeyedSubscript: "log" as NSString)
 
     let sql: @convention(block) (String, String, String) -> String = { [db] op, text, params in

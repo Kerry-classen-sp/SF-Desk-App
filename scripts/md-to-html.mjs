@@ -11,6 +11,10 @@ import path from 'node:path';
 const [input, output, titleArg, linksFile] = process.argv.slice(2);
 const links = linksFile ? JSON.parse(fs.readFileSync(linksFile, 'utf8')) : {};
 const REPO = 'https://github.com/Kerry-classen-sp/SF-Desk-App/blob/main/';
+// The doc's folder in the repo (the nearest folder up with a package.json is the root), for its relative links.
+let root = path.resolve(path.dirname(input));
+while (!fs.existsSync(path.join(root, 'package.json')) && path.dirname(root) !== root) root = path.dirname(root);
+const DIR = path.relative(root, path.resolve(path.dirname(input))).split(path.sep).filter(Boolean).join('/');
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const slug = (s) => s.toLowerCase().replace(/<[^>]+>/g, '').replace(/[^\w\- ]+/g, '').trim().replace(/ /g, '-');
@@ -19,7 +23,7 @@ function href(url) {
   if (/^(https?:|mailto:|#)/.test(url)) return url;
   const [file, anchor] = url.split('#');
   const page = links[path.basename(file)];
-  return page ? encodeURI(page) + (anchor ? '#' + anchor : '') : REPO + url;
+  return page ? encodeURI(page) + (anchor ? '#' + anchor : '') : REPO + path.posix.join(DIR, url);
 }
 
 function inline(text) {

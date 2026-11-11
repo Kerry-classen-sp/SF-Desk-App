@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepares what the iPhone app bundles, in ios/SFDesk/Generated (not in git):
+# Prepares what the iPad app bundles, in ios/SFDesk/Generated (not in git):
 #   core-bundle.js  the shared core (src/sha1.js, router.js, store.js, core.js) and Host/host.js as one script
 #                   for JavaScriptCore, which can't load ES modules: each module is wrapped in a function
 #                   returning what it exports, and its imports of the others are dropped.

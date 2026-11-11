@@ -19,10 +19,11 @@ Microsoft's "Microsoft Graph Command Line Tools" client or for an SF Desk app re
 
 ## iOS app
 
-Built in `ios/` (see [ios/README.md](ios/README.md)): the shared core in JavaScriptCore, the page in a web
+Built in `ios/` (see [docs/IOS.md](IOS.md)): the shared core in JavaScriptCore, the page in a web
 view, and the Salesforce CLI's connected app for sign-in. Still to do:
 
-- **Distribution:** TestFlight or company device management, through the company's Apple Developer account.
+- **Distribution:** TestFlight is set up (`ios/testflight.sh`, see [docs/IOS.md](IOS.md#testflight)) on Kerry's
+  Apple Developer team; move it to the company's Apple Developer account, or company device management, for wider use.
 - **Own connected app:** if Salesforce or IT ever limits the CLI's `PlatformCLI` app, an SF Desk connected
   app (or External Client App) with a `sfdesk://` callback, opened in `ASWebAuthenticationSession`.
 - **Touch wording:** Time Entry says "right-click it to create…". On a phone, say "tap it", and offer the

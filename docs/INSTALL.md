@@ -71,7 +71,7 @@ built anywhere npm and nodejs.org are reachable. So:
    checkout's current commit, compiles the app and the calendar reader for Apple Silicon and Intel, puts the server, its
    `node_modules` and Node.js inside, signs it ad hoc, and writes `dist/SF Desk.app`, `dist/SF-Desk-app.zip`
    and `dist/SF-Desk.dmg`. The disk image, the file to hand out, holds the app, a shortcut to Applications
-   and, as web pages made by `scripts/md-to-html.mjs`, a short install guide (`mac/app/READ ME FIRST.md`),
+   and, as web pages made by `scripts/md-to-html.mjs`, a short install guide (`docs/MAC-READ-ME-FIRST.md`),
    the README and OUTLOOK.md.
 
 With `node_modules` in your checkout and a nodejs.org build of Node, `scripts/build-mac-app.sh --node

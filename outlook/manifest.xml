@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SF Desk add-in for Outlook: a "Create Deal Support" button on calendar meetings that opens SF Desk's
      create form in a task pane. Sideload the copy SF Desk serves at https://localhost:3443/outlook/manifest.xml,
-     which carries the HTTPS port SF Desk runs on (see OUTLOOK.md). -->
+     which carries the HTTPS port SF Desk runs on (see docs/OUTLOOK.md). -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
            xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"

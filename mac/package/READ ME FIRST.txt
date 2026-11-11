@@ -33,4 +33,4 @@ are kept.
 Uninstalling
 Delete the SF-Desk folder in your home folder and "Start SF Desk" on your Desktop.
 
-Problems? See INSTALL.md in ~/SF-Desk, "Troubleshooting".
+Problems? See docs/INSTALL.md in ~/SF-Desk, "Troubleshooting".
