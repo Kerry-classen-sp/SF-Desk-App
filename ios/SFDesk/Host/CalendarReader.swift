@@ -37,10 +37,15 @@ final class CalendarReader {
     }
   }
 
+  // Only the Exchange account's calendars; iCloud, Google and the rest on the device are left out.
+  private var exchangeCalendars: [EKCalendar] {
+    store.calendars(for: .event).filter { $0.source.sourceType == .exchange }
+  }
+
   func calendars(_ done: @escaping (Any) -> Void) {
     access { ok in
       guard ok else { return done(Self.denied) }
-      done(self.store.calendars(for: .event).map { c in [
+      done(self.exchangeCalendars.map { c in [
         "id": c.calendarIdentifier, "title": c.title, "account": c.source.title,
         "type": self.sourceType(c.source.sourceType), "writable": c.allowsContentModifications,
       ] as [String: Any] })
@@ -54,8 +59,8 @@ final class CalendarReader {
         return done(["error": "usage", "message": "Invalid time range"])
       }
       let wanted = Set(ids)
-      let calendars = self.store.calendars(for: .event).filter { wanted.contains($0.calendarIdentifier) }
-      if calendars.isEmpty { return done([Any]()) }
+      let calendars = self.exchangeCalendars.filter { wanted.contains($0.calendarIdentifier) }
+      if calendars.isEmpty { return done(["error": "usage", "message": "SF Desk only reads Exchange calendars. Pick one from the list."]) }
       let events = self.store.events(matching: self.store.predicateForEvents(withStart: start, end: end, calendars: calendars))
       done(events.map { e -> [String: Any] in
         let attendees: [[String: Any]] = (e.attendees ?? []).map { p in

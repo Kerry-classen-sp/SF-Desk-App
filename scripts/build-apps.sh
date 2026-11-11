@@ -1,7 +1,8 @@
 #!/bin/bash
 # Makes a new build of every client SF Desk hands out, start to finish:
 #   1. pulls (git pull --tags), then commits anything uncommitted, so nothing is left out;
-#   2. raises the build number in package.json ("build"), keeping the version, and commits that;
+#   2. raises the build number in package.json ("build"), keeping the version, sets the iPhone app's version
+#      and build number to match (ios/project.yml), and commits that;
 #   3. pushes, opens a pull request into main and merges it;
 #   4. tags main v<version>-build.<build> and pushes the tag;
 #   5. builds from main, so each build names that tag:
@@ -86,7 +87,9 @@ node -e '
   for (const [k, v] of Object.entries(pkg)) { if (k !== "build") out[k] = v; if (k === "version") out.build = Number(process.argv[1]); }
   fs.writeFileSync("package.json", JSON.stringify(out, null, 2) + "\n");
 ' "$BUILD"
-git commit -q -m "$NAME" package.json
+# The iPhone app (ios/project.yml) carries the same version and build number.
+sed -i '' -e "s/^\(    MARKETING_VERSION: \).*/\1\"$VERSION\"/" -e "s/^\(    CURRENT_PROJECT_VERSION: \).*/\1\"$BUILD\"/" ios/project.yml
+git commit -q -m "$NAME" package.json ios/project.yml
 
 # 3. Into main.
 git push -u origin "$BRANCH"
