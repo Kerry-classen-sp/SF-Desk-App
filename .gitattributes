@@ -1,2 +1,4 @@
 *.cmd text eol=crlf
 *.ico binary
+# The iOS app is built from the checkout; the desktop downloads (git archive) leave it out.
+ios/ export-ignore

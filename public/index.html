@@ -141,7 +141,7 @@ darkQuery.addEventListener('change', applyTheme);
   tr.new td { background: var(--row-soft); }
   td.actions { white-space: nowrap; width: 1%; }
   .tablewrap { overflow-x: auto; }
-  .col-name { min-width: 180px; } .col-stage { min-width: 150px; } .col-num { min-width: 100px; } .col-date { min-width: 140px; } .col-next { min-width: 180px; }
+  .col-name { min-width: 180px; } .col-stage { min-width: 150px; } .col-num { min-width: 100px; } .col-date { min-width: 140px; } .col-pct { width: 1%; min-width: 56px; } .col-time { min-width: 110px; white-space: nowrap; }
 
   .back { margin-bottom: 8px; }
   .ds-row { cursor: pointer; }
@@ -156,6 +156,9 @@ darkQuery.addEventListener('change', applyTheme);
   tr.tes-stage .tes-stalled { color: var(--err); }
   tr.tes-stage { cursor: pointer; } tr.tes-stage:hover td { filter: brightness(.97); }
   .tes-twisty { display: inline-block; width: 1.2em; }
+  tr.time-group td { font-weight: 600; background: var(--accent-soft); cursor: pointer; }
+  tr.time-group:hover td { filter: brightness(.97); }
+  tr.time-group .m { font-weight: 400; color: var(--muted); }
   .tes-date { white-space: nowrap; min-width: 112px; }
   td.tes-opp { white-space: normal; max-width: 260px; overflow-wrap: anywhere; }
   tr.tes-pager td { text-align: center; } tr.tes-pager td > * { margin: 0 6px; vertical-align: middle; }
@@ -169,6 +172,17 @@ darkQuery.addEventListener('change', applyTheme);
   .tes-update label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   .tes-update textarea { min-height: calc(3lh + 14px); resize: vertical; }
   .tes-update .form-actions { grid-column: 1 / -1; margin-top: 0; }
+  .grid.tes-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tes-create-col { display: grid; gap: 10px 14px; align-content: start; }
+  .tes-show-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; color: var(--ink); cursor: pointer; }
+  .tes-create div.field { display: flex; flex-direction: column; }
+  .tes-create .tes-create-opp { grid-column: 1 / -1; }
+  .tes-create .tes-create-opp .opp-pick { max-height: 160px; }
+  .tes-create div.field fieldset.checklist { flex: 1 1 0; height: auto; min-height: 12em; }
+  @media (max-width: 760px) { .grid.tes-create { grid-template-columns: minmax(0, 1fr); } }
+  .tes-stage-edit { display: flex; align-items: flex-end; gap: 10px; margin: 10px 0 4px; }
+  .tes-stage-edit .k { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .tes-stage-edit select { min-width: 160px; }
   .ds-more details { margin: 6px 0; } .ds-more details summary { cursor: pointer; color: var(--accent); }
   dialog.popup { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 22px;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
@@ -448,6 +462,7 @@ darkQuery.addEventListener('change', applyTheme);
     <button id="navAccts" onclick="showMain()">Accounts</button>
   <div class="hdr-right">
     <span id="who"></span>
+    <button id="refresh" hidden title="Reload this view from Salesforce" onclick="refreshView()">↻ Refresh</button>
     <button id="logout" hidden>Disconnect</button>
   </div>
   </nav>
@@ -466,7 +481,7 @@ const ACCOUNT_UI = [
 ];
 const OPP_UI = [
   ['Name', 'text', 'col-name'], ['StageName', 'picklist', 'col-stage'], ['Amount', 'number', 'col-num'],
-  ['CloseDate', 'date', 'col-date'], ['Probability', 'number', 'col-num'], ['NextStep', 'text', 'col-next'],
+  ['CloseDate', 'date', 'col-date'], ['Probability', 'number', 'col-pct'],
 ];
 const LABELS = { StageName: 'Stage', AnnualRevenue: 'Annual revenue', NumberOfEmployees: 'Employees',
   BillingCity: 'Billing city', BillingState: 'Billing state', CloseDate: 'Close date', NextStep: 'Next step',
@@ -742,6 +757,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('#hdr')) menu(
 function showConnect(message) {
   document.getElementById('who').textContent = '';
   document.getElementById('logout').hidden = true;
+  document.getElementById('refresh').hidden = true;
   document.getElementById('nav').hidden = true;
   document.getElementById('navToggle').hidden = true;
   const app = document.getElementById('app');
@@ -785,7 +801,10 @@ function showLoading(text) {
     el('h2', {}, el('span', { class: 'spin dark', 'aria-hidden': 'true' }), text))));
 }
 
+// The tab showing ('dash', 'time', 'team', 'cal', 'tes', 'accts' or 'settings'), for Refresh.
+let navTab = null;
 function setNav(which) {
+  navTab = which;
   document.getElementById('nav').hidden = false;
   document.getElementById('navToggle').hidden = false;
   menu(false);
@@ -797,6 +816,27 @@ function setNav(which) {
   document.getElementById('navTes').classList.toggle('on', which === 'tes');
   document.getElementById('navAccts').classList.toggle('on', which === 'accts');
 }
+
+// Refresh (the header button, and pulling down on iOS): load the tab showing again. On Accounts, the list
+// and the open account (and opportunity) are read again, keeping where you were.
+async function refreshView() {
+  const btn = document.getElementById('refresh');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    if (navTab === 'dash') await loadDashboard();
+    else if (navTab === 'time') await loadTime();
+    else if (navTab === 'team') await loadTeam();
+    else if (navTab === 'cal') await loadCalendar();
+    else if (navTab === 'tes') await loadTes();
+    else if (navTab === 'accts') {
+      const acctId = current?.account?.Id, oppId = current?.focusOppId;
+      await Promise.all([reloadAccounts(), acctId ? openAccount(acctId) : null]);
+      if (oppId && current?.account?.Id === acctId) openOpportunity(oppId);
+    }
+  } finally { btn.disabled = false; }
+}
+window.sfdeskRefresh = refreshView;
 
 // Settings (the app's Settings... menu, or #settings): Display Mode, saved in this browser.
 function showSettings() {
@@ -1057,6 +1097,7 @@ async function openAccount(id) {
 }
 
 function renderDetail() {
+  current.focusOppId = null;
   const a = current.account;
   document.getElementById('detail').replaceChildren(
     el('button', { class: 'back mobile-only', onclick: () => { document.querySelector('main').classList.remove('has-detail'); window.scrollTo(0, 0); } }, '‹ Accounts'),
@@ -1508,7 +1549,7 @@ function renderOpps() {
     const msg = !all.length ? 'No opportunities on this account yet.'
       : closed ? `No open opportunities. Tick "Show all" to see the ${closed} closed, contract renewal or Professional Services one${closed === 1 ? '' : 's'}.`
       : 'All opportunities on this account are hidden.';
-    tbody.append(el('tr', {}, el('td', { colspan: OPP_UI.length + 2, class: 'empty' }, msg)));
+    tbody.append(el('tr', {}, el('td', { colspan: OPP_UI.length + 3, class: 'empty' }, msg)));
   }
   const newRow = meta.canCreateOpportunity ? newOppRow(tbody) : null;
   const showHidden = el('input', { type: 'checkbox', checked: showHiddenOpps });
@@ -1522,12 +1563,41 @@ function renderOpps() {
       el('label', { class: 'selbar', title: SHOW_ALL_TIP }, toggle, `Show all (${closed})`),
       hiddenCount ? el('label', { class: 'selbar' }, showHidden, `Show hidden (${hiddenCount})`) : null),
     el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, el('th', { class: 'pick' }, ''), OPP_UI.map(([f, , c]) => el('th', { class: c }, label(f))), el('th', {}, ''))),
+      el('thead', {}, el('tr', {}, el('th', { class: 'pick' }, ''), OPP_UI.map(([f, , c]) => f === 'Probability'
+          ? el('th', { class: c + ' n', title: label(f) }, 'Prob.') : el('th', { class: c }, label(f))),
+        el('th', { class: 'n col-time', title: MY_TIME_TIP }, 'My time'), el('th', {}, ''))),
       tbody,
       newRow ? el('tfoot', {}, newRow) : null,
     )),
   );
   renderOppSelbar();
+  loadAcctMyHours();
+}
+
+// My time on each opportunity: the hours of my Deal Supports on it (where I'm the Assigned SE), read once
+// per account and filled into the list's My time column.
+const MY_TIME_TIP = 'Total hours of your Deal Supports on the opportunity (where you are the Assigned SE)';
+async function loadAcctMyHours() {
+  const a = current?.account;
+  if (!a) return;
+  if (current.myHours?.accountId !== a.Id) {
+    current.myHours = { accountId: a.Id, data: api(`/accounts/${a.Id}/my-hours`) };
+  }
+  const fill = (text, title) => document.querySelectorAll('#oppSection td.my-time').forEach((td) => {
+    const v = text(td.dataset.opp);
+    td.textContent = v; if (title) td.title = title;
+  });
+  try {
+    const d = await current.myHours.data;
+    const toHours = (v) => v == null || v === '' ? 0 : d.hoursUnit === 'text' ? parseDuration(v) : d.hoursUnit === 'minutes' ? Number(v) / 60 : Number(v) || 0;
+    fill((id) => {
+      const list = d.byOpp[id] || [];
+      return list.length ? `${fmtH(list.reduce((s, v) => s + toHours(v), 0))} (${list.length})` : '—';
+    }, `${d.hoursLabel} of your ${d.labelPlural} on this opportunity (where you are the ${d.mineLabel}), and how many`);
+  } catch (e) {
+    current.myHours = null;
+    fill(() => '—', e.message);
+  }
 }
 
 function renderOppSelbar() {
@@ -1546,6 +1616,7 @@ function oppRow(o) {
       ? el('a', { href: '#', title: 'Focus on this opportunity and its deal supports', onclick: (ev) => { ev.preventDefault(); openOpportunity(o.Id); } }, o.Name)
       : text(name, o[name])));
   }
+  tr.append(el('td', { class: 'n my-time col-time', 'data-opp': o.Id }, '…'));
   tr.append(el('td', { class: 'actions' },
     el('a', { class: 'btn', href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', title: 'Open this opportunity in Salesforce' }, 'Open')));
   return tr;
@@ -1561,6 +1632,7 @@ function newOppRow(tbody) {
     if (def[0] === 'Name') n.placeholder = 'New opportunity name';
     tr.append(el('td', {}, n));
   }
+  tr.append(el('td'));
   tr.append(el('td', { class: 'actions' }, add));
 
   add.addEventListener('click', async () => {
@@ -1585,6 +1657,7 @@ const shortDate = (d) => d ? new Date(String(d).replace(/\+0000$/, 'Z')).toLocal
 function openOpportunity(id) {
   const o = current.opportunities.find((x) => x.Id === id);
   if (!o) return;
+  current.focusOppId = id;
   const a = current.account;
   document.getElementById('detail').replaceChildren(
     el('button', { class: 'back', onclick: renderDetail }, `← ${a.Name}`),
@@ -1594,10 +1667,180 @@ function openOpportunity(id) {
     ),
     oppSub(a, o, openOpportunity),
     el('section', { id: 'focusOpp' }),
+    el('section', { id: 'oppTes', hidden: true }),
     el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
   );
   renderFocusOpp(o);
+  loadOppTes(o);
   loadDealSupports(o);
+}
+
+// Above the opportunity's Deal Supports: its TES Requests (each opening its details in a dialog) and RFP
+// Requests, with New TES Request and Show all at the top. Nothing shows when the org has no TES Requests.
+async function loadOppTes(o) {
+  const sec = document.getElementById('oppTes');
+  if (!sec) return;
+  try {
+    const [d] = await Promise.all([api(`/opportunities/${o.Id}/tes`),
+      dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
+    if (document.getElementById('oppTes') === sec) renderOppTes(sec, o, d);
+  } catch (e) {
+    if (e.status !== 404 && document.getElementById('oppTes') === sec) {
+      sec.hidden = false;
+      sec.replaceChildren(el('h3', {}, 'TES/RFP Requests'), el('div', { class: 'empty' }, e.message));
+    }
+  }
+}
+
+// Show all (finished ones too) is for one opportunity: another one starts with it off. The server marks
+// the open (unfinished) requests.
+const oppTesAll = { oppId: null, on: false };
+function renderOppTes(sec, o, d) {
+  if (oppTesAll.oppId !== o.Id) Object.assign(oppTesAll, { oppId: o.Id, on: false });
+  const rfp = d.rfp?.records || [];
+  const tesShown = oppTesAll.on ? d.records : d.records.filter((r) => r.open);
+  const rfpShown = oppTesAll.on ? rfp : rfp.filter((r) => r.open);
+  const total = d.records.length + rfp.length, open = d.records.concat(rfp).filter((r) => r.open).length;
+  sec.hidden = false;
+  const text = (x) => (r) => (x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])) || '—';
+  const f = d.fields;
+  const tesDateOf = (r) => (f.activityDate && r[f.activityDate.name]) || (f.requestDate && r[f.requestDate.name])
+    || String(r.CreatedDate || '').slice(0, 10);
+  const tesCols = [
+    ['Date', tesDateOf],
+    f.stage && [f.stage.label, text(f.stage)],
+    f.type && [f.type.label, text(f.type)],
+    f.tesStatus && [f.tesStatus.label, (r) => tesChip(r[f.tesStatus.name])],
+    f.assignedSe && [f.assignedSe.label, text(f.assignedSe)],
+    f.lastStatus && [f.lastStatus.label, text(f.lastStatus)],
+  ].filter(Boolean);
+  const rf = d.rfp?.fields || {};
+  const rfpCols = [
+    ['Created', (r) => shortDate(r.CreatedDate)],
+    ...['status', 'type', 'due', 'manager', 'assignedSe'].filter((k) => rf[k]).map((k) => [rf[k].label, text(rf[k])]),
+  ];
+  const reload = async () => {
+    const fresh = await api(`/opportunities/${o.Id}/tes`);
+    if (document.getElementById('oppTes') === sec) renderOppTes(sec, o, fresh);
+    return fresh;
+  };
+  const table = (title, rows, cols, nameCell) => rows.length ? [el('h4', {}, `${title} (${rows.length})`),
+    el('div', { class: 'tablewrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, el('th', {}, 'Name'), cols.map(([h]) => el('th', {}, h)))),
+      el('tbody', {}, rows.map((r) => el('tr', {}, el('td', {}, nameCell(r)), cols.map(([, v]) => el('td', {}, v(r))))))))] : [];
+  const all = el('input', { type: 'checkbox', checked: oppTesAll.on,
+    onchange: () => { oppTesAll.on = all.checked; renderOppTes(sec, o, d); } });
+  sec.replaceChildren(
+    el('h3', {}, oppTesAll.on || open === total ? `TES/RFP Requests (${oppTesAll.on ? total : open})`
+      : `TES/RFP Requests (${open} open of ${total})`, el('span', { class: 'spacer' }),
+      el('label', { class: 'tes-show-all', title: 'Include the Completed, Cancelled and closed ones' }, all, 'Show all'),
+      d.createForm ? el('button', { class: 'primary', onclick: () => openTesCreate(o, d) }, 'New TES Request') : ''),
+    ...table('TES Requests', tesShown, tesCols, (r) => el('a', { href: '#', title: 'Show this TES Request',
+      onclick: (ev) => { ev.preventDefault(); openTesDialog(r, d, reload); } }, r.Name)),
+    ...table('RFP Requests', rfpShown, rfpCols, (r) => el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener',
+      title: 'Open this RFP Request in Salesforce' }, r.Name, ' ↗')),
+    d.rfp?.error ? el('div', { class: 'sub' }, `RFP Requests: ${d.rfp.error}`) : '',
+    tesShown.length || rfpShown.length ? '' : el('div', { class: 'empty' }, total
+      ? 'No open TES or RFP Requests. Show all to see the finished ones.' : 'No TES or RFP Requests on this opportunity yet.'),
+  );
+}
+
+// A new TES Request on the opportunity: the TES Request section of its Salesforce page layout. With no
+// opportunity (from the TES tab), the form starts with a picker for one. onCreated runs after the save.
+function openTesCreate(o, d, onCreated = () => { loadOppTes(o); if (document.getElementById('dealSupports')) loadDealSupports(o); }) {
+  const form = d.createForm;
+  const dlg = el('dialog', { class: 'popup', 'aria-label': 'Create TES Request' });
+  dlg.addEventListener('close', () => dlg.remove());
+  let opp = o;
+  const picker = o ? null : oppCombobox({ picked: null, onPick: (x) => { opp = x; } });
+  const inputs = new Map(form.fields.map((f) => [f, dsInput(f)]));
+  const wide = (f) => f.type === 'textarea' || f.type === 'multipicklist';
+  // A checklist sits in a div, not a label: a label would tick its first box when its title is clicked.
+  const cell = (f) => el(f.type === 'multipicklist' ? 'div' : 'label', { class: ['field', wide(f) && 'wide'].filter(Boolean).join(' ') },
+    el('span', {}, f.label, f.required ? el('span', { class: 'req' }, ' *') : null), inputs.get(f));
+  const cancel = el('button', { onclick: () => dlg.close() }, 'Cancel');
+  const create = el('button', { class: 'primary' }, 'Create TES Request');
+  create.addEventListener('click', async () => {
+    const fields = Object.fromEntries(form.fields.map((f) => [f.name, dsValue(f, inputs.get(f))]));
+    const missing = [!opp && 'Opportunity', ...form.fields.filter((f) => f.required && (fields[f.name] == null || fields[f.name] === '')).map((f) => f.label)];
+    if (missing.some(Boolean)) return toast('Required: ' + missing.filter(Boolean).join(', '), 'err');
+    create.disabled = true;
+    try {
+      const rec = await api(`/opportunities/${opp.Id}/tes`, { method: 'POST', body: { fields } });
+      toast(`Created ${rec.Name || 'a TES Request'} on ${opp.Name} in Salesforce`, 'ok');
+      dlg.close();
+      onCreated(rec, opp);
+    } catch (e) { toast(e.message, 'err'); create.disabled = false; }
+  });
+  dlg.append(
+    el('div', { class: 'title-row' }, el('h2', {}, 'Create TES Request'), el('span', { class: 'spacer', style: 'flex:1' })),
+    o ? el('div', { class: 'sub' }, `On ${o.Name}`) : '',
+    // Single-line fields down the left, the checklists on the right, text areas full width below.
+    el('div', { class: 'grid tes-create' },
+      picker ? el('div', { class: 'field tes-create-opp' },
+        el('label', {}, el('span', {}, 'Opportunity', el('span', { class: 'req' }, ' *')), picker.input), picker.list, picker.status) : null,
+      el('div', { class: 'tes-create-col' }, form.fields.filter((f) => !wide(f)).map(cell)),
+      form.fields.filter((f) => f.type === 'multipicklist').map(cell),
+      form.fields.filter((f) => f.type === 'textarea').map(cell)),
+    el('div', { class: 'form-actions' }, cancel, create),
+  );
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// One TES Request in a dialog: its TES Stage, status updates, adding one, and all fields. reload() refreshes
+// the list it was opened from and gives the fresh /tes answer, for the dialog to show the request as it is now.
+function openTesDialog(r, d, reload) {
+  const f = d.fields;
+  const dlg = el('dialog', { class: 'popup', 'aria-label': r.Name });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });
+  const box = el('div', { class: 'ds-more' });
+  const sub = [f.type && r[f.type.name], f.assignedSe?.rel && r[f.assignedSe.rel]?.Name].filter(Boolean).join(' · ');
+  const refresh = async () => {
+    const fresh = await reload();
+    const now = fresh?.records.find((x) => x.Id === r.Id);
+    if (now && dlg.open) { dlg.close(); openTesDialog(now, fresh, reload); }
+  };
+  dlg.append(
+    el('div', { class: 'title-row' },
+      el('h2', {}, r.Name),
+      f.tesStatus && r[f.tesStatus.name] ? tesChip(r[f.tesStatus.name]) : null,
+      el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
+      el('span', { class: 'spacer', style: 'flex:1' }),
+      el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
+    sub ? el('div', { class: 'sub' }, sub) : '',
+    box,
+  );
+  document.body.append(dlg);
+  dlg.showModal();
+  renderTesPanel(r, box, { d, open: true, onAdded: refresh });
+}
+
+// The TES Stage as a dropdown, saved with its button; read-only when the user can't change it.
+function tesStagePicker(r, d, onSaved) {
+  const f = d.fields.stage, now = r[f.name] || '';
+  if (!d.stageEdit) return el('div', { class: 'tes-stage-edit' }, el('span', { class: 'k' }, f.label), now || '—');
+  const options = d.stageEdit.options.includes(now) || !now ? d.stageEdit.options : [now, ...d.stageEdit.options];
+  const select = el('select', { 'aria-label': f.label },
+    now ? null : el('option', { value: '' }, '—'),
+    options.map((v) => el('option', { value: v, disabled: v === now && !d.stageEdit.options.includes(v) }, v)));
+  select.value = now;
+  const save = el('button', { class: 'primary', disabled: true }, 'Save stage');
+  select.addEventListener('change', () => { save.disabled = select.value === now || !select.value; });
+  save.addEventListener('click', async () => {
+    save.disabled = select.disabled = true;
+    try {
+      await api(`/tes/${r.Id}/stage`, { method: 'PATCH', body: { stage: select.value } });
+      toast(`${r.Name}: ${f.label} is now ${select.value}`, 'ok');
+      await onSaved();
+    } catch (e) {
+      toast(e.message, 'err');
+      select.disabled = false;
+      save.disabled = select.value === now;
+    }
+  });
+  return el('div', { class: 'tes-stage-edit' }, el('label', {}, el('span', { class: 'k' }, f.label), select), save);
 }
 
 // One full-width row of read-only people: Lead SE, CSM, ATS, DSR, Services Manager.
@@ -1678,7 +1921,11 @@ function renderFocusOpp(o) {
   const first = el('div', { class: 'wide opp-row1' });
   form.append(first);
   for (const def of OPP_FOCUS_UI) {
-    if (def[1] !== 'textarea') { first.append(show(def)); continue; }
+    if (def[1] !== 'textarea') {
+      first.append(show(def));
+      if (def === OPP_FOCUS_UI.at(-2)) first.append(myHoursCell(o));
+      continue;
+    }
     if (def[0] === 'Description' && current.team) {
       const own = current.team.opportunities[o.Id];
       form.append(teamRow(current.team.roles, (r) => own?.[r] || { name: current.team.account[r], fromAccount: true }));
@@ -1689,12 +1936,26 @@ function renderFocusOpp(o) {
     el('a', { href: `${me.instanceUrl}/${o.Id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Edit in Salesforce ↗')), form);
 }
 
+// The total of my Deal Supports' hours on the opportunity (where I'm the Assigned SE), read-only.
+function myHoursCell(o) {
+  const out = el('input', { type: 'text', disabled: true, 'aria-label': 'My time', value: '…' });
+  const cell = el('label', {}, el('span', {}, 'My time'), out);
+  api(`/opportunities/${o.Id}/my-hours`).then((d) => {
+    const toHours = (v) => v == null || v === '' ? 0 : d.hoursUnit === 'text' ? parseDuration(v) : d.hoursUnit === 'minutes' ? Number(v) / 60 : Number(v) || 0;
+    out.value = `${fmtH(d.hours.reduce((s, v) => s + toHours(v), 0))} (${d.hours.length})`;
+    cell.title = `${d.hoursLabel} on the ${plural(d.hours.length, 'Deal Support')} where you are the ${d.mineLabel}`;
+  }, (e) => { out.value = '—'; cell.title = e.message; });
+  return cell;
+}
+
 // The open edit form on the opportunity's Deal Supports list, and on the account's Deal Supports panel.
 const oppDsEdit = { editing: null }, acctDsEdit = { editing: null };
 
 async function loadDealSupports(o) {
   const sec = document.getElementById('dealSupports');
   if (oppDsEdit.oppId !== o.Id) Object.assign(oppDsEdit, { oppId: o.Id, editing: null });
+  // Time added or changed here shows in the account's My time column when it's next listed.
+  if (current) current.myHours = null;
   try {
     dsMeta ||= await api('/deal-supports/meta');
     const records = await api(`/opportunities/${o.Id}/deal-supports`);
@@ -1808,8 +2069,16 @@ async function moveMyTime(o, box, close) {
       : '\n\nOnly yours move.';
     if (!confirm(`Move ${d.records.length} ${plural} (${hrs} hours) of yours\nfrom "${d.from.Name}"\nto "${to.Name}"?${stay}`)) return;
     go.disabled = pick.disabled = cancel.disabled = true;
+    // Over the whole page until Salesforce has them all, so nothing else gets clicked meanwhile.
+    const busy = el('dialog', { class: 'popup', 'aria-label': 'Moving your time', role: 'alertdialog' },
+      el('h2', {}, el('span', { class: 'spin dark', 'aria-hidden': 'true' }), ` Moving ${d.records.length} ${plural}…`),
+      el('div', { class: 'sub' }, `From "${d.from.Name}" to "${to.Name}". This can take a minute; please stay on this page until it's done.`));
+    busy.addEventListener('cancel', (ev) => ev.preventDefault());
+    document.body.append(busy);
+    busy.showModal();
     try {
-      const r = await api('/deal-supports/move', { method: 'POST', body: { fromOppId: o.Id, toOppId: to.Id, ids: d.records.map((x) => x.Id) } });
+      const r = await api('/deal-supports/move', { method: 'POST', body: { fromOppId: o.Id, toOppId: to.Id, ids: d.records.map((x) => x.Id) } })
+        .finally(() => { busy.close(); busy.remove(); });
       if (r.failed.length) {
         toast(`Moved ${r.moved.length}; ${r.failed.length} failed: ` + r.failed.map((f) => `${f.Name}: ${f.error}`).join('; '), 'err');
       } else toast(`Moved ${r.moved.length} ${r.moved.length === 1 ? d.label : d.labelPlural} to "${to.Name}"`, 'ok');
@@ -2086,7 +2355,7 @@ function dealSupportForm(o, close, opts = {}) {
     const word = kind === 'rfp' ? 'RFP' : 'TES';
     if (!related.oppId) note.textContent = 'Pick an opportunity to see matching requests.';
     else if (list == null) note.textContent = related.error || 'Loading…';
-    else if (!list.length) note.textContent = related.error || `No ${word} requests on this account or opportunity.`;
+    else if (!list.length) note.textContent = related.error || `No open ${word} requests on this account or opportunity.`;
     else {
       const group = (rows, label) => rows.length ? el('optgroup', { label }, rows.map((r) => el('option', { value: r.id }, requestLabel(r)))) : null;
       for (const g of [group(list.filter((r) => r.sameOpp), 'This opportunity'), group(list.filter((r) => !r.sameOpp), 'This account')]) if (g) n.append(g);
@@ -2666,14 +2935,13 @@ async function openDeal(o) {
 // ---------- TES ----------
 // TES Requests (the Deal Supports of record type "TES Request") where I, my team or one of them is the
 // Opportunity Lead SE or Assigned SE, grouped by TES Stage, then by customer A–Z, newest first within each.
-// `open` holds the rows showing their status updates; `updates` the updates fetched, by request Id.
-// Completed and Cancelled requests show for the last `days[stage]` days (TES_CLOSED_DAYS to start; each
-// "Show more" adds that much), and never once they're over TES_CLOSED_MAX days old.
+// `updates` holds the status updates fetched, by request Id.
+// Only requests on open opportunities come (the server leaves out closed ones).
 const TES_CLOSED = ['completed', 'cancelled'];
-const TES_CLOSED_DAYS = 90, TES_CLOSED_MAX = 365;
 // `collapsed` holds the collapsed stages, `page` each stage's page (from 0); both start over for each team filter.
 const TES_COLLAPSE_OVER = 100, TES_PAGE = 50;
-const tes = { data: null, filters: null, loads: 0, open: new Set(), updates: new Map(), days: {},
+// showAll adds the Completed and Cancelled requests (TES_CLOSED) to the open ones.
+const tes = { data: null, filters: null, loads: 0, updates: new Map(), showAll: false,
   collapsed: new Set(), page: {}, collapsedFor: null };
 const tesOpp = (r) => r[tes.data.oppRel] || null;
 const tesAcct = (r) => tesOpp(r)?.Account || null;
@@ -2694,18 +2962,10 @@ const tesDate = (r) => {
   return { value: String(r.CreatedDate || '').slice(0, 10), from: 'Created Date' };
 };
 const tesClosed = (r) => TES_CLOSED.includes(tesStage(r).toLowerCase());
-const tesDays = (stage) => tes.days[stage.toLowerCase()] || TES_CLOSED_DAYS;
-// When a Completed or Cancelled request finished: Date TES Completed, else TES End Date, else Last TES Stage, else its date.
-const tesClosedOn = (r) => {
-  const f = tes.data.fields;
-  const x = [f.completedDate, f.endDate, f.stageDate].find((y) => y && r[y.name]);
-  return x ? r[x.name] : tesDate(r).value;
-};
 
 function showTes() {
   setNav('tes');
   current = null;
-  tes.days = {};
   tes.collapsedFor = null;
   // The team filter of the other tabs (and saved with them), matching the request's Opportunity Lead SE or
   // Assigned SE. The BOAT and sales rep filters don't apply here, and their picks stay as they are.
@@ -2726,6 +2986,8 @@ function showTes() {
     el('div', { class: 'dash-head' },
       el('h2', {}, 'TES'),
       el('span', { class: 'picks' }, filters.boat, filters.team, filters.rep),
+      el('label', { class: 'tes-show-all', title: 'Include Completed and Cancelled requests' },
+        el('input', { type: 'checkbox', checked: tes.showAll, onchange: (ev) => { tes.showAll = ev.target.checked; if (tes.data) renderTes(); } }), 'Show all'),
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('span', { id: 'tesNew' }),
       el('button', { onclick: loadTes }, 'Reload'),
@@ -2754,8 +3016,10 @@ async function loadTes() {
 
 function renderTes() {
   const d = tes.data, f = tes.filters;
-  // Salesforce's own "New <Deal Support>: TES Request" page.
-  document.getElementById('tesNew')?.replaceChildren(d.canCreate && d.recordTypeId ? el('a', { class: 'btn primary', target: '_blank', rel: 'noopener',
+  // The create form, as on an opportunity, else Salesforce's own "New <Deal Support>: TES Request" page.
+  document.getElementById('tesNew')?.replaceChildren(d.createForm
+    ? el('button', { class: 'primary', onclick: () => openTesCreate(null, d, () => loadTes()) }, 'Create TES Request')
+    : d.canCreate && d.recordTypeId ? el('a', { class: 'btn primary', target: '_blank', rel: 'noopener',
     href: `${me.instanceUrl}/lightning/o/${d.object}/new?recordTypeId=${d.recordTypeId}`, title: `New ${d.label}: ${d.recordType}, in Salesforce` },
     'Add TES Request ↗') : '');
   const customer = (r) => tesAcct(r)?.Name || '';
@@ -2765,25 +3029,23 @@ function renderTes() {
       || String(tesOpp(x)?.AccountId).localeCompare(String(tesOpp(y)?.AccountId))
       || tesDate(y).value.localeCompare(tesDate(x).value) || String(y.CreatedDate).localeCompare(String(x.CreatedDate)));
   const hiddenCount = d.records.length - list.length;
-  const today = todayStr(), yearAgo = addDays(today, -TES_CLOSED_MAX);
-  const recent = list.filter((r) => !tesClosed(r) || tesClosedOn(r) >= yearAgo);
-  const shown = recent.filter((r) => !tesClosed(r) || tesClosedOn(r) >= addDays(today, -tesDays(tesStage(r))));
+  const shown = tes.showAll ? list : list.filter((r) => !tesClosed(r));
   const t = (s) => s.options[s.selectedIndex]?.textContent || '';
   const who = d.team === 'all' ? '' : d.team === 'mine' ? 'you are' : d.team === 'team' ? 'you or someone on your team is' : `${t(f.team)} is`;
   const se = [d.fields.leadSe?.label, d.fields.assignedSe?.label].filter(Boolean).join(' or ');
   document.getElementById('tesSub').textContent =
-    `${plural(recent.length, 'TES Request')}${who ? ` where ${who} ${se}` : ''}` +
+    `${plural(shown.length, 'TES Request')} on open opportunities${who ? ` where ${who} ${se}` : ''}` +
     (hiddenCount ? `, not counting ${hiddenCount} on hidden accounts or opportunities` : '') +
     (d.truncated ? ` · Only the newest ${d.records.length.toLocaleString()} are shown; narrow the filters to see the rest` : '') +
     (d.missing.length ? ` · Not found on ${dsMeta.label}: ${d.missing.join(', ')}` : '') +
-    ` · Completed and Cancelled ones from the last ${TES_CLOSED_DAYS} days to start, up to a year with Show more`;
-  renderTesRequests(shown, recent.filter((r) => !shown.includes(r)));
+    (tes.showAll ? '' : ' · Not Completed or Cancelled; Show all adds those');
+  renderTesRequests(shown);
 }
 
 // Shown like the opportunity's Deal Supports list, with the date, Most Recent TES Status and opportunity
 // added, under a heading row per TES Stage and per customer. Click a row for its status updates and to add
-// one. `older` holds the Completed and Cancelled requests left out for finishing before their stage's window.
-function renderTesRequests(list, older = []) {
+// one.
+function renderTesRequests(list) {
   const sec = document.getElementById('tesRequests');
   const d = tes.data, f = d.fields;
   const dates = [f.activityDate, f.requestDate].filter(Boolean);
@@ -2796,15 +3058,12 @@ function renderTesRequests(list, older = []) {
     ...cols.map(([h, x]) => el('th', { title: x.label, class: x === f.lastStatus ? 'tes-date' : null }, h)), 'Created by', 'Created'].filter(Boolean);
   const ncols = heads.length;
   const tbody = el('tbody');
-  // Rows come sorted by stage, then customer, so each group's requests are together. A Completed or
-  // Cancelled stage with only older requests still gets its heading, for its Show more link.
+  // Rows come sorted by stage, then customer, so each group's requests are together.
   const groups = [];
   for (const r of list) {
     if (groups.at(-1)?.stage !== tesStage(r)) groups.push({ stage: tesStage(r), rows: [] });
     groups.at(-1).rows.push(r);
   }
-  for (const r of older) if (!groups.some((g) => g.stage === tesStage(r))) groups.push({ stage: tesStage(r), rows: [] });
-  groups.sort((x, y) => (tesStageRank(x.stage) - tesStageRank(y.stage)) || x.stage.localeCompare(y.stage));
   // Over TES_COLLAPSE_OVER requests, every stage starts collapsed (again whenever the team filter changes).
   if (tes.collapsedFor !== d.team) {
     tes.collapsedFor = d.team;
@@ -2812,13 +3071,12 @@ function renderTesRequests(list, older = []) {
     tes.page = {};
   }
   for (const { stage, rows } of groups) {
-    const closed = TES_CLOSED.includes(stage.toLowerCase());
     const shut = tes.collapsed.has(stage);
     const toggle = () => { shut ? tes.collapsed.delete(stage) : tes.collapsed.add(stage); renderTes(); };
     tbody.append(el('tr', { class: 'tes-stage', onclick: toggle, title: shut ? 'Expand' : 'Collapse' }, el('td', { colspan: ncols },
       el('span', { class: 'tes-twisty', 'aria-hidden': 'true' }, shut ? '▸' : '▾'),
       stage.toLowerCase() === 'stalled' ? el('span', { class: 'tes-stalled' }, stage) : stage || `(No ${f.stage?.label || 'TES Stage'})`,
-      ` (${rows.length})` + (closed ? ` · finished in the last ${tesDays(stage)} days` : ''))));
+      ` (${rows.length})`)));
     if (shut) continue;
     // Over TES_PAGE requests, the stage shows a page at a time, with paging controls above and below.
     const pages = Math.ceil(rows.length / TES_PAGE);
@@ -2836,21 +3094,11 @@ function renderTesRequests(list, older = []) {
         tbody.append(el('tr', { class: 'ds-group' }, el('td', { colspan: ncols },
           `${tesAcct(r)?.Name || '(No account)'} (${rows.filter((x) => (tesOpp(x)?.AccountId || '') === a).length})`)));
       }
-      tbody.append(...tesRow(r, ncols, cols));
+      tbody.append(...tesRow(r, cols));
     }
     if (pages > 1) tbody.append(pager());
-    // Each click reaches back another TES_CLOSED_DAYS, at least to the newest one left out, and at most a year.
-    const more = closed ? older.filter((r) => tesStage(r) === stage) : [];
-    if (more.length) {
-      tbody.append(el('tr', { class: 'nolink' }, el('td', { colspan: ncols, style: 'text-align:center' }, el('a', { href: '#', onclick: (ev) => {
-        ev.preventDefault();
-        const toNewest = Math.ceil((Date.parse(todayStr()) - Date.parse(more.map(tesClosedOn).sort().at(-1))) / 864e5);
-        tes.days[stage.toLowerCase()] = Math.min(TES_CLOSED_MAX, Math.max(tesDays(stage) + TES_CLOSED_DAYS, toNewest));
-        renderTes();
-      } }, `Show more ${stage} (${more.length.toLocaleString()} more in the last year)`))));
-    }
   }
-  if (!list.length && !older.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No TES Requests match these filters.')));
   sec.replaceChildren(
     el('h3', {}, `TES Requests (${list.length})`),
     el('div', { class: 'tablewrap' }, el('table', {},
@@ -2872,21 +3120,14 @@ function tesLastUpdateCell(r) {
     tone ? el('span', { class: 'tes-chip ' + tone }, dsText(x, v)) : dsText(x, v));
 }
 
-// One TES Request's row and, under it, its status-updates panel (shown when the row is open).
-function tesRow(r, ncols, cols) {
+// One TES Request's row; clicking it opens the request in a dialog, as on the opportunity screen.
+function tesRow(r, cols) {
   const d = tes.data, f = d.fields;
   {
-    const more = el('tr', { class: 'ds-more', hidden: !tes.open.has(r.Id) }, el('td', { colspan: ncols }));
-    if (tes.open.has(r.Id)) renderTesPanel(r, more.firstChild);
-    const toggle = () => {
-      if (tes.open.delete(r.Id)) { more.hidden = true; return; }
-      tes.open.add(r.Id);
-      more.hidden = false;
-      renderTesPanel(r, more.firstChild);
-    };
+    const show = () => openTesDialog(r, d, async () => { await loadTes(); return tes.data; });
     const opp = tesOpp(r), oppId = r[d.oppField];
     return [
-      el('tr', { class: 'ds-row', onclick: toggle },
+      el('tr', { class: 'ds-row', onclick: show, title: 'Show this TES Request' },
         dsNameCell(r.Name),
         (({ value, from }) => el('td', { class: 'tes-date', title: from }, value || '—'))(tesDate(r)),
         f.tesStatus ? el('td', {}, tesChip(r[f.tesStatus.name])) : null,
@@ -2902,22 +3143,22 @@ function tesRow(r, ncols, cols) {
         el('td', {}, r.CreatedBy?.Name || ''),
         el('td', {}, shortDate(r.CreatedDate)),
       ),
-      more,
     ];
   }
 }
 
-// Under a clicked TES Request: its status updates (newest first, with who entered each), a form to add
-// one, and every field of the request.
-function renderTesPanel(r, box) {
-  const d = tes.data, u = d.updates, f = d.fields;
+// Under a clicked TES Request: its TES Stage, its status updates (newest first, with who entered each), a
+// form to add one, and every field of the request. `d` is the /tes answer the request came in; `onAdded`
+// reloads after the stage changes or an update is added; `open` shows All fields opened.
+function renderTesPanel(r, box, { d = tes.data, onAdded = loadTes, open = false } = {}) {
+  const u = d.updates, f = d.fields;
   const extra = Object.values(f).filter((x) => !dsMeta.fields.some((y) => y.name === x.name));
   const details = [
     ...dsMeta.fields.filter((x) => x.type !== 'reference').map((x) => [x.label, dsText(x, r[x.name])]),
     ...extra.map((x) => [x.label, x.rel ? r[x.rel]?.Name : dsText(x, r[x.name])]),
   ].filter(([, v]) => v);
   const history = el('div', {}, el('div', { class: 'empty' }, 'Loading…'));
-  let form = null;
+  let form = '';
   if (u?.canCreate) {
     const rank = (o) => ['green', 'yellow', 'red'].indexOf(o.toLowerCase()) + 1 || 9;
     const status = el('select', { 'aria-label': 'TES Status' },
@@ -2931,7 +3172,7 @@ function renderTesPanel(r, box) {
         const res = await api(`/tes/${r.Id}/updates`, { method: 'POST', body: { status: status.value, notes: notes.value } });
         tes.updates.set(r.Id, Promise.resolve(res));
         toast(res.warning || `Added a ${u.label} update to ${r.Name}`, res.warning ? 'err' : 'ok');
-        await loadTes();
+        await onAdded();
       } catch (e) { toast(e.message, 'err'); save.disabled = false; }
     });
     form = el('div', { class: 'tes-update' },
@@ -2940,10 +3181,11 @@ function renderTesPanel(r, box) {
       el('div', { class: 'form-actions' }, save));
   }
   box.replaceChildren(
+    f.stage ? tesStagePicker(r, d, onAdded) : '',
     el('h4', {}, `${u?.label || 'TES Status'} updates`),
     form,
     history,
-    el('details', {}, el('summary', {}, 'All fields'),
+    el('details', { open }, el('summary', {}, 'All fields'),
       el('dl', {}, details.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
     el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
   );
@@ -2985,9 +3227,11 @@ async function openOppPopup(oppId, accountId) {
         closeBtn),
       oppSub(a, o, (id) => { dlg.close(); openOppPopup(id, a.Id); }),
       el('section', { id: 'focusOpp' }),
+      el('section', { id: 'oppTes', hidden: true }),
       el('section', { id: 'dealSupports' }, el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…')),
     );
     renderFocusOpp(o);
+    loadOppTes(o);
     loadDealSupports(o);
   } catch (e) {
     body.replaceChildren(el('div', { class: 'title-row' }, el('span', { class: 'spacer', style: 'flex:1' }), closeBtn), el('div', { class: 'empty' }, e.message));
@@ -2998,7 +3242,8 @@ async function openOppPopup(oppId, accountId) {
 // Your hours from the Deal Supports where you are the chosen user (Owner by default), across all
 // opportunities: this week, last week, this calendar month, this fiscal quarter and year, per week,
 // and per opportunity. Weeks start on Monday.
-const time = { data: null, range: 'fy', opp: null };
+// `open` holds the opportunities whose activities show in the list (by opportunity Id, '' for none).
+const time = { data: null, range: 'fy', opp: null, open: new Set() };
 // Field picks that differ from the server's defaults, kept in this browser. (v2: picks saved by the
 // first version, which had different defaults, are ignored.)
 const TIME_PREFS = 'sfdesk.time.v2';
@@ -3289,7 +3534,8 @@ function exportTime(list, showRole, what, showPerson) {
     .catch((e) => toast("Couldn't build the Excel file: " + e.message, 'err'));
 }
 
-// The activities behind the numbers: the chosen period, narrowed to one opportunity if picked.
+// The activities behind the numbers: the chosen period, narrowed to one opportunity if picked. Grouped by
+// opportunity (most hours first) with each one's subtotal; click a group to show its activities.
 function renderTimeList(all, today) {
   const sec = document.getElementById('timeList');
   const range = timeRange(today);
@@ -3300,30 +3546,57 @@ function renderTimeList(all, today) {
   const showPerson = time.data.who === 'team';
   const canEdit = !!dsMeta?.canUpdate;
   const edit = (e) => editDealSupport(e.id, time, () => renderTimeList(all, today), loadTime);
-  const tbody = el('tbody', {}, list.map((e) => el('tr', {
-    ...(e.oppId && e.accountId ? { onclick: () => openDeal({ Id: e.oppId, AccountId: e.accountId }), title: 'Open this opportunity' } : {}),
-    class: time.editing?.id === e.id ? 'sel' : null },
-    canEdit ? editPencil(e.name, () => edit(e)) : null,
-    el('td', {}, e.date || '—'),
-    showPerson ? el('td', {}, e.person) : null,
-    el('td', { class: 'wrap' }, e.oppName),
-    el('td', { class: 'wrap' }, e.accountName),
-    showRole ? el('td', {}, e.role) : null,
-    dsNameCell(e.name),
-    el('td', { class: 'n' }, fmtH(e.hours)),
-  )));
-  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: 8, class: 'empty' }, 'No activities here.')));
+  const ncols = (canEdit ? 1 : 0) + 1 + (showPerson ? 1 : 0) + (showRole ? 1 : 0) + 2;
+  const groups = new Map();
+  for (const e of list) {
+    const k = e.oppId || '';
+    if (!groups.has(k)) groups.set(k, { id: k, name: e.oppName || '(No opportunity)', account: e.accountName, accountId: e.accountId, entries: [] });
+    groups.get(k).entries.push(e);
+  }
+  const sorted = [...groups.values()].map((g) => ({ ...g, hours: hoursOf(g.entries) }))
+    .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name));
+  // One opportunity picked: its activities show.
+  const isOpen = (g) => time.opp !== null || time.open.has(g.id);
+  const tbody = el('tbody');
+  for (const g of sorted) {
+    const shut = !isOpen(g);
+    tbody.append(el('tr', { class: 'time-group subtotal', title: shut ? 'Show its activities' : 'Hide its activities',
+      onclick: () => { time.open.has(g.id) ? time.open.delete(g.id) : time.open.add(g.id); renderTimeList(all, today); } },
+      el('td', { colspan: ncols - 1 },
+        el('span', { class: 'tes-twisty', 'aria-hidden': 'true' }, shut ? '▸' : '▾'), g.name,
+        el('span', { class: 'm' }, `${g.account ? ` · ${g.account}` : ''} · ${plural(g.entries.length, 'activity', 'activities')}`),
+        g.id && g.accountId ? [' ', el('a', { href: '#', title: 'Open this opportunity',
+          onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openDeal({ Id: g.id, AccountId: g.accountId }); } }, 'Open')] : null),
+      el('td', { class: 'n' }, fmtH(g.hours))));
+    if (shut) continue;
+    for (const e of g.entries) tbody.append(el('tr', {
+      ...(e.oppId && e.accountId ? { onclick: () => openDeal({ Id: e.oppId, AccountId: e.accountId }), title: 'Open this opportunity' } : {}),
+      class: time.editing?.id === e.id ? 'sel' : null },
+      canEdit ? editPencil(e.name, () => edit(e)) : null,
+      el('td', {}, e.date || '—'),
+      showPerson ? el('td', {}, e.person) : null,
+      showRole ? el('td', {}, e.role) : null,
+      dsNameCell(e.name),
+      el('td', { class: 'n' }, fmtH(e.hours)),
+    ));
+  }
+  if (!list.length) tbody.append(el('tr', {}, el('td', { colspan: ncols, class: 'empty' }, 'No activities here.')));
+  const expand = el('input', { type: 'checkbox', checked: sorted.length > 0 && sorted.every(isOpen), disabled: time.opp !== null || !sorted.length,
+    onchange: () => { time.open = new Set(expand.checked ? sorted.map((g) => g.id) : []); renderTimeList(all, today); } });
   sec.replaceChildren(
     el('h3', {}, `${range.label}${oppName ? ` · ${oppName}` : ''}: ${plural(list.length, 'activity', 'activities')}, ${fmtH(hoursOf(list))}`,
       el('span', { class: 'spacer' }),
       time.opp !== null ? el('button', { onclick: () => { time.opp = null; renderTime(); } }, 'All opportunities')
         : el('span', { class: 'sub', style: 'margin:0' }, 'Click a tile, week or opportunity to narrow this list'),
+      el('label', { class: 'tes-show-all' }, expand, 'Expand all'),
       el('button', { disabled: !list.length, onclick: () => exportTime(list, showRole, range.label + (oppName ? ` - ${oppName}` : ''), showPerson) }, 'Export to Excel')),
     time.editing?.box || el('div'),
     el('div', { class: 'tablewrap' }, el('table', { class: 'deals' },
-      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, el('th', {}, 'Date'), showPerson ? el('th', {}, 'Person') : null, el('th', {}, 'Opportunity'), el('th', {}, 'Account'),
+      el('thead', {}, el('tr', {}, canEdit ? el('th', { 'aria-label': 'Edit' }) : null, el('th', {}, 'Date'), showPerson ? el('th', {}, 'Person') : null,
         showRole ? el('th', {}, 'Role') : null, el('th', {}, time.data.label), el('th', { class: 'n' }, 'Hours'))),
-      tbody)),
+      tbody,
+      list.length ? el('tfoot', {}, el('tr', {}, el('td', { colspan: ncols - 1 }, `Total (${plural(sorted.length, 'opportunity', 'opportunities')})`),
+        el('td', { class: 'n' }, fmtH(hoursOf(list))))) : null)),
   );
 }
 
@@ -4493,6 +4766,7 @@ function renderOutlookPane(e, reload) {
     showLoading('Loading your Salesforce data…');
     document.getElementById('who').textContent = me.user?.username || me.user?.name || '';
     document.getElementById('logout').hidden = false;
+    document.getElementById('refresh').hidden = false;
     meta = await api('/meta');
     await loadHidden();
     await loadAcctPrefs();

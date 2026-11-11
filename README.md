@@ -223,8 +223,10 @@ appears when you have a team; team members' time is matched on the same Mine by 
 
 ## Security notes
 
+See [SECURITY.md](SECURITY.md) for how SF Desk signs in, what it stores and how it keeps data safe.
+
 - The server listens on `localhost` only.
-- Tokens are held in server memory for the session and never written to disk. Restarting the app means reconnecting.
+- Salesforce tokens are held in server memory for the session and never written to disk. Restarting the app means reconnecting.
 - Account and opportunity records you load are saved to `data/sf-desk.db` (set `SF_DESK_DB` to move it;
   the Mac app keeps it in `~/Library/Application Support/SF Desk/data`).
   Delete that file to clear the local copy; it is rebuilt as you browse. Edits always go straight to
