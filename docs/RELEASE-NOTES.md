@@ -56,6 +56,11 @@ Build 4 (November 10, 2026):
   [docs/EXPORT-COMPLIANCE.md](EXPORT-COMPLIANCE.md).
 - **Docs:** all the documentation is now in `docs/`.
 
+Build 5 (November 12, 2026):
+
+- **New Deal Supports are Complete:** the create form's Status starts as Complete (it can still be
+  changed), and a Deal Support created without a Status, e.g. from the Outlook add-in, is saved as Complete.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder

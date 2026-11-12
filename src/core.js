@@ -893,6 +893,13 @@ async function dealSupportMeta(req) {
   const roleValue = (name) => role?.picklist.find((v) => v.trim().toLowerCase() === name);
   const leadSe = roleValue('lead se'), sme = roleValue('sme');
   if (sme) role.defaultValue = sme;
+  // New Deal Supports are logged after the work is done, so their Status starts as "Complete" (on the form
+  // when the layout shows Status, else set on create), when the record type's picklist has it.
+  const statusField = d.fields.find((f) => f.type === 'picklist' && f.createable && (f.name === 'Status__c' || /^status$/i.test(f.label)));
+  const statusEntry = statusField && fields.find((f) => f.name === statusField.name);
+  const complete = (statusEntry?.picklist || statusField?.picklistValues?.filter((v) => v.active).map((v) => v.value) || [])
+    .find((v) => v.trim().toLowerCase() === 'complete');
+  if (statusEntry && complete) statusEntry.defaultValue = complete;
   // The hours shown and totalled on an opportunity's Deal Supports list: customer-facing time and the total
   // (a formula, so usually not on the form).
   const numeric = (f) => ['double', 'int', 'currency', 'percent'].includes(f.type);
@@ -907,6 +914,7 @@ async function dealSupportMeta(req) {
     listHours,
     oppField: opp.name,
     roleDefault: role ? { field: role.name, value: sme || null, leadSe: leadSe || null, options: role.picklist } : null,
+    statusDefault: complete ? { field: statusField.name, value: complete } : null,
     canCreate: d.createable && opp.createable,
     canUpdate: !!d.updateable,
     canDelete: !!d.deletable,
@@ -1118,6 +1126,7 @@ async function createDealSupport(req, meta, oppId, fields, extra = {}) {
     if (v !== '' && v !== null && v !== undefined) body[k] = v;
   }
   for (const [k, v] of Object.entries(extra)) if (body[k] === undefined) body[k] = v;
+  if (meta.statusDefault && body[meta.statusDefault.field] === undefined) body[meta.statusDefault.field] = meta.statusDefault.value;
   // Salesforce renames each Deal Support itself, but the name can't be empty.
   if (byName.has('Name') && !body.Name) body.Name = 'X';
   // The account is always the opportunity's.
