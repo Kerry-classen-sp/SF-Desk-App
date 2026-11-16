@@ -58,7 +58,8 @@ const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 // ---------- Salesforce REST helpers ----------
 
-async function sf(req, method, urlPath, { body, headers = {} } = {}, retried = false) {
+// raw: return the response's text as it is (e.g. a file's content) rather than parsed JSON.
+async function sf(req, method, urlPath, { body, headers = {}, raw = false } = {}, retried = false) {
   const t = req.session.sf;
   if (!t) throw new HttpError(401, 'Not connected to Salesforce');
   let r;
@@ -79,7 +80,7 @@ async function sf(req, method, urlPath, { body, headers = {} } = {}, retried = f
 
   if (r.status === 401 && !retried && (t.refresh_token || t.cli || t.native)) {
     await host.refreshAccess(req);
-    return sf(req, method, urlPath, { body, headers }, true);
+    return sf(req, method, urlPath, { body, headers, raw }, true);
   }
   if (r.status === 412) {
     throw new HttpError(409, 'Someone changed this record in Salesforce after you loaded it. ' +
@@ -88,6 +89,7 @@ async function sf(req, method, urlPath, { body, headers = {} } = {}, retried = f
   if (r.status === 204) return null;
 
   const text = await r.text();
+  if (raw && r.ok) return text;
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { message: text }; }
   if (!r.ok) {
@@ -1200,6 +1202,138 @@ api.delete('/deal-supports/:id', wrap(async (req, res) => {
   if (!meta.canDelete) throw new HttpError(403, `Your Salesforce user can't delete ${meta.labelPlural}.`);
   await sf(req, 'DELETE', `/services/data/${API}/sobjects/${meta.object}/${id}`);
   store.unlinkDealSupport(orgOf(req), id);
+  res.json({ ok: true });
+}));
+
+// ---------- Notes and Next Steps on a Deal Support ----------
+// Notes are Salesforce's notes (ContentNote, linked to the Deal Support by a ContentDocumentLink); Next
+// Steps are Tasks on it (Subject and Comments). Both are edited as a title and plain text.
+
+// Base64 of a string's UTF-8 bytes (JavaScriptCore has neither btoa nor Buffer).
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function base64Utf8(s) {
+  const b = [];
+  for (const c of s) {
+    const p = c.codePointAt(0);
+    if (p < 0x80) b.push(p);
+    else if (p < 0x800) b.push(0xc0 | p >> 6, 0x80 | p & 63);
+    else if (p < 0x10000) b.push(0xe0 | p >> 12, 0x80 | p >> 6 & 63, 0x80 | p & 63);
+    else b.push(0xf0 | p >> 18, 0x80 | p >> 12 & 63, 0x80 | p >> 6 & 63, 0x80 | p & 63);
+  }
+  let out = '';
+  for (let i = 0; i < b.length; i += 3) {
+    const n = b[i] << 16 | (b[i + 1] ?? 0) << 8 | (b[i + 2] ?? 0);
+    out += B64[n >> 18 & 63] + B64[n >> 12 & 63] + (i + 1 < b.length ? B64[n >> 6 & 63] : '=') + (i + 2 < b.length ? B64[n & 63] : '=');
+  }
+  return out;
+}
+// A note's content is HTML: plain text goes in one paragraph per line, and comes back out the same way
+// (formatting added in Salesforce is dropped when the note is edited here).
+const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const noteHtml = (text) => text.replace(/\r/g, '').split('\n').map((l) => `<p>${escHtml(l)}</p>`).join('');
+const noteText = (html) => String(html || '')
+  .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '\n').replace(/<li[^>]*>/gi, '• ').replace(/<[^>]+>/g, '')
+  .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&').replace(/\n+$/, '');
+
+// The title and text from the dialog, checked: a title is required.
+function titleAndText(body, maxText) {
+  const title = String(body?.title ?? '').trim(), text = String(body?.text ?? '');
+  if (!title) throw new HttpError(400, 'Give it a title.');
+  if (title.length > 255) throw new HttpError(400, 'The title can be at most 255 characters.');
+  if (maxText && text.length > maxText) throw new HttpError(400, `The text can be at most ${maxText.toLocaleString('en-US')} characters.`);
+  return { title, text };
+}
+const myUserId = (req) => req.session.sf?.user?.id || '';
+
+// The note, if it's linked to this Deal Support (so only its notes are read or changed here).
+async function linkedNote(req, dsId, noteId) {
+  const [link] = await query(req, `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${dsId}' AND ContentDocumentId = '${noteId}'`);
+  if (!link) throw new HttpError(404, 'That note isn\'t on this Deal Support.');
+}
+const noteRow = (req, n) => ({ Id: n.Id, title: n.Title || '', text: n.TextPreview || '', by: n.Owner?.Name || n.CreatedBy?.Name || '',
+  modified: n.LastModifiedDate || null, mine: n.OwnerId === myUserId(req) });
+
+api.get('/deal-supports/:id/notes', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const links = await query(req, `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${id}' AND ContentDocument.FileType = 'SNOTE'`);
+  const ids = links.map((l) => `'${sfId(l.ContentDocumentId)}'`);
+  const notes = ids.length ? await query(req, `SELECT Id, Title, TextPreview, OwnerId, Owner.Name, CreatedBy.Name, LastModifiedDate FROM ContentNote
+    WHERE Id IN (${ids.join(',')}) ORDER BY LastModifiedDate DESC`) : [];
+  res.json({ records: notes.map((n) => noteRow(req, n)) });
+}));
+
+api.get('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+  const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
+  await linkedNote(req, id, noteId);
+  const [n] = await query(req, `SELECT Id, Title, TextPreview, OwnerId, Owner.Name, CreatedBy.Name, LastModifiedDate FROM ContentNote WHERE Id = '${noteId}'`);
+  if (!n) throw new HttpError(404, 'Note not found.');
+  const html = await sf(req, 'GET', `/services/data/${API}/sobjects/ContentNote/${noteId}/Content`, { raw: true });
+  res.json({ ...noteRow(req, n), text: noteText(html) });
+}));
+
+api.post('/deal-supports/:id/notes', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const { title, text } = titleAndText(req.body);
+  const note = await sf(req, 'POST', `/services/data/${API}/sobjects/ContentNote`, { body: { Title: title, Content: base64Utf8(noteHtml(text)) } });
+  try {
+    await sf(req, 'POST', `/services/data/${API}/sobjects/ContentDocumentLink`,
+      { body: { ContentDocumentId: note.id, LinkedEntityId: id, ShareType: 'V', Visibility: 'AllUsers' } });
+  } catch (err) {
+    await sf(req, 'DELETE', `/services/data/${API}/sobjects/ContentDocument/${sfId(note.id)}`).catch(() => {});
+    throw err;
+  }
+  res.status(201).json({ Id: note.id });
+}));
+
+api.patch('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+  const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
+  const { title, text } = titleAndText(req.body);
+  await linkedNote(req, id, noteId);
+  await sf(req, 'PATCH', `/services/data/${API}/sobjects/ContentNote/${noteId}`, { body: { Title: title, Content: base64Utf8(noteHtml(text)) } });
+  res.json({ ok: true });
+}));
+
+api.delete('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+  const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
+  await linkedNote(req, id, noteId);
+  await sf(req, 'DELETE', `/services/data/${API}/sobjects/ContentDocument/${noteId}`);
+  res.json({ ok: true });
+}));
+
+const TASK_TEXT_MAX = 32000;
+async function linkedTask(req, dsId, taskId) {
+  const [task] = await query(req, `SELECT Id FROM Task WHERE Id = '${taskId}' AND WhatId = '${dsId}'`);
+  if (!task) throw new HttpError(404, 'That next step isn\'t on this Deal Support.');
+}
+
+api.get('/deal-supports/:id/next-steps', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const tasks = await query(req, `SELECT Id, Subject, Description, Status, IsClosed, OwnerId, Owner.Name, LastModifiedDate FROM Task
+    WHERE WhatId = '${id}' ORDER BY IsClosed, LastModifiedDate DESC LIMIT 200`);
+  res.json({ records: tasks.map((x) => ({ Id: x.Id, title: x.Subject || '', text: x.Description || '', status: x.Status || '',
+    done: !!x.IsClosed, by: x.Owner?.Name || '', modified: x.LastModifiedDate || null, mine: x.OwnerId === myUserId(req) })) });
+}));
+
+api.post('/deal-supports/:id/next-steps', wrap(async (req, res) => {
+  const id = sfId(req.params.id);
+  const { title, text } = titleAndText(req.body, TASK_TEXT_MAX);
+  const task = await sf(req, 'POST', `/services/data/${API}/sobjects/Task`, { body: { WhatId: id, Subject: title, Description: text || null } });
+  res.status(201).json({ Id: task.id });
+}));
+
+api.patch('/deal-supports/:id/next-steps/:taskId', wrap(async (req, res) => {
+  const id = sfId(req.params.id), taskId = sfId(req.params.taskId);
+  const { title, text } = titleAndText(req.body, TASK_TEXT_MAX);
+  await linkedTask(req, id, taskId);
+  await sf(req, 'PATCH', `/services/data/${API}/sobjects/Task/${taskId}`, { body: { Subject: title, Description: text || null } });
+  res.json({ ok: true });
+}));
+
+api.delete('/deal-supports/:id/next-steps/:taskId', wrap(async (req, res) => {
+  const id = sfId(req.params.id), taskId = sfId(req.params.taskId);
+  await linkedTask(req, id, taskId);
+  await sf(req, 'DELETE', `/services/data/${API}/sobjects/Task/${taskId}`);
   res.json({ ok: true });
 }));
 

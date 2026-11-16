@@ -61,6 +61,14 @@ Build 5 (November 12, 2026):
 - **New Deal Supports are Complete:** the create form's Status starts as Complete (it can still be
   changed), and a Deal Support created without a Status, e.g. from the Outlook add-in, is saved as Complete.
 
+Build 6 (November 16, 2026):
+
+- **Notes and Next Steps on a Deal Support:** a Deal Support has **Details**, **Notes** and **Next Steps**
+  tabs: in its opened row on an opportunity, in the edit form, on Time Entry and in the Outlook add-in. Each
+  lists its notes or next steps; click one, or **New Note** / **New Next Step**, to edit its Title and Text,
+  with Save, Cancel and Delete. Notes are Salesforce notes on the Deal Support; Next Steps are its Tasks
+  (Subject and Comments).
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
