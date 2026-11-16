@@ -182,9 +182,10 @@ darkQuery.addEventListener('change', applyTheme);
   tr.linked-mine td { font-weight: 600; }
   h4.req-head { display: flex; align-items: center; gap: 10px; }
   h4.req-head .spacer { flex: 1; }
-  .ds-children tr.clickable { cursor: pointer; }
-  .ds-children tr.muted td { color: var(--muted); }
-  .ds-children td.child-text { max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .child-list tr.clickable { cursor: pointer; }
+  .child-list td.step-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 320px; }
+  .child-list td.nowrap { white-space: nowrap; vertical-align: top; }
+  .child-list td.child-text { max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   dialog.child-dialog { width: min(720px, calc(100vw - 48px)); }
   dialog.child-dialog section { margin: 0; border: 0; padding: 0; }
   dialog.child-dialog textarea { width: 100%; box-sizing: border-box; }
@@ -1685,32 +1686,40 @@ function openOpportunity(id) {
     ),
     oppSub(a, o, openOpportunity),
     el('section', { id: 'focusOpp' }),
-    ...oppTabs(),
+    ...oppTabs(o),
   );
   renderFocusOpp(o);
   loadOppTes(o);
   loadDealSupports(o);
 }
 
-// Under the opportunity's details, a tab for its Deal Supports and one for its TES/RFP Requests. Each
-// opportunity opens on Deal Supports. The TES/RFP tab goes when the org has no TES Requests.
-function oppTabs() {
-  const tab = (which, label) => el('button', { role: 'tab', id: which === 'ds' ? 'oppTabDs' : 'oppTabTes', onclick: () => showOppTab(which) }, label);
+// Under the opportunity's details, tabs for its Deal Supports, TES/RFP Requests, Notes and Next Steps.
+// Each opportunity opens on Deal Supports. The TES/RFP tab goes when the org has no TES Requests; Notes
+// and Next Steps load when first shown.
+const OPP_TABS = [['ds', 'oppTabDs', 'dealSupports'], ['tes', 'oppTabTes', 'oppTes'], ['notes', 'oppTabNotes', 'oppNotes'], ['steps', 'oppTabSteps', 'oppSteps']];
+function oppTabs(o) {
+  const tab = (which, label) => el('button', { role: 'tab', id: OPP_TABS.find((x) => x[0] === which)[1], onclick: () => showOppTab(which) }, label);
   const bar = el('div', { class: 'opp-tabs', role: 'tablist', 'aria-label': 'Opportunity' },
-    tab('ds', 'Deal Supports'), tab('tes', 'TES/RFP Requests'));
+    tab('ds', 'Deal Supports'), tab('tes', 'TES/RFP Requests'), tab('notes', 'Notes'), tab('steps', 'Next Steps'));
   const tes = el('section', { id: 'oppTes', role: 'tabpanel', 'aria-labelledby': 'oppTabTes' }, el('div', { class: 'empty' }, 'Loading…'));
   const ds = el('section', { id: 'dealSupports', role: 'tabpanel', 'aria-labelledby': 'oppTabDs' },
     el('h3', {}, 'Deal Supports'), el('div', { class: 'empty' }, 'Loading…'));
+  const child = (id, kind) => {
+    const list = childList(`/opportunities/${o.Id}`, 'opportunity', kind);
+    const sec = el('section', { id, role: 'tabpanel', 'aria-labelledby': OPP_TABS.find((x) => x[2] === id)[1] }, list);
+    sec.load = list.load;
+    return sec;
+  };
   queueMicrotask(() => showOppTab('ds'));
-  return [bar, ds, tes];
+  return [bar, ds, tes, child('oppNotes', CHILD_KINDS.notes), child('oppSteps', CHILD_KINDS.steps)];
 }
 function showOppTab(which) {
   const tesTab = document.getElementById('oppTabTes');
   if (which === 'tes' && tesTab?.hidden) which = 'ds';
-  document.getElementById('dealSupports')?.toggleAttribute('hidden', which !== 'ds');
-  document.getElementById('oppTes')?.toggleAttribute('hidden', which !== 'tes');
-  for (const [id, on] of [['oppTabDs', which === 'ds'], ['oppTabTes', which === 'tes']]) {
-    const b = document.getElementById(id);
+  for (const [key, tabId, panelId] of OPP_TABS) {
+    const on = key === which, panel = document.getElementById(panelId), b = document.getElementById(tabId);
+    panel?.toggleAttribute('hidden', !on);
+    if (on) panel?.load?.();
     if (b) { b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
   }
 }
@@ -2109,11 +2118,10 @@ function renderDealSupports(o, records) {
   const edit = (r) => editDealSupport(r.Id, oppDsEdit, () => renderDealSupports(o, records), () => loadDealSupports(o));
   const tbody = el('tbody');
   for (const r of records) {
-    const more = el('tr', { class: 'ds-more', hidden: true }, el('td', { colspan: ncols, onclick: (ev) => ev.stopPropagation() },
-      ...dsTabbed(el('div', {},
-        el('dl', {}, dsMeta.fields.filter((f) => r[f.name] != null && r[f.name] !== '' && f.type !== 'reference')
-          .map((f) => el('div', {}, el('dt', {}, f.label), el('dd', {}, dsText(f, r[f.name]))))),
-        el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗')), r.Id),
+    const more = el('tr', { class: 'ds-more', hidden: true }, el('td', { colspan: ncols },
+      el('dl', {}, dsMeta.fields.filter((f) => r[f.name] != null && r[f.name] !== '' && f.type !== 'reference')
+        .map((f) => el('div', {}, el('dt', {}, f.label), el('dd', {}, dsText(f, r[f.name]))))),
+      el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener' }, 'Open in Salesforce ↗'),
     ));
     tbody.append(
       el('tr', { class: 'ds-row' + (oppDsEdit.editing?.id === r.Id ? ' sel' : ''), onclick: () => { more.hidden = !more.hidden; } },
@@ -3345,7 +3353,7 @@ async function openOppPopup(oppId, accountId) {
         closeBtn),
       oppSub(a, o, (id) => { dlg.close(); openOppPopup(id, a.Id); }),
       el('section', { id: 'focusOpp' }),
-      ...oppTabs(),
+      ...oppTabs(o),
     );
     renderFocusOpp(o);
     loadOppTes(o);
@@ -4349,75 +4357,59 @@ async function editDealSupport(id, host, rerender, reload) {
   const oppLine = el('div', { style: 'margin-bottom:12px' }, 'Opportunity: ', el('b', {}, opp?.Name || '—'),
     opp?.Account?.Name ? ` (${opp.Account.Name})` : '');
   box.querySelector('h3').after(oppLine);
-  dsTabs(box, oppLine, id);
   box.classList.add('ds-edit');
   host.editing = { id, box };
   rerender();
   box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-// A Deal Support's tabs: Details (the form or its fields, where it opens), then its Notes and Next Steps,
-// each loaded when first shown. In the edit form they go under the heading; in a list, in the opened row.
-const DS_CHILDREN = {
+// An opportunity's Notes (Salesforce notes) and Next Steps (its next step field's history, newest first:
+// read-only, and a new one sets the field when the user may change it).
+const CHILD_KINDS = {
   notes: { path: 'notes', label: 'Notes', one: 'Note', full: true },
-  steps: { path: 'next-steps', label: 'Next Steps', one: 'Next Step', status: true },
+  steps: { path: 'next-steps', label: 'Next Steps', one: 'Next Step', history: true },
 };
-function dsTabs(box, after, dsId) {
-  const details = el('div');
-  while (after.nextSibling) details.append(after.nextSibling);
-  box.append(...dsTabbed(details, dsId));
-}
-function dsTabbed(details, dsId) {
-  details.setAttribute('role', 'tabpanel');
-  const panels = { details, notes: dsChildList(dsId, DS_CHILDREN.notes), steps: dsChildList(dsId, DS_CHILDREN.steps) };
-  const buttons = {};
-  const show = (which) => {
-    for (const [k, p] of Object.entries(panels)) p.hidden = k !== which;
-    for (const [k, b] of Object.entries(buttons)) { b.classList.toggle('on', k === which); b.setAttribute('aria-selected', String(k === which)); }
-    panels[which].load?.();
-  };
-  for (const [k, label] of [['details', 'Details'], ['notes', 'Notes'], ['steps', 'Next Steps']]) {
-    buttons[k] = el('button', { type: 'button', role: 'tab', onclick: () => show(k) }, label);
-  }
-  show('details');
-  return [el('div', { class: 'opp-tabs', role: 'tablist', 'aria-label': dsMeta.label }, Object.values(buttons)), ...Object.values(panels)];
-}
 
-// A Deal Support's Notes or Next Steps: a table (click a row to open it) and a button to add one.
-function dsChildList(dsId, kind) {
-  const panel = el('div', { role: 'tabpanel', class: 'ds-children' }, el('div', { class: 'empty' }, 'Loading…'));
+// A record's Notes or Next Steps: a table (click a row to open it) and a button to add one, loaded on the
+// first panel.load(). base is the record's API path (e.g. /opportunities/<id>), noun what it is.
+function childList(base, noun, kind) {
+  const panel = el('div', { class: 'child-list' }, el('div', { class: 'empty' }, 'Loading…'));
   let loaded = false;
-  const render = (records) => {
-    const add = el('button', { type: 'button', class: 'primary', onclick: () => dsChildDialog(dsId, kind, null, reload) }, `New ${kind.one}`);
+  const render = ({ records, canCreate = true, maxLength, label }) => {
+    const add = canCreate ? el('button', { type: 'button', class: 'primary', onclick: () => childDialog(base, kind, null, reload, maxLength) }, `New ${kind.one}`) : null;
     const head = el('h4', { class: 'req-head' }, `${kind.label} (${records.length})`, el('span', { class: 'spacer' }), add);
-    if (!records.length) return panel.replaceChildren(head, el('div', { class: 'empty' }, `No ${kind.label.toLowerCase()} on this ${dsMeta.label} yet.`));
+    if (!records.length) return panel.replaceChildren(head, el('div', { class: 'empty' }, `No ${kind.label.toLowerCase()} on this ${noun} yet.`));
+    if (kind.history) {
+      return panel.replaceChildren(head, el('div', { class: 'tablewrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, el('th', {}, 'Date'), el('th', {}, label || kind.one), el('th', {}, 'Entered by'))),
+        el('tbody', {}, records.map((r) => el('tr', {},
+          el('td', { class: 'nowrap' }, shortDate(r.date) || '—'), el('td', { class: 'step-text' }, r.text), el('td', { class: 'nowrap' }, r.by || '—')))))));
+    }
     panel.replaceChildren(head, el('div', { class: 'tablewrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, el('th', {}, 'Title'), el('th', {}, 'Text'), kind.status ? el('th', {}, 'Status') : '',
-        el('th', {}, kind.status ? 'Assigned to' : 'Owner'), el('th', {}, 'Last modified'))),
-      el('tbody', {}, records.map((r) => el('tr', { class: ['clickable', r.done && 'muted'].filter(Boolean).join(' '), title: `Open this ${kind.one.toLowerCase()}`,
-        onclick: () => dsChildDialog(dsId, kind, r, reload) },
+      el('thead', {}, el('tr', {}, el('th', {}, 'Title'), el('th', {}, 'Text'), el('th', {}, 'Owner'), el('th', {}, 'Last modified'))),
+      el('tbody', {}, records.map((r) => el('tr', { class: 'clickable', title: `Open this ${kind.one.toLowerCase()}`,
+        onclick: () => childDialog(base, kind, r, reload) },
         el('td', {}, el('b', {}, r.title || '(no title)')),
         el('td', { class: 'child-text' }, r.text || '—'),
-        kind.status ? el('td', {}, r.status || '—') : '',
         el('td', {}, r.by || '—'),
         el('td', {}, shortDate(r.modified) || '—')))))));
   };
   const reload = async () => {
-    try { render((await api(`/deal-supports/${dsId}/${kind.path}`)).records); }
+    try { render(await api(`${base}/${kind.path}`)); }
     catch (e) { loaded = false; panel.replaceChildren(el('div', { class: 'empty' }, e.message)); }
   };
   panel.load = () => { if (!loaded) { loaded = true; reload(); } };
   return panel;
 }
 
-// Create or edit a note or next step: its Title and Text, with Save, Cancel and Delete (for a saved one).
-// Only Cancel, Esc or a save closes it, so a stray click doesn't lose the text.
-function dsChildDialog(dsId, kind, rec, onSaved) {
-  const base = `/deal-supports/${dsId}/${kind.path}`;
+// Create or edit a note: its Title and Text, with Save, Cancel and Delete (for a saved one). A new next
+// step is only its text (at most maxLength). Only Cancel, Esc or a save closes it, so a stray click doesn't lose the text.
+function childDialog(record, kind, rec, onSaved, maxLength) {
+  const base = `${record}/${kind.path}`;
   const dlg = el('dialog', { class: 'popup child-dialog', 'aria-label': rec ? `Edit ${kind.one}` : `New ${kind.one}` });
   dlg.addEventListener('close', () => dlg.remove());
   const title = el('input', { type: 'text', maxlength: 255, value: rec?.title || '', 'aria-label': 'Title' });
-  const text = el('textarea', { rows: 12, 'aria-label': 'Text' });
+  const text = el('textarea', { rows: kind.history ? 5 : 12, 'aria-label': 'Text', maxlength: kind.history && maxLength ? maxLength : null });
   text.value = rec?.text || '';
   const error = el('div', { class: 'form-error', role: 'alert', hidden: true });
   const save = el('button', { type: 'button', class: 'primary' }, 'Save');
@@ -4427,13 +4419,13 @@ function dsChildDialog(dsId, kind, rec, onSaved) {
   const fail = (msg) => { error.textContent = msg; error.hidden = false; busy(false); };
   save.addEventListener('click', async () => {
     error.hidden = true;
-    if (!title.value.trim()) { title.focus(); return fail('Give it a title.'); }
+    if (kind.history ? !text.value.trim() : !title.value.trim()) { (kind.history ? text : title).focus(); return fail(kind.history ? 'Write the next step.' : 'Give it a title.'); }
     busy(true);
     try {
-      const body = { title: title.value.trim(), text: text.value };
+      const body = kind.history ? { text: text.value.trim() } : { title: title.value.trim(), text: text.value };
       if (rec) await api(`${base}/${rec.Id}`, { method: 'PATCH', body });
       else await api(base, { method: 'POST', body });
-      toast(`${rec ? 'Saved' : 'Added'} ${kind.one.toLowerCase()} "${body.title}"`, 'ok');
+      toast(kind.history ? 'Next step saved on the opportunity' : `${rec ? 'Saved' : 'Added'} ${kind.one.toLowerCase()} "${body.title}"`, 'ok');
       dlg.close();
       await onSaved();
     } catch (e) { fail(e.message); }
@@ -4451,8 +4443,9 @@ function dsChildDialog(dsId, kind, rec, onSaved) {
   dlg.append(el('section', {},
     el('h3', {}, rec ? `Edit ${kind.one}` : `New ${kind.one}`),
     el('div', { class: 'grid' },
-      el('label', { class: 'field wide' }, el('span', {}, 'Title', el('span', { class: 'req' }, ' *')), title),
-      el('label', { class: 'field wide' }, el('span', {}, 'Text'), text)),
+      kind.history ? null : el('label', { class: 'field wide' }, el('span', {}, 'Title', el('span', { class: 'req' }, ' *')), title),
+      el('label', { class: 'field wide' }, el('span', {}, kind.history ? [kind.one, el('span', { class: 'req' }, ' *')] : 'Text'), text)),
+    kind.history ? el('div', { class: 'sub', style: 'margin-top:6px' }, "Saved as the opportunity's next step; Salesforce adds it to the history.") : null,
     error,
     el('div', { class: 'form-actions' }, del, cancel, save)));
   document.body.append(dlg);
@@ -4463,7 +4456,7 @@ function dsChildDialog(dsId, kind, rec, onSaved) {
     text.value = 'Loading…';
     api(`${base}/${rec.Id}`).then((full) => { text.value = full.text; busy(false); },
       (e) => { text.value = rec.text || ''; fail(e.message); save.disabled = true; });
-  } else title.focus();
+  } else (kind.history ? text : title).focus();
 }
 
 // Lists show a Deal Support by the number in its name (e.g. "DR-012345" -> "012345"); the full name is the tooltip.
@@ -4626,7 +4619,7 @@ function renderEventPanel() {
       e.supports.map((r) => el('div', {},
         el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
         one ? null : editBtn(r, { class: 'linkish', style: 'display:inline;margin-left:8px' }),
-        editing?.id !== r.Id ? dsTabbed(el('div', {}, dsSummary(r.Id)), r.Id) : null)));
+        editing?.id !== r.Id ? dsSummary(r.Id) : null)));
     return panel.replaceChildren(...(editing && e.supports.length === 1 ? [editing.box] : [list, editing?.box].filter(Boolean)));
   }
   const formBox = el('div', {}, editing?.box);
@@ -4940,7 +4933,7 @@ function renderOutlookPane(e, reload) {
     const summary = el('section', {},
       el('h3', {}, dsMeta.label, dsMeta.canUpdate ? el('button', { style: 'margin-left:10px', onclick: edit }, 'Edit') : null),
       el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
-      dsTabbed(el('div', {}, dsSummary(r.Id), note), r.Id));
+      dsSummary(r.Id), note);
     if (e.recurring) note.textContent = seriesNote;
     else tagMeeting(dsMeta.label).then((t) => {
       note.textContent = t === 'tagged' ? `Marked with the "${dsMeta.label}" category in your calendar.`

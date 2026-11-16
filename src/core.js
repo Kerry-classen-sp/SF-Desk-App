@@ -1205,9 +1205,9 @@ api.delete('/deal-supports/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---------- Notes and Next Steps on a Deal Support ----------
-// Notes are Salesforce's notes (ContentNote, linked to the Deal Support by a ContentDocumentLink); Next
-// Steps are Tasks on it (Subject and Comments). Both are edited as a title and plain text.
+// ---------- Notes and Next Steps on an opportunity ----------
+// Notes are Salesforce's notes (ContentNote, linked to the opportunity by a ContentDocumentLink), edited as a
+// title and plain text. Next Steps are its "Most Recent NEXT STEP" field's history (see nextStepMeta).
 
 // Base64 of a string's UTF-8 bytes (JavaScriptCore has neither btoa nor Buffer).
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -1237,24 +1237,23 @@ const noteText = (html) => String(html || '')
   .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&').replace(/\n+$/, '');
 
 // The title and text from the dialog, checked: a title is required.
-function titleAndText(body, maxText) {
+function titleAndText(body) {
   const title = String(body?.title ?? '').trim(), text = String(body?.text ?? '');
   if (!title) throw new HttpError(400, 'Give it a title.');
   if (title.length > 255) throw new HttpError(400, 'The title can be at most 255 characters.');
-  if (maxText && text.length > maxText) throw new HttpError(400, `The text can be at most ${maxText.toLocaleString('en-US')} characters.`);
   return { title, text };
 }
 const myUserId = (req) => req.session.sf?.user?.id || '';
 
-// The note, if it's linked to this Deal Support (so only its notes are read or changed here).
-async function linkedNote(req, dsId, noteId) {
-  const [link] = await query(req, `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${dsId}' AND ContentDocumentId = '${noteId}'`);
-  if (!link) throw new HttpError(404, 'That note isn\'t on this Deal Support.');
+// The note, if it's linked to this opportunity (so only its notes are read or changed here).
+async function linkedNote(req, oppId, noteId) {
+  const [link] = await query(req, `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${oppId}' AND ContentDocumentId = '${noteId}'`);
+  if (!link) throw new HttpError(404, 'That note isn\'t on this opportunity.');
 }
 const noteRow = (req, n) => ({ Id: n.Id, title: n.Title || '', text: n.TextPreview || '', by: n.Owner?.Name || n.CreatedBy?.Name || '',
   modified: n.LastModifiedDate || null, mine: n.OwnerId === myUserId(req) });
 
-api.get('/deal-supports/:id/notes', wrap(async (req, res) => {
+api.get('/opportunities/:id/notes', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const links = await query(req, `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${id}' AND ContentDocument.FileType = 'SNOTE'`);
   const ids = links.map((l) => `'${sfId(l.ContentDocumentId)}'`);
@@ -1263,7 +1262,7 @@ api.get('/deal-supports/:id/notes', wrap(async (req, res) => {
   res.json({ records: notes.map((n) => noteRow(req, n)) });
 }));
 
-api.get('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+api.get('/opportunities/:id/notes/:noteId', wrap(async (req, res) => {
   const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
   await linkedNote(req, id, noteId);
   const [n] = await query(req, `SELECT Id, Title, TextPreview, OwnerId, Owner.Name, CreatedBy.Name, LastModifiedDate FROM ContentNote WHERE Id = '${noteId}'`);
@@ -1272,7 +1271,7 @@ api.get('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
   res.json({ ...noteRow(req, n), text: noteText(html) });
 }));
 
-api.post('/deal-supports/:id/notes', wrap(async (req, res) => {
+api.post('/opportunities/:id/notes', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const { title, text } = titleAndText(req.body);
   const note = await sf(req, 'POST', `/services/data/${API}/sobjects/ContentNote`, { body: { Title: title, Content: base64Utf8(noteHtml(text)) } });
@@ -1286,7 +1285,7 @@ api.post('/deal-supports/:id/notes', wrap(async (req, res) => {
   res.status(201).json({ Id: note.id });
 }));
 
-api.patch('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+api.patch('/opportunities/:id/notes/:noteId', wrap(async (req, res) => {
   const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
   const { title, text } = titleAndText(req.body);
   await linkedNote(req, id, noteId);
@@ -1294,48 +1293,64 @@ api.patch('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-api.delete('/deal-supports/:id/notes/:noteId', wrap(async (req, res) => {
+api.delete('/opportunities/:id/notes/:noteId', wrap(async (req, res) => {
   const id = sfId(req.params.id), noteId = sfId(req.params.noteId);
   await linkedNote(req, id, noteId);
   await sf(req, 'DELETE', `/services/data/${API}/sobjects/ContentDocument/${noteId}`);
   res.json({ ok: true });
 }));
 
-const TASK_TEXT_MAX = 32000;
-async function linkedTask(req, dsId, taskId) {
-  const [task] = await query(req, `SELECT Id FROM Task WHERE Id = '${taskId}' AND WhatId = '${dsId}'`);
-  if (!task) throw new HttpError(404, 'That next step isn\'t on this Deal Support.');
+// The opportunity's next step: a field reps update (e.g. weekly), and a history object Salesforce adds a
+// record to on each change (Opportunity, the step, who entered it). SF_NEXT_STEP_FIELD and
+// SF_NEXT_STEP_HISTORY name them when they differ from Kerry's org. Null when the org has neither.
+const NEXT_STEP_FIELD = env.SF_NEXT_STEP_FIELD || 'Most_Recent_NEXT_STEP__c';
+const NEXT_STEP_HISTORY = env.SF_NEXT_STEP_HISTORY || 'Most_Recent__c';
+async function nextStepMeta(req) {
+  if (req.session.nextStep !== undefined) return req.session.nextStep;
+  const read = (o) => sf(req, 'GET', `/services/data/${API}/sobjects/${o}/describe`).catch((err) => { if (err.status === 401) throw err; return null; });
+  const [opp, hist] = await Promise.all([read('Opportunity'), read(NEXT_STEP_HISTORY)]);
+  const field = opp?.fields.find((f) => f.name === NEXT_STEP_FIELD);
+  const hf = hist?.fields || [];
+  const oppRef = hf.find((f) => f.type === 'reference' && f.referenceTo?.includes('Opportunity'));
+  const text = hf.find((f) => f.custom && (f.type === 'textarea' || f.type === 'string') && /next step/i.test(f.label));
+  req.session.nextStep = field || (oppRef && text) ? {
+    label: field?.label || 'Next Step',
+    field: field ? { name: field.name, updateable: !!field.updateable, length: field.length || 255 } : null,
+    history: oppRef && text ? { object: hist.name, oppField: oppRef.name, textField: text.name } : null,
+  } : null;
+  return req.session.nextStep;
 }
 
-api.get('/deal-supports/:id/next-steps', wrap(async (req, res) => {
+// The next steps entered on an opportunity, newest first, and whether this user can add one.
+api.get('/opportunities/:id/next-steps', wrap(async (req, res) => {
   const id = sfId(req.params.id);
-  const tasks = await query(req, `SELECT Id, Subject, Description, Status, IsClosed, OwnerId, Owner.Name, LastModifiedDate FROM Task
-    WHERE WhatId = '${id}' ORDER BY IsClosed, LastModifiedDate DESC LIMIT 200`);
-  res.json({ records: tasks.map((x) => ({ Id: x.Id, title: x.Subject || '', text: x.Description || '', status: x.Status || '',
-    done: !!x.IsClosed, by: x.Owner?.Name || '', modified: x.LastModifiedDate || null, mine: x.OwnerId === myUserId(req) })) });
+  const m = await nextStepMeta(req);
+  if (!m) throw new HttpError(404, 'This org has no next step field on opportunities.');
+  let records = [];
+  if (m.history) {
+    const h = m.history;
+    records = (await query(req, `SELECT Id, ${h.textField}, CreatedBy.Name, CreatedDate FROM ${h.object}
+      WHERE ${h.oppField} = '${id}' ORDER BY CreatedDate DESC LIMIT 500`, 500))
+      .map((r) => ({ Id: r.Id, text: r[h.textField] || '', by: r.CreatedBy?.Name || '', date: r.CreatedDate || null }));
+  } else if (m.field) {
+    const [o] = await query(req, `SELECT ${m.field.name}, LastModifiedBy.Name, LastModifiedDate FROM Opportunity WHERE Id = '${id}'`);
+    if (o?.[m.field.name]) records = [{ Id: id, text: o[m.field.name], by: o.LastModifiedBy?.Name || '', date: o.LastModifiedDate || null }];
+  }
+  res.json({ label: m.label, canCreate: !!m.field?.updateable, maxLength: m.field?.length || null, records });
 }));
 
-api.post('/deal-supports/:id/next-steps', wrap(async (req, res) => {
+// A new next step: sets the opportunity's next step field (Salesforce records it in the history).
+api.post('/opportunities/:id/next-steps', wrap(async (req, res) => {
   const id = sfId(req.params.id);
-  const { title, text } = titleAndText(req.body, TASK_TEXT_MAX);
-  const task = await sf(req, 'POST', `/services/data/${API}/sobjects/Task`, { body: { WhatId: id, Subject: title, Description: text || null } });
-  res.status(201).json({ Id: task.id });
+  const m = await nextStepMeta(req);
+  if (!m?.field?.updateable) throw new HttpError(403, `Your Salesforce user can't change the opportunity's ${m?.label || 'next step'}.`);
+  const text = String(req.body?.text ?? '').trim();
+  if (!text) throw new HttpError(400, 'Write the next step.');
+  if (text.length > m.field.length) throw new HttpError(400, `The next step can be at most ${m.field.length} characters.`);
+  await sf(req, 'PATCH', `/services/data/${API}/sobjects/Opportunity/${id}`, { body: { [m.field.name]: text } });
+  res.status(201).json({ ok: true });
 }));
 
-api.patch('/deal-supports/:id/next-steps/:taskId', wrap(async (req, res) => {
-  const id = sfId(req.params.id), taskId = sfId(req.params.taskId);
-  const { title, text } = titleAndText(req.body, TASK_TEXT_MAX);
-  await linkedTask(req, id, taskId);
-  await sf(req, 'PATCH', `/services/data/${API}/sobjects/Task/${taskId}`, { body: { Subject: title, Description: text || null } });
-  res.json({ ok: true });
-}));
-
-api.delete('/deal-supports/:id/next-steps/:taskId', wrap(async (req, res) => {
-  const id = sfId(req.params.id), taskId = sfId(req.params.taskId);
-  await linkedTask(req, id, taskId);
-  await sf(req, 'DELETE', `/services/data/${API}/sobjects/Task/${taskId}`);
-  res.json({ ok: true });
-}));
 
 // Move My Time: my Deal Supports (Assigned SE = me) on an opportunity (open or closed), and the other open
 // opportunities on the same account they can be moved to. Only the opportunity lookup changes; the account lookup stays.
