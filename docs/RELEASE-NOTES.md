@@ -63,11 +63,17 @@ Build 5 (November 12, 2026):
 
 Build 6 (November 16, 2026):
 
-- **Notes and Next Steps on a Deal Support:** a Deal Support has **Details**, **Notes** and **Next Steps**
-  tabs: in its opened row on an opportunity, in the edit form, on Time Entry and in the Outlook add-in. Each
-  lists its notes or next steps; click one, or **New Note** / **New Next Step**, to edit its Title and Text,
-  with Save, Cancel and Delete. Notes are Salesforce notes on the Deal Support; Next Steps are its Tasks
-  (Subject and Comments).
+- **Notes and Next Steps (first version):** Notes and Next Steps tabs inside each Deal Support. Replaced in
+  build 7 by tabs on the opportunity.
+
+Build 7 (November 16, 2026):
+
+- **Notes and Next Steps on the opportunity:** next to Deal Supports and TES/RFP Requests, an opportunity
+  has a **Notes** tab and a **Next Steps** tab (each loads when first opened). Notes lists its Salesforce
+  notes; click one, or **New Note**, to edit its Title and Text, with Save, Cancel and Delete. Next Steps
+  lists every update to the opportunity's Most Recent NEXT STEP (its history in Salesforce), newest first,
+  with who entered it; **New Next Step** sets it, for users Salesforce lets change that field.
+- **Deal Supports:** the Notes and Next Steps tabs inside each Deal Support are gone.
 
 ## 1.7.1 (October 30, 2026)
 
