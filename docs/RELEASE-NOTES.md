@@ -75,6 +75,11 @@ Build 7 (November 16, 2026):
   with who entered it; **New Next Step** sets it, for users Salesforce lets change that field.
 - **Deal Supports:** the Notes and Next Steps tabs inside each Deal Support are gone.
 
+Build 8 (November 17, 2026):
+
+- **Security:** body-parser 1.20.9 (GHSA-27r3-jxmh-p828, high) and qs 6.16.2 (moderate), the two
+  vulnerable packages Express pulls in. Express stays on 4 and dotenv on 16.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
