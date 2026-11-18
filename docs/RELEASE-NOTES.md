@@ -104,6 +104,14 @@ Build 13 (November 18, 2026):
 - **No code to enter:** on the Mac, the sign-in sheet enters Microsoft's code itself and starts at
   Microsoft's own sign-in (your email, password and MFA).
 
+Build 14 (November 18, 2026):
+
+- **No DS Required in Outlook from SF Desk:** with Microsoft 365 marking on, meetings marked as needing no Deal
+  Support get the gray **No DS Required** category in Outlook, as the add-in does, and meetings with a Deal
+  Support keep getting the green Deal Support one. Changing a meeting swaps its category, and undoing takes it
+  off. SF Desk asks Outlook to create both categories with their colors; where your tenant doesn't allow that,
+  they're added without a color unless the add-in has created them already.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
