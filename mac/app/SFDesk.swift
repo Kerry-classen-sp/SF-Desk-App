@@ -341,6 +341,23 @@ final class Server: @unchecked Sendable {
 // MARK: - The window
 
 @MainActor
+// Enters the device code (the sign-in URL's otc parameter) on Microsoft's page once and submits it, so the sheet
+// starts at Microsoft's own sign-in instead of asking for the code.
+final class SignInCode: NSObject, WKNavigationDelegate {
+  let code: String
+  var entered = false
+  init(_ code: String) { self.code = code }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    guard !entered, let literal = String(data: (try? JSONEncoder().encode(code)) ?? Data(), encoding: .utf8) else { return }
+    webView.evaluateJavaScript("""
+      (() => { const i = document.querySelector('input[name=otc]'); if (!i || i.value) return false;
+        i.value = \(literal); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true }));
+        (document.querySelector('#idSIButton9') || i.form?.querySelector('[type=submit]'))?.click(); return true; })()
+      """) { [weak self] done, _ in if done as? Bool == true { self?.entered = true } }
+  }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
                          WKScriptMessageHandler {
   var window: NSWindow!
@@ -511,6 +528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   // than in the browser: there Microsoft signs in with the account the browser already has, and here it asks which
   // one. The page posts "signInDone" to the sfdesk message handler once SF Desk is signed in, which closes it.
   var signInSheet: NSWindow?
+  var signInCode: SignInCode?
 
   func isDeviceSignIn(_ url: URL) -> Bool {
     let host = url.host?.lowercased() ?? "", path = url.path.lowercased()
@@ -526,6 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     let size = NSSize(width: 520, height: 680), bar: CGFloat = 48
     let view = WKWebView(frame: NSRect(x: 0, y: bar, width: size.width, height: size.height - bar), configuration: config)
     view.autoresizingMask = [.width, .height]
+    let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "otc" }?.value
+    signInCode = code.map(SignInCode.init)
+    view.navigationDelegate = signInCode
     let close = NSButton(title: "Close", target: self, action: #selector(closeSignIn(_:)))
     close.keyEquivalent = "\u{1b}"
     close.sizeToFit()
@@ -546,6 +567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   @objc func closeSignIn(_ sender: Any?) {
     guard let sheet = signInSheet else { return }
     signInSheet = nil
+    signInCode = nil
     window.endSheet(sheet)
   }
 

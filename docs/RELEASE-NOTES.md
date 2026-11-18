@@ -99,6 +99,11 @@ Build 12 (November 18, 2026):
   the SF Desk window (still with a fresh session), and closes by itself once you're signed in. **Close**
   (or Esc) closes it sooner.
 
+Build 13 (November 18, 2026):
+
+- **No code to enter:** on the Mac, the sign-in sheet enters Microsoft's code itself and starts at
+  Microsoft's own sign-in (your email, password and MFA).
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
