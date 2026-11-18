@@ -4074,8 +4074,10 @@ async function graphSignIn({ keepSource = false } = {}) {
 
 // Meetings get categories in Outlook (Microsoft 365), as the add-in does for the meeting open in it, so they show
 // without opening each one: green Deal Support on those with one, gray No DS Required on those marked as needing
-// none, and neither once that's undone. Runs after each week loads once signed in with permission to update the
-// calendar; the button signs in first. A meeting is sent again automatically only when its tag changes.
+// none, and neither once that's undone. Meetings with neither lose a stray Deal Support category (one on a recurring
+// series shows on every occurrence, but a Deal Support covers only one). Runs after each week loads once signed in
+// with permission to update the calendar; the button signs in first. A meeting is sent again automatically only
+// when its tag changes.
 const outlookSent = new Map();
 async function markOutlook(auto) {
   const g = cal.sources?.graph;
@@ -4087,10 +4089,16 @@ async function markOutlook(auto) {
     return graphSignIn({ keepSource: true });
   }
   const key = (e) => `${e.allDay ? e.date : e.start}|${e.subject}`;
-  const tag = (e) => (e.supports.length ? 'ds' : e.skipped ? 'none' : 'clear');
+  // Neither: 'clear' when it had a tag from here, else 'unlinked' (only a Deal Support category comes off).
+  const tag = (e) => {
+    if (e.supports.length) return 'ds';
+    if (e.skipped) return 'none';
+    const was = outlookSent.get(key(e));
+    return was === 'ds' || was === 'none' || was === 'clear' ? 'clear' : 'unlinked';
+  };
   const events = cal.data.events.filter((e) => {
     const was = outlookSent.get(key(e)), now = tag(e);
-    return now === 'clear' ? was && was !== 'clear' : !auto || was !== now;
+    return !auto || was !== now;
   });
   if (!events.length) { if (!auto) toast(`No meetings with a ${dsMeta.label} or marked as needing none this week.`); return; }
   const week = cal.week;
@@ -4100,6 +4108,7 @@ async function markOutlook(auto) {
       events: events.map((e) => ({ start: e.start, allDay: e.allDay, date: e.date, subject: e.subject, tag: tag(e) })) } });
     for (const e of events) outlookSent.set(key(e), tag(e));
     const parts = [r.marked ? `Marked ${plural(r.marked, 'meeting')} in Outlook` : null,
+      r.series ? `${dsMeta.label} taken off ${plural(r.series, 'recurring series', 'recurring series')}, kept on the occurrence it covers` : null,
       !auto && r.already ? `${plural(r.already, 'meeting')} already marked` : null,
       !auto && r.notFound ? `${r.notFound} not found in your Outlook calendar` : null].filter(Boolean);
     if (r.failed) toast(`Couldn't mark ${plural(r.failed, 'meeting')} in Outlook: ${r.error || 'Microsoft 365 refused'}`, 'err');
