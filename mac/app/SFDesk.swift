@@ -341,7 +341,8 @@ final class Server: @unchecked Sendable {
 // MARK: - The window
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
+                         WKScriptMessageHandler {
   var window: NSWindow!
   var web: WKWebView!
   var server: Server!
@@ -359,7 +360,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func applicationDidFinishLaunching(_ note: Notification) {
     buildMenu()
-    web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    let config = WKWebViewConfiguration()
+    config.userContentController.add(self, name: "sfdesk")
+    web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = true
@@ -504,9 +507,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     return nil
   }
 
-  // Microsoft's device code page opens in a window of its own with a fresh session that isn't kept, rather than in
-  // the browser: there Microsoft signs in with the account the browser already has, and here it asks which one.
-  var signInWindows: [NSWindow] = []
+  // Microsoft's device code page opens in a sheet on the SF Desk window with a fresh session that isn't kept, rather
+  // than in the browser: there Microsoft signs in with the account the browser already has, and here it asks which
+  // one. The page posts "signInDone" to the sfdesk message handler once SF Desk is signed in, which closes it.
+  var signInSheet: NSWindow?
 
   func isDeviceSignIn(_ url: URL) -> Bool {
     let host = url.host?.lowercased() ?? "", path = url.path.lowercased()
@@ -516,20 +520,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   func openSignIn(_ url: URL) {
+    closeSignIn(nil)
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
-    let view = WKWebView(frame: .zero, configuration: config)
-    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 700),
-                     styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-    w.title = "Sign in to Microsoft 365"
-    w.contentView = view
-    w.isReleasedWhenClosed = false
-    w.center()
-    signInWindows.removeAll { !$0.isVisible }
-    signInWindows.append(w)
+    let size = NSSize(width: 520, height: 680), bar: CGFloat = 48
+    let view = WKWebView(frame: NSRect(x: 0, y: bar, width: size.width, height: size.height - bar), configuration: config)
+    view.autoresizingMask = [.width, .height]
+    let close = NSButton(title: "Close", target: self, action: #selector(closeSignIn(_:)))
+    close.keyEquivalent = "\u{1b}"
+    close.sizeToFit()
+    close.frame.origin = NSPoint(x: size.width - close.frame.width - 14, y: (bar - close.frame.height) / 2)
+    close.autoresizingMask = [.minXMargin, .maxYMargin]
+    let content = NSView(frame: NSRect(origin: .zero, size: size))
+    content.addSubview(view)
+    content.addSubview(close)
+    let sheet = NSWindow(contentRect: content.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    sheet.contentView = content
+    sheet.isReleasedWhenClosed = false
+    signInSheet = sheet
     view.load(URLRequest(url: url))
-    w.makeKeyAndOrderFront(nil)
-    NSApp.activate(ignoringOtherApps: true)
+    showWindow(nil)
+    window.beginSheet(sheet)
+  }
+
+  @objc func closeSignIn(_ sender: Any?) {
+    guard let sheet = signInSheet else { return }
+    signInSheet = nil
+    window.endSheet(sheet)
+  }
+
+  func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    if message.body as? String == "signInDone" { closeSignIn(nil) }
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
