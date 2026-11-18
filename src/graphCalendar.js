@@ -201,7 +201,10 @@ export function graphCalendar(dataDir) {
   // Tag the meetings in my main calendar that match `wanted` ({ start, allDay, date, subject, tag }): the meeting at
   // the same start (same day when all-day) with the same or a similar subject, or the only one there. `tags` maps
   // each tag to its category ({ ds: { name, color }, none: ... }); a meeting gets its tag's category and loses the
-  // others' (a null tag takes them all off). Meetings already that way are left alone. Returns the counts.
+  // others'. 'clear' takes them all off, 'unlinked' only the ds one. Meetings already that way are left alone.
+  // A Deal Support covers one occurrence of a recurring meeting, so the ds category never stays on a series (where
+  // every occurrence shows it): it comes off the series, and the occurrences that have one get it of their own.
+  // Returns the counts.
   async function markCategory(fromIso, toIso, wanted, tags) {
     if (!canWrite(saved?.scope)) {
       throw new CalendarError(`${saved?.refresh_token ? 'Sign in to Microsoft 365 again' : 'Sign in to Microsoft 365'} to let SF Desk mark meetings in Outlook.`, 400);
@@ -209,17 +212,21 @@ export function graphCalendar(dataDir) {
     const simple = (s) => String(s || '').replace(/^\s*\[backstory\b[^\]]*\]\s*/i, '').toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
     const mine = [];
     let url = '/me/calendarView?' + new URLSearchParams({ startDateTime: fromIso, endDateTime: toIso,
-      $select: 'id,subject,start,isAllDay,categories,isCancelled', $top: '200' });
+      $select: 'id,subject,start,isAllDay,categories,isCancelled,type,seriesMasterId', $top: '200' });
     while (url) {
       const page = await graph(url, { Prefer: 'outlook.timezone="UTC"' });
       for (const e of page.value || []) {
         if (e.isCancelled) continue;
         mine.push({ id: e.id, subject: e.subject || '', allDay: !!e.isAllDay, categories: e.categories || [],
-          day: e.start.dateTime.slice(0, 10), at: e.isAllDay ? null : Date.parse(e.start.dateTime + 'Z') });
+          day: e.start.dateTime.slice(0, 10), at: e.isAllDay ? null : Date.parse(e.start.dateTime + 'Z'),
+          series: e.seriesMasterId || null, inherits: e.type === 'occurrence' });
       }
       url = page['@odata.nextLink'] || '';
     }
     const out = { marked: 0, already: 0, notFound: 0, failed: 0 };
+    const lower = (s) => String(s).toLowerCase();
+    const dsName = lower(tags.ds.name);
+    const hits = [];
     const done = new Set();
     for (const w of wanted) {
       const at = Date.parse(w.start);
@@ -230,10 +237,27 @@ export function graphCalendar(dataDir) {
       if (!hit) { out.notFound++; continue; }
       if (done.has(hit.id)) continue;
       done.add(hit.id);
+      hits.push({ w, hit });
+    }
+    // The ds category off the series of these meetings; their plain occurrences had it from there.
+    for (const series of new Set(hits.filter(({ hit }) => hit.series && hit.categories.some((c) => lower(c) === dsName)).map(({ hit }) => hit.series))) {
+      try {
+        const master = await graph(`/me/events/${encodeURIComponent(series)}?$select=categories`);
+        const cats = master.categories || [];
+        if (!cats.some((c) => lower(c) === dsName)) continue;
+        await graph(`/me/events/${encodeURIComponent(series)}`, {}, { method: 'PATCH', body: { categories: cats.filter((c) => lower(c) !== dsName) } });
+        out.series = (out.series || 0) + 1;
+        for (const e of mine) if (e.series === series && e.inherits) e.categories = e.categories.filter((c) => lower(c) !== dsName);
+      } catch (err) {
+        out.failed++;
+        out.error = err.message;
+      }
+    }
+    for (const { w, hit } of hits) {
       const want = tags[w.tag]?.name;
-      const ours = new Set(Object.values(tags).map((t) => t.name.toLowerCase()));
-      const kept = hit.categories.filter((c) => !ours.has(c.toLowerCase()) || c.toLowerCase() === want?.toLowerCase());
-      const next = want && !kept.some((c) => c.toLowerCase() === want.toLowerCase()) ? [...kept, want] : kept;
+      const drop = new Set((w.tag === 'unlinked' ? [tags.ds] : Object.entries(tags).filter(([k]) => k !== w.tag).map(([, t]) => t)).map((t) => lower(t.name)));
+      const kept = hit.categories.filter((c) => !drop.has(lower(c)));
+      const next = want && !kept.some((c) => lower(c) === lower(want)) ? [...kept, want] : kept;
       if (next.length === hit.categories.length && next.every((c, i) => c === hit.categories[i])) { if (want) out.already++; continue; }
       try {
         if (want) await ensureCategory(want, tags[w.tag].color);

@@ -2516,7 +2516,7 @@ api.post('/graph/signout', (req, res) => { graphCal?.signOut(); res.json({ ok: t
 
 // Tag meetings in Outlook (Microsoft 365) as the add-in does for the meeting open in it: green Deal Support category
 // on meetings that have one (tag 'ds', the default), gray No DS Required on those marked as needing none ('none'),
-// or neither ('clear'). events: [{ start, allDay, date, subject, tag }] from one range.
+// neither ('clear'), or no Deal Support one ('unlinked'). events: [{ start, allDay, date, subject, tag }] from one range.
 const NO_DS_CATEGORY = 'No DS Required';
 api.post('/graph/mark', wrap(async (req, res) => {
   if (!graphCal || !MARK_ENABLED) throw new HttpError(404, 'Marking meetings in Outlook isn\'t turned on (SF_DESK_OUTLOOK_MARK).');
@@ -2526,7 +2526,7 @@ api.post('/graph/mark', wrap(async (req, res) => {
   const events = (Array.isArray(req.body?.events) ? req.body.events : []).slice(0, 500).map((e) => ({
     start: String(e?.start || '').replace(/\+0000$/, 'Z'), allDay: !!e?.allDay,
     date: /^\d{4}-\d{2}-\d{2}$/.test(e?.date) ? e.date : '', subject: String(e?.subject || '').slice(0, 500),
-    tag: ['ds', 'none', 'clear'].includes(e?.tag) ? e.tag : 'ds',
+    tag: ['ds', 'none', 'clear', 'unlinked'].includes(e?.tag) ? e.tag : 'ds',
   }));
   res.json(events.length ? await graphCal.markCategory(from, to, events, tags) : { marked: 0, already: 0, notFound: 0, failed: 0 });
 }));

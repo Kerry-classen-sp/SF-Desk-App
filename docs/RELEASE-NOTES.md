@@ -112,6 +112,13 @@ Build 14 (November 18, 2026):
   off. SF Desk asks Outlook to create both categories with their colors; where your tenant doesn't allow that,
   they're added without a color unless the add-in has created them already.
 
+Build 15 (November 18, 2026):
+
+- **One Deal Support, one occurrence:** a Deal Support covers a single occurrence of a recurring meeting, in
+  Outlook too. When SF Desk tags a week, a Deal Support category on a recurring series (which shows on every
+  occurrence) comes off the series and goes only on the occurrence a Deal Support covers, and meetings without
+  one lose a stray Deal Support category. No DS Required put on a whole series is left alone.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
