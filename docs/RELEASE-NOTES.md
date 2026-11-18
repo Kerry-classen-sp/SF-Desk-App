@@ -93,6 +93,12 @@ Build 11 (November 18, 2026):
   with a fresh session instead of in the browser, so Microsoft asks which account to use rather than
   signing in with the browser's. The code is copied, ready to paste.
 
+Build 12 (November 18, 2026):
+
+- **Microsoft 365 sign-in in the SF Desk window:** on the Mac, Microsoft's sign-in page opens as a sheet on
+  the SF Desk window (still with a fresh session), and closes by itself once you're signed in. **Close**
+  (or Esc) closes it sooner.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder

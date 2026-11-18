@@ -4025,6 +4025,9 @@ async function loadSources() {
   };
 }
 
+// The Mac app shows Microsoft's sign-in page in a sheet on its window; this closes it.
+const signInDone = () => window.webkit?.messageHandlers?.sfdesk?.postMessage('signInDone');
+
 // Microsoft 365 sign-in with a device code: show the code and Microsoft's page, then wait for it to finish.
 // keepSource: stay on the calendar shown (signing in to mark meetings in Outlook), rather than switching to Microsoft 365's.
 async function graphSignIn({ keepSource = false } = {}) {
@@ -4037,7 +4040,7 @@ async function graphSignIn({ keepSource = false } = {}) {
     'To use your Microsoft 365 calendar, open ', el('a', { href: info.verificationUri, target: '_blank', rel: 'noopener' }, info.verificationUri),
     ' and enter the code ', el('b', { style: 'font-size:1.15em;letter-spacing:.08em;user-select:all' }, info.userCode), ' ',
     el('button', { onclick: () => navigator.clipboard?.writeText(info.userCode).then(() => toast('Code copied')) }, 'Copy code'), ' ',
-    el('button', { onclick: () => { cal.graphTicket = null; loadCalendar(); } }, 'Cancel'),
+    el('button', { onclick: () => { cal.graphTicket = null; signInDone(); loadCalendar(); } }, 'Cancel'),
     el('br'), cal.sources?.graph?.canMark
       ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
       : 'Sign in with your work account and accept reading your calendar.', status));
@@ -4049,6 +4052,7 @@ async function graphSignIn({ keepSource = false } = {}) {
     const st = await api('/graph/status').catch(() => ({}));
     if (st.signedIn) {
       cal.graphTicket = null;
+      signInDone();
       toast(`Signed in to Microsoft 365${st.account ? ` as ${st.account}` : ''}`);
       if (!keepSource) {
         try { localStorage.removeItem(CAL_SOURCE); } catch {}
@@ -4059,6 +4063,7 @@ async function graphSignIn({ keepSource = false } = {}) {
     }
     if (!st.pending && st.error) {
       cal.graphTicket = null;
+      signInDone();
       status.textContent = '';
       sub.replaceChildren(el('span', { style: 'color:var(--err, #b00020)' }, `Microsoft 365 sign-in didn't work: ${st.error}`));
       return;
