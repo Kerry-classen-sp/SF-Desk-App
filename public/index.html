@@ -4045,7 +4045,8 @@ async function graphSignIn({ keepSource = false } = {}) {
       ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
       : 'Sign in with your work account and accept reading your calendar.', status));
   navigator.clipboard?.writeText(info.userCode).catch(() => {});
-  window.open(info.verificationUri, '_blank', 'noopener');
+  // otc: the Mac app enters the code on Microsoft's page itself.
+  window.open(`${info.verificationUri}?otc=${encodeURIComponent(info.userCode)}`, '_blank', 'noopener');
   while (cal.graphTicket === ticket) {
     await new Promise((r) => setTimeout(r, 3000));
     if (cal.graphTicket !== ticket) return;
