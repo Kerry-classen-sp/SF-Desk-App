@@ -5,7 +5,8 @@
 // the data folder (graph-token.json). Your organization may require an admin to approve that client
 // for Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
 // Events come back in the same shape as the Mac's and Outlook's readers (see macCalendar.js).
-// The one write is adding the Deal Support category to meetings that have one (markCategory).
+// The one write is tagging meetings: the Deal Support category on meetings that have one, and No DS Required on
+// meetings marked as needing none (markCategory).
 // Sign-ins from before that only granted Calendars.Read; they keep reading until signed in again.
 
 import crypto from 'node:crypto';
@@ -187,10 +188,21 @@ export function graphCalendar(dataDir) {
     }));
   }
 
-  // Add the category to the meetings in my main calendar that match `wanted` ({ start, allDay, date, subject }):
-  // the meeting at the same start (same day when all-day) with the same or a similar subject, or the only one
-  // there. Meetings that already have it are left alone. Returns the counts.
-  async function markCategory(fromIso, toIso, wanted, name) {
+  // Outlook's category list, so SF Desk's categories get their colors (preset4 green, preset12 gray) where the add-in
+  // hasn't made them yet. That needs MailboxSettings.ReadWrite, which SF Desk doesn't ask for: without it Microsoft
+  // refuses and the categories are used without a color, as before. Tried once per category per run.
+  const listed = new Set();
+  async function ensureCategory(name, color) {
+    if (!color || listed.has(name.toLowerCase())) return;
+    listed.add(name.toLowerCase());
+    try { await graph('/me/outlook/masterCategories', {}, { method: 'POST', body: { displayName: name, color } }); } catch { /* there already, or not allowed */ }
+  }
+
+  // Tag the meetings in my main calendar that match `wanted` ({ start, allDay, date, subject, tag }): the meeting at
+  // the same start (same day when all-day) with the same or a similar subject, or the only one there. `tags` maps
+  // each tag to its category ({ ds: { name, color }, none: ... }); a meeting gets its tag's category and loses the
+  // others' (a null tag takes them all off). Meetings already that way are left alone. Returns the counts.
+  async function markCategory(fromIso, toIso, wanted, tags) {
     if (!canWrite(saved?.scope)) {
       throw new CalendarError(`${saved?.refresh_token ? 'Sign in to Microsoft 365 again' : 'Sign in to Microsoft 365'} to let SF Desk mark meetings in Outlook.`, 400);
     }
@@ -218,10 +230,15 @@ export function graphCalendar(dataDir) {
       if (!hit) { out.notFound++; continue; }
       if (done.has(hit.id)) continue;
       done.add(hit.id);
-      if (hit.categories.some((c) => c.toLowerCase() === name.toLowerCase())) { out.already++; continue; }
+      const want = tags[w.tag]?.name;
+      const ours = new Set(Object.values(tags).map((t) => t.name.toLowerCase()));
+      const kept = hit.categories.filter((c) => !ours.has(c.toLowerCase()) || c.toLowerCase() === want?.toLowerCase());
+      const next = want && !kept.some((c) => c.toLowerCase() === want.toLowerCase()) ? [...kept, want] : kept;
+      if (next.length === hit.categories.length && next.every((c, i) => c === hit.categories[i])) { if (want) out.already++; continue; }
       try {
-        await graph(`/me/events/${encodeURIComponent(hit.id)}`, {}, { method: 'PATCH', body: { categories: [...hit.categories, name] } });
-        out.marked++;
+        if (want) await ensureCategory(want, tags[w.tag].color);
+        await graph(`/me/events/${encodeURIComponent(hit.id)}`, {}, { method: 'PATCH', body: { categories: next } });
+        if (want) out.marked++; else out.cleared = (out.cleared || 0) + 1;
       } catch (err) {
         out.failed++;
         out.error = err.message;

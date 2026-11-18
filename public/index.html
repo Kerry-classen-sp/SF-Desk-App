@@ -3956,7 +3956,7 @@ function showCalendar() {
           el('span', {}, el('i', { style: 'background:var(--skip);border-color:var(--skip-line)' }), 'Not needed')),
         el('span', { class: 'spacer', style: 'flex:1' }),
         el('button', { id: 'calMark', hidden: true, onclick: () => markOutlook(false),
-          title: 'Add the Deal Support category in Outlook to this week\'s meetings that have one' }, 'Mark in Outlook'),
+          title: 'In Outlook, tag this week\'s meetings that have a Deal Support (green) or need none (gray)' }, 'Mark in Outlook'),
         el('button', { onclick: () => loadSources().then(loadCalendar) }, 'Reload'),
       ),
       el('div', { class: 'sub', id: 'calSub' }, 'Loading…'),
@@ -4072,29 +4072,33 @@ async function graphSignIn({ keepSource = false } = {}) {
   }
 }
 
-// Meetings with a Deal Support get the Deal Support category in Outlook (Microsoft 365), as the add-in does for
-// the meeting open in it, so they show as linked without opening each one. Runs after each week loads once
-// signed in with permission to update the calendar; the button signs in first. Meetings sent once this
-// session aren't sent again automatically.
-const outlookSent = new Set();
+// Meetings get categories in Outlook (Microsoft 365), as the add-in does for the meeting open in it, so they show
+// without opening each one: green Deal Support on those with one, gray No DS Required on those marked as needing
+// none, and neither once that's undone. Runs after each week loads once signed in with permission to update the
+// calendar; the button signs in first. A meeting is sent again automatically only when its tag changes.
+const outlookSent = new Map();
 async function markOutlook(auto) {
   const g = cal.sources?.graph;
   if (!g?.canMark || !cal.data || !dsMeta) return;
   if (!g.canWrite) {
     if (auto) return;
     if (g.signedIn && !confirm('To mark meetings in Outlook, sign in to Microsoft 365 again and allow SF Desk to update your calendar. ' +
-      `It only adds the "${dsMeta.label}" category. Sign in now?`)) return;
+      `It only adds the "${dsMeta.label}" and "${NO_DS_CATEGORY}" categories. Sign in now?`)) return;
     return graphSignIn({ keepSource: true });
   }
   const key = (e) => `${e.allDay ? e.date : e.start}|${e.subject}`;
-  const events = cal.data.events.filter((e) => e.supports.length && (!auto || !outlookSent.has(key(e))));
-  if (!events.length) { if (!auto) toast(`No meetings with a ${dsMeta.label} this week.`); return; }
+  const tag = (e) => (e.supports.length ? 'ds' : e.skipped ? 'none' : 'clear');
+  const events = cal.data.events.filter((e) => {
+    const was = outlookSent.get(key(e)), now = tag(e);
+    return now === 'clear' ? was && was !== 'clear' : !auto || was !== now;
+  });
+  if (!events.length) { if (!auto) toast(`No meetings with a ${dsMeta.label} or marked as needing none this week.`); return; }
   const week = cal.week;
   try {
     const r = await api('/graph/mark', { method: 'POST', body: {
       from: localDate(week).toISOString(), to: localDate(addDays(week, 7)).toISOString(), category: dsMeta.label,
-      events: events.map(({ start, allDay, date, subject }) => ({ start, allDay, date, subject })) } });
-    for (const e of events) outlookSent.add(key(e));
+      events: events.map((e) => ({ start: e.start, allDay: e.allDay, date: e.date, subject: e.subject, tag: tag(e) })) } });
+    for (const e of events) outlookSent.set(key(e), tag(e));
     const parts = [r.marked ? `Marked ${plural(r.marked, 'meeting')} in Outlook` : null,
       !auto && r.already ? `${plural(r.already, 'meeting')} already marked` : null,
       !auto && r.notFound ? `${r.notFound} not found in your Outlook calendar` : null].filter(Boolean);
