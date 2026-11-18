@@ -4041,6 +4041,7 @@ async function graphSignIn({ keepSource = false } = {}) {
     el('br'), cal.sources?.graph?.canMark
       ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
       : 'Sign in with your work account and accept reading your calendar.', status));
+  navigator.clipboard?.writeText(info.userCode).catch(() => {});
   window.open(info.verificationUri, '_blank', 'noopener');
   while (cal.graphTicket === ticket) {
     await new Promise((r) => setTimeout(r, 3000));
