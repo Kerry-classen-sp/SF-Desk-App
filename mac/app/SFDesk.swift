@@ -482,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // Links out of SF Desk (Salesforce records, Teams...) open in the browser; redirects such as an OAuth
     // sign-in stay here.
     if action.navigationType == .linkActivated, let url = action.request.url, !isLocal(url) {
-      NSWorkspace.shared.open(url)
+      if isDeviceSignIn(url) { openSignIn(url) } else { NSWorkspace.shared.open(url) }
       return decisionHandler(.cancel)
     }
     decisionHandler(.allow)
@@ -497,9 +497,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   func webView(_ webView: WKWebView, createWebViewWith config: WKWebViewConfiguration,
                for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
     if let url = action.request.url {
-      if isLocal(url) && url.scheme != "about" { webView.load(action.request) } else { NSWorkspace.shared.open(url) }
+      if isLocal(url) && url.scheme != "about" { webView.load(action.request) }
+      else if isDeviceSignIn(url) { openSignIn(url) }
+      else { NSWorkspace.shared.open(url) }
     }
     return nil
+  }
+
+  // Microsoft's device code page opens in a window of its own with a fresh session that isn't kept, rather than in
+  // the browser: there Microsoft signs in with the account the browser already has, and here it asks which one.
+  var signInWindows: [NSWindow] = []
+
+  func isDeviceSignIn(_ url: URL) -> Bool {
+    let host = url.host?.lowercased() ?? "", path = url.path.lowercased()
+    return host == "login.microsoft.com" && path.hasPrefix("/device")
+      || ["microsoft.com", "www.microsoft.com"].contains(host) && path.hasPrefix("/devicelogin")
+      || host == "login.microsoftonline.com" && path.hasSuffix("/oauth2/deviceauth")
+  }
+
+  func openSignIn(_ url: URL) {
+    let config = WKWebViewConfiguration()
+    config.websiteDataStore = .nonPersistent()
+    let view = WKWebView(frame: .zero, configuration: config)
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 700),
+                     styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+    w.title = "Sign in to Microsoft 365"
+    w.contentView = view
+    w.isReleasedWhenClosed = false
+    w.center()
+    signInWindows.removeAll { !$0.isVisible }
+    signInWindows.append(w)
+    view.load(URLRequest(url: url))
+    w.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }

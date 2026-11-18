@@ -87,6 +87,12 @@ Build 10 (November 18, 2026):
   calendar can come from Microsoft 365, and meetings with a Deal Support get the Deal Support category in
   Outlook. Existing installs get this by adding the same settings to their `.env`.
 
+Build 11 (November 18, 2026):
+
+- **Pick the Microsoft 365 account:** on the Mac, Microsoft's sign-in page opens in its own SF Desk window
+  with a fresh session instead of in the browser, so Microsoft asks which account to use rather than
+  signing in with the browser's. The code is copied, ready to paste.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
