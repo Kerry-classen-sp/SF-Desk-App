@@ -80,6 +80,13 @@ Build 8 (November 17, 2026):
 - **Security:** body-parser 1.20.9 (GHSA-27r3-jxmh-p828, high) and qs 6.16.2 (moderate), the two
   vulnerable packages Express pulls in. Express stays on 4 and dotenv on 16.
 
+Build 10 (November 18, 2026):
+
+- **SF Desk's own Microsoft 365 app:** new installs sign in to Microsoft 365 through SailPoint's SF Desk
+  app registration instead of Microsoft's shared Graph Command Line Tools client. On the Mac too, the
+  calendar can come from Microsoft 365, and meetings with a Deal Support get the Deal Support category in
+  Outlook. Existing installs get this by adding the same settings to their `.env`.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
