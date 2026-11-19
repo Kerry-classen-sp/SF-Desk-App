@@ -5,8 +5,9 @@
 // the desktop, the Keychain on the iPad). Your organization may require an admin to approve the client for
 // Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
 // The writes are tagging meetings (markCategory: the Deal Support category on meetings that have one, and No DS
-// Required on meetings marked as needing none), adding a meeting you create with a Deal Support (createEvent) and
-// removing a meeting you choose to (deleteEvent).
+// Required on meetings marked as needing none), adding a meeting you create with a Deal Support (createEvent),
+// changing or answering one from the edit form (updateEvent, respondEvent) and removing one you choose to
+// (deleteEvent).
 // Sign-ins from before that only granted Calendars.Read; they keep reading until signed in again.
 // Plain JavaScript with no Node modules, as it also runs in JavaScriptCore on the iPad (see ios/build-core.sh).
 
@@ -154,7 +155,7 @@ export function graphCalendar(opts) {
   // Events between two instants in the given calendars, each with a stable id for its occurrence.
   async function events(fromIso, toIso, ids) {
     const me = String(saved?.account || '').toLowerCase();
-    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs,isOrganizer,type';
+    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs,isOrganizer,type,responseStatus';
     const out = [];
     for (const id of ids) {
       const calId = id.replace(/^graph:/, '');
@@ -179,6 +180,7 @@ export function graphCalendar(opts) {
             })),
             canceled: !!e.isCancelled, free: e.showAs === 'free',
             graphId: e.id, isOrganizer: e.isOrganizer !== false, recurring: e.type === 'occurrence' || e.type === 'exception',
+            declined: e.isOrganizer === false && e.responseStatus?.response === 'declined',
           });
         }
         url = page['@odata.nextLink'] || '';
@@ -203,19 +205,75 @@ export function graphCalendar(opts) {
     return { id: 'gr_' + sha1Hex(`${e.iCalUId || e.id}|${startIso}`).slice(0, 24) };
   }
 
-  // Removes one meeting (one occurrence of a series) from my calendar, after checking that graphId is the meeting
-  // SF Desk knows as `id`. For a meeting I organized, Microsoft sends the attendees a cancellation.
-  async function deleteEvent(id, graphId) {
-    if (!canWrite(saved?.scope)) {
-      throw new CalendarError('Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to remove meetings.', 403);
-    }
-    const path = `/me/events/${encodeURIComponent(String(graphId || ''))}`;
-    const e = await graph(`${path}?$select=iCalUId,start,isAllDay`, { Prefer: 'outlook.timezone="UTC"' });
+  // The id events() gives a meeting, from Graph's (UTC) start and iCalUId.
+  const occurrenceId = (e, graphId) => {
     const start = e.isAllDay ? new Date(e.start.dateTime.slice(0, 10) + 'T00:00:00') : new Date(e.start.dateTime + 'Z');
-    if ('gr_' + sha1Hex(`${e.iCalUId || graphId}|${start.toISOString()}`).slice(0, 24) !== id) {
-      throw new CalendarError('That meeting changed in Outlook. Reload and try again.', 409);
+    return 'gr_' + sha1Hex(`${e.iCalUId || graphId}|${start.toISOString()}`).slice(0, 24);
+  };
+  const needWrite = (what) => {
+    if (!canWrite(saved?.scope)) {
+      throw new CalendarError(`Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to ${what}.`, 403);
     }
+  };
+  // graphId's meeting with the fields in `select`, after checking that it's the meeting SF Desk knows as `id`.
+  async function checked(id, graphId, select, headers = {}) {
+    const path = `/me/events/${encodeURIComponent(String(graphId || ''))}`;
+    const e = await graph(`${path}?$select=iCalUId,start,isAllDay${select ? ',' + select : ''}`, { Prefer: 'outlook.timezone="UTC"', ...headers });
+    if (occurrenceId(e, graphId) !== id) throw new CalendarError('That meeting changed in Outlook. Reload and try again.', 409);
+    return { path, e };
+  }
+
+  // Removes one meeting (one occurrence of a series) from my calendar. For a meeting I organized, Microsoft sends
+  // the attendees a cancellation.
+  async function deleteEvent(id, graphId) {
+    needWrite('remove meetings');
+    const { path } = await checked(id, graphId);
     await graph(path, {}, { method: 'DELETE' });
+  }
+
+  const DETAIL = 'subject,body,end,location,attendees,showAs,isReminderOn,reminderMinutesBeforeStart,sensitivity,importance,' +
+    'categories,isOnlineMeeting,onlineMeeting,organizer,isOrganizer,responseStatus,responseRequested,allowNewTimeProposals,type,recurrence,webLink';
+  // What the edit form shows of a meeting, as Outlook has it: times as UTC instants (all-day ones as dates, the end
+  // date exclusive), the body as plain text, rooms apart from people.
+  async function eventDetails(id, graphId) {
+    const { e } = await checked(id, graphId, DETAIL, { Prefer: 'outlook.timezone="UTC", outlook.body-content-type="text"' });
+    const person = (a) => ({ name: a.emailAddress?.name || '', email: a.emailAddress?.address || '' });
+    return {
+      kind: 'graph', subject: e.subject || '', body: String(e.body?.content || ''), allDay: !!e.isAllDay,
+      start: e.isAllDay ? e.start.dateTime.slice(0, 10) : new Date(e.start.dateTime + 'Z').toISOString(),
+      end: e.isAllDay ? e.end.dateTime.slice(0, 10) : new Date(e.end.dateTime + 'Z').toISOString(),
+      location: e.location?.displayName || '',
+      attendees: (e.attendees || []).filter((a) => a.type !== 'resource').map((a) => ({ ...person(a), type: a.type, response: a.status?.response || 'none' })),
+      rooms: (e.attendees || []).filter((a) => a.type === 'resource').map(person),
+      showAs: e.showAs || 'busy', reminder: e.isReminderOn ? Number(e.reminderMinutesBeforeStart) || 0 : null,
+      private: e.sensitivity === 'private', importance: e.importance || 'normal', categories: e.categories || [],
+      teams: !!e.isOnlineMeeting, joinUrl: e.onlineMeeting?.joinUrl || '', organizer: person(e.organizer || {}),
+      isOrganizer: e.isOrganizer !== false, response: e.responseStatus?.response || 'none',
+      responseRequested: e.responseRequested !== false, allowNewTimeProposals: e.allowNewTimeProposals !== false,
+      type: e.type || 'singleInstance', recurrence: e.recurrence || null, webLink: e.webLink || '',
+    };
+  }
+
+  // Saves the changed fields of a meeting (Graph's own names: subject, body as text, start/end, isAllDay, location,
+  // attendees, showAs, reminder, sensitivity, importance, categories, isOnlineMeeting, responseRequested,
+  // allowNewTimeProposals, recurrence). Rooms stay when the attendees change. For a meeting I organized with
+  // attendees, Microsoft sends them the update. Returns the meeting's id as events() will give it.
+  async function updateEvent(id, graphId, changes) {
+    needWrite('change meetings');
+    const { path, e } = await checked(id, graphId, 'attendees');
+    const body = { ...changes };
+    if (body.attendees) body.attendees = [...body.attendees, ...(e.attendees || []).filter((a) => a.type === 'resource')];
+    if (body.isOnlineMeeting) body.onlineMeetingProvider = 'teamsForBusiness';
+    const after = await graph(path, { Prefer: 'outlook.timezone="UTC"' }, { method: 'PATCH', body });
+    return { id: after?.start?.dateTime ? occurrenceId(after, graphId) : id };
+  }
+
+  // Accept, tentatively accept or decline a meeting I was invited to, telling the organizer (with comment) or not.
+  async function respondEvent(id, graphId, action, { comment = '', sendResponse = true } = {}) {
+    needWrite('answer meetings');
+    if (!['accept', 'tentativelyAccept', 'decline'].includes(action)) throw new CalendarError('Unknown response.', 400);
+    const { path } = await checked(id, graphId);
+    await graph(`${path}/${action}`, {}, { method: 'POST', body: { comment, sendResponse } });
   }
 
   // Outlook's category list, so SF Desk's categories get their colors (preset4 green, preset12 gray) where the add-in
@@ -301,5 +359,5 @@ export function graphCalendar(opts) {
     return out;
   }
 
-  return { calendars, events, createEvent, deleteEvent, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
+  return { calendars, events, createEvent, deleteEvent, eventDetails, updateEvent, respondEvent, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
 }

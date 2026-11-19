@@ -55,7 +55,14 @@ calendar permission and troubleshooting.
   Click free time on the calendar to add a meeting with its Deal Support in one go: the meeting's title and time
   (starting on the half hour clicked, an hour long) above the same form. The meeting goes in the calendar shown:
   a Microsoft 365 meeting with no attendees (so no invitations go out), or a Salesforce event on the opportunity.
-  Right-click an event (long-press it on the iPad) and choose **Remove this event** to take it off its calendar,
+  Meetings you declined in Microsoft 365 are hidden; tick **Show declined** above the calendar to show them in
+  yellow. Right-click an event (long-press it on the iPad) and choose **Edit** to change it in a form with
+  Outlook's options: title, attendees, start and end, all day, repeat (for a single meeting), location, Teams
+  meeting, show as, reminder, importance, categories, private, response options and description (saved as plain
+  text). For a meeting someone else organized, you answer it (Accept, Tentative, Decline) and change how it shows
+  on your calendar; its details stay the organizer's. Salesforce events offer title, time, all day, location,
+  show as, reminder, private and description. Its Deal Support stays linked when the time or title changes.
+  Choose **Remove this event** to take it off its calendar,
   after a confirmation that says what happens: a Microsoft 365 meeting you organized is cancelled for its
   attendees, one you were invited to just leaves your calendar (the organizer isn't told), only that occurrence
   of a recurring meeting goes, and a Salesforce event goes to the Recycle Bin. The Deal Supports shown on the

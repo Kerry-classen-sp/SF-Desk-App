@@ -15,6 +15,17 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 3
+
+- **Show declined:** meetings you declined in Microsoft 365 are hidden on Time Entry. Tick **Show declined** above
+  the calendar (remembered on each device) to show them in yellow.
+- **Edit an event:** right-click (or long-press) an event and choose **Edit** for a form with Outlook's options:
+  title, required and optional attendees, start, end, all day, repeat, location, Teams meeting, show as, reminder,
+  importance, categories, private, response options and description. For meetings someone else organized you can
+  accept, tentatively accept or decline (with an optional message) and change show as, reminder, private and
+  categories. Salesforce events get the fields Salesforce has. A Deal Support stays with its meeting when the
+  meeting's time or title changes.
+
 ### Build 2
 
 - **Long press on the iPad:** press and hold an event on Time Entry to open its menu (Create Deal Support, No Deal
