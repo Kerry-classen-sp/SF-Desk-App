@@ -6,7 +6,6 @@
 // On launch it makes the support folder (copying .env, data and certs from ~/SF-Desk or a Git checkout
 // the first time), finds or downloads the Salesforce CLI and signs in to Salesforce if needed, then starts
 // its server and loads it. Quitting stops the server. Closing the window keeps it running for the Outlook add-in; click the Dock icon to get it back.
-// macOS asks SF Desk itself, not Terminal, for calendar access.
 
 import AppKit
 @preconcurrency import WebKit
@@ -20,8 +19,6 @@ let envFile = supportDir.appendingPathComponent(".env")
 let resources = Bundle.main.resourceURL!
 let appDir = resources.appendingPathComponent("app")
 let bundledNode = resources.appendingPathComponent("node/bin/node")
-let calendarHelper = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("sfdesk-calendar")
-
 // The SailPoint org, as the installer (mac/package) sets it up.
 let sfInstance = "https://sailpoint.my.salesforce.com"
 let sfAlias = "sailpoint"
@@ -290,7 +287,6 @@ final class Server: @unchecked Sendable {
       "SF_DESK_READY": ready.path,
       "SF_DESK_DB": supportDir.appendingPathComponent("data/sf-desk.db").path,
       "SF_DESK_CERTS": supportDir.appendingPathComponent("certs").path,
-      "SF_DESK_CALENDAR_HELPER": calendarHelper.path,
       "SF_AUTOUPDATE_DISABLE": "true",
     ]) { $1 }
     let pipe = Pipe()

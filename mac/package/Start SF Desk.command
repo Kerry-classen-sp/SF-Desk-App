@@ -1,7 +1,6 @@
 #!/bin/bash
 # Starts SF Desk and opens it in the browser. Double-click it; keep the Terminal window open
 # while you use SF Desk, and close it (or press Ctrl+C) to stop.
-# It runs in Terminal on purpose: macOS gives calendar access to the app that starts SF Desk.
 
 DEST="$HOME/SF-Desk"
 cd "$DEST" || { echo "SF Desk isn't installed in $DEST. Run the installer first."; read -r -p "Press Return to close." _; exit 1; }

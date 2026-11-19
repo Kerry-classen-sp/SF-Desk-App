@@ -5,10 +5,9 @@ You need:
   - Windows 10 or 11, 64-bit, on an Intel, AMD or ARM (Snapdragon) PC. The installer picks the right
     version for your PC.
   - For your meetings in Time Entry, one of:
-      - Microsoft 365: works with the new Outlook. Pick "Sign in to read your Microsoft 365 calendar"
-        in Time Entry's calendar list, open the page it shows and enter the code. Your organization may
-        need to approve "Microsoft Graph Command Line Tools" first; SF Desk says so if it does.
-      - Classic Outlook signed in to your SailPoint mailbox (the "New Outlook" toggle switched off).
+      - Microsoft 365 (any Outlook, new or classic, or none). Pick "Sign in to read your Microsoft 365
+        calendar" in Time Entry's calendar list, open the page it shows, enter the code and sign in with
+        your SailPoint account.
       - Salesforce events, which need nothing else.
   - Microsoft Edge (it comes with Windows). SF Desk opens in an Edge window of its own.
 
@@ -17,8 +16,7 @@ To install:
   2. Double-click "Install SF Desk". If Windows SmartScreen warns about it, click More info > Run anyway.
   3. SF Desk starts. The first time it offers to download the Salesforce CLI (no admin rights
      needed) and opens your browser to sign in to Salesforce with SSO.
-  4. Click Connect, then open Time Entry and pick your calendar at the top. With classic Outlook,
-     Outlook may ask whether to allow access to its data; choose Allow.
+  4. Click Connect, then open Time Entry and pick your calendar at the top.
 
 SF Desk is then in the Start menu and on the Desktop. Closing its window keeps it running; the SF Desk
 icon by the clock reopens it, opens its settings and log, or quits it.

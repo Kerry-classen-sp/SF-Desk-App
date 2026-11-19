@@ -57,12 +57,14 @@ caught by the app and never loaded. The refresh token is kept in the iOS Keychai
 *accessible after first unlock, this device only*, so it isn't included in backups or moved to another
 device. Signing out revokes it with Salesforce and deletes it.
 
-### Microsoft 365 (optional)
+### Microsoft 365
 
-Only for reading the new Outlook's calendar on Windows, and for marking meetings that have a Deal Support.
-It uses Microsoft's device-code sign-in with Microsoft's own Graph Command Line Tools client, so there's no
-app registration. Your tenant may require an admin to approve it. The only Microsoft 365 write is adding the
-Deal Support category to your own meetings, and only after you ask for it.
+For reading your calendar in Time Entry (on the desktop and the iPad), and for marking meetings in Outlook.
+It uses Microsoft's device-code sign-in with SailPoint's SF Desk app registration (a public client with no
+secret; its client and tenant IDs are in `.env.example` and `ios/SFDesk/Host/host.js`). The Mac and iPad
+apps show Microsoft's page in a sheet with a non-persistent web session, so no other Microsoft sign-in is
+reused and nothing from it stays behind. The only Microsoft 365 writes are the Deal Support and No DS
+Required categories on your own meetings.
 
 ## Where tokens and data are kept
 
@@ -71,7 +73,8 @@ Deal Support category to your own meetings, and only after you ask for it.
 | Salesforce access token (desktop) | Server memory, for the session only | Never written to disk; quitting SF Desk forgets it |
 | Salesforce login (CLI) | The Salesforce CLI's own store | Managed by the CLI |
 | Salesforce refresh token (iOS) | iOS Keychain | This device only, after first unlock |
-| Microsoft 365 refresh token | `graph-token.json` in the data folder | File readable by your user only (`0600`) |
+| Microsoft 365 refresh token (desktop) | `graph-token.json` in the data folder | File readable by your user only (`0600`) |
+| Microsoft 365 refresh token (iOS) | iOS Keychain | This device only, after first unlock |
 | Local copy of records | `data/sf-desk.db` (SQLite) in the data folder | Your user account and disk encryption |
 | Outlook add-in certificate | `certs/` in the data folder | See [the Outlook certificate](#the-outlook-add-in-certificate) |
 | Server log | `~/Library/Logs/SF Desk/server.log` (Mac), `logs\server.log` (Windows) | Your user account; no tokens are logged |
@@ -92,10 +95,9 @@ locally. To clear the local copy, quit SF Desk and delete `sf-desk.db`. It is re
 
 ### Calendar
 
-Time Entry reads only your Exchange calendar, on your own computer: the Mac's Exchange account through macOS
-Calendar access (EventKit, which macOS asks you to allow), your Exchange mailbox through classic Outlook's COM
-API on Windows, or Microsoft 365 through Microsoft Graph if you've signed in. Other calendars on the computer
-(iCloud, Google, Outlook data files and the like) are never read.
+Time Entry reads only your Microsoft 365 calendar, through Microsoft Graph after you sign in, or your
+Salesforce events. Calendars on the computer or iPad itself (macOS Calendar, classic Outlook, iCloud, Google
+and the like) are never read, so SF Desk doesn't ask for calendar access.
 Meetings are read when you open the tab and are not stored, apart from the links described above.
 
 ## How the local server is protected
@@ -162,8 +164,9 @@ The certificate is only needed for the Outlook add-in. Without it, SF Desk doesn
 
 ## Dedicated Microsoft Graph and Salesforce apps
 
-Today SF Desk signs in through two clients that already exist and are shared with other tools: Microsoft's
-"Microsoft Graph Command Line Tools" for Microsoft 365, and the Salesforce CLI's `PlatformCLI` for Salesforce
+SF Desk now signs in to Microsoft 365 with SailPoint's own SF Desk app registration; this section explains
+why. Before it, SF Desk signed in through two clients that already exist and are shared with other tools: Microsoft's
+"Microsoft Graph Command Line Tools" for Microsoft 365, and (still today) the Salesforce CLI's `PlatformCLI` for Salesforce
 on iOS (and on the desktop through the CLI login). This works without setup, but IT can't tell SF Desk apart
 from those tools, or control it separately. Registering an SF Desk app with each service fixes that. SF Desk
 already supports both: set `SF_DESK_GRAPH_CLIENT_ID` and `SF_DESK_GRAPH_TENANT` for Microsoft Graph, and
@@ -267,8 +270,6 @@ to your computer or user account:
 - **The iOS sign-in page doesn't use the device's single sign-on.** The page is shown inside the app, so
   Microsoft Entra may ask for your password or passkey again. The dedicated Salesforce app's system-browser
   sign-in fixes this.
-- **Microsoft 365 uses Microsoft's shared Graph Command Line Tools client** until IT registers an SF Desk
-  app, so its permissions are shared with that tool's other users.
 - **Development builds log more.** Debug builds of the iOS app log connection errors and allow the Web
   Inspector; use a Release build for everyday use.
 - **Windows has no Outlook add-in certificate yet**, so the add-in is Mac-only.

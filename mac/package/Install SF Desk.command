@@ -66,15 +66,7 @@ set_env() { # set_env KEY VALUE: replace the line in .env, or add it
   fi
 }
 
-# 3. Xcode Command Line Tools build the calendar reader. Optional: without them SF Desk asks
-#    Calendar.app instead, which is slower.
-if ! xcode-select -p >/dev/null 2>&1; then
-  bold "Xcode Command Line Tools"
-  note "macOS will offer to install them now. Click Install; you can carry on while it runs."
-  xcode-select --install 2>/dev/null || true
-fi
-
-# 4. Salesforce CLI. Use one already installed, else install Homebrew's (brew install sf) if there's
+# 3. Salesforce CLI. Use one already installed, else install Homebrew's (brew install sf) if there's
 #    Homebrew, else download Salesforce's own build into ~/SF-Desk/sf-cli (no admin rights needed, and
 #    no npm).
 bold "Salesforce CLI"
@@ -113,7 +105,7 @@ note "Using $SF"
 set_env SF_CLI_PATH "$SF"
 set_env SF_TARGET_ORG "$SF_ALIAS"
 
-# 5. Salesforce login, once. The CLI keeps it; SF Desk borrows it.
+# 4. Salesforce login, once. The CLI keeps it; SF Desk borrows it.
 if "$SF" org display --target-org "$SF_ALIAS" --json 2>/dev/null | grep -q '"status": *0'; then
   note "Already signed in to Salesforce."
 else
@@ -122,23 +114,10 @@ else
     die "Salesforce sign-in didn't finish. Run this installer again to retry."
 fi
 
-# 6. Calendar. SF Desk reads the calendars macOS syncs, so the SailPoint Exchange account
-#    has to be in Internet Accounts, not only in Outlook.
-bold "Your SailPoint calendar"
-note "SF Desk's Time Entry tab reads meetings from the Exchange account in"
-note "System Settings > Internet Accounts. Check that this week's meetings show in Calendar.app."
-read -r -p "  Open Internet Accounts to add or check it? [y/N] " answer || answer=""
-if [[ "$answer" =~ ^[Yy] ]]; then
-  open "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension" 2>/dev/null ||
-    open -b com.apple.systempreferences
-  note "Add Account > Microsoft Exchange, sign in with your SailPoint email, and turn on Calendars."
-  read -r -p "  Press Return when you're done. " _ || true
-fi
-
-# 7. A launcher on the Desktop.
+# 5. A launcher on the Desktop.
 cp "$DEST/Start SF Desk.command" "$HOME/Desktop/Start SF Desk.command" 2>/dev/null &&
   note "Put \"Start SF Desk\" on your Desktop."
 
 bold "Done. Starting SF Desk..."
-note "When macOS asks whether Terminal may access your calendars, choose Allow Full Access."
+note "For your meetings in Time Entry, pick Microsoft 365 in its calendar list and sign in with your SailPoint account."
 exec "$DEST/Start SF Desk.command"

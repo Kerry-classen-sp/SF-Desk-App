@@ -10,7 +10,6 @@ import WebKit
 //   SFDESK_STEPS=<file>                      with SFDESK_SELFTEST: instead of the standard test, run the file's
 //                                            JavaScript steps (separated by lines of ---), a screenshot after each
 //   SFDESK_WIDTH=<points>                    the window's width (default 393, an iPhone's)
-//   SFDESK_NO_CALENDAR=1                     no calendar (Time Entry shows Salesforce only)
 //   SFDESK_DATA=<dir>                        where the database goes (default: Application Support/SF Desk iOS Test)
 final class MacTestApp: NSObject, NSApplicationDelegate, HostUI {
   private var window: NSWindow!
@@ -38,7 +37,6 @@ final class MacTestApp: NSObject, NSApplicationDelegate, HostUI {
       database: data.appendingPathComponent("sf-desk.db"),
       loginUrl: Bundle.main.object(forInfoDictionaryKey: "SFDeskLoginURL") as? String ?? "https://login.salesforce.com",
       version: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0") + " (iPhone test)")
-    config.calendar = env["SFDESK_NO_CALENDAR"] == nil
     if let instance = env["SFDESK_TEST_INSTANCE"], let token = env["SFDESK_TEST_TOKEN"] {
       config.testToken = { (instance, token) }
     }
@@ -84,10 +82,10 @@ final class MacTestApp: NSObject, NSApplicationDelegate, HostUI {
     if window.contentView !== page { window.contentView = page }
   }
 
-  func show(signIn: WKWebView, cancel: @escaping () -> Void) {
+  func show(signIn: WKWebView, title: String, cancel: @escaping () -> Void) {
     let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 720), styleMask: [.titled, .closable, .resizable],
                      backing: .buffered, defer: false)
-    w.title = "Sign in to Salesforce"
+    w.title = title
     w.contentView = signIn
     w.isReleasedWhenClosed = false
     w.center()

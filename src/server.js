@@ -16,9 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApi, HttpError, loadUser, wrap } from './core.js';
 import { openDb } from './db.js';
-import { isMac, macCalendar } from './macCalendar.js';
-import { isWindows, windowsCalendar } from './windowsCalendar.js';
-import { graphCalendar, MARK_ENABLED } from './graphCalendar.js';
+import { graphCalendar } from './graphCalendar.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -44,12 +42,22 @@ const CLI_INSTANCE_URL = process.env.SF_INSTANCE_URL || 'https://sailpoint.my.sa
 const b64url = (buf) => buf.toString('base64url');
 
 const store = openDb(DB_FILE);
-// This computer's Exchange calendar for Time Entry: the Mac's Exchange account, or classic Outlook's on Windows.
-const localCal = isMac ? macCalendar(ROOT, path.dirname(DB_FILE)) : isWindows ? windowsCalendar(ROOT) : null;
-const LOCAL_CAL_NAME = isWindows ? 'Outlook (classic)' : 'Mac calendar';
-// Microsoft 365 calendars through Microsoft Graph, for the new Outlook (Windows; SF_DESK_GRAPH=1 elsewhere), and
-// for marking meetings that have a Deal Support in Outlook (also on the Mac, once SF_DESK_OUTLOOK_MARK=1).
-const graphCal = isWindows || (isMac && MARK_ENABLED) || process.env.SF_DESK_GRAPH ? graphCalendar(path.dirname(DB_FILE)) : null;
+const isMac = process.platform === 'darwin';
+const isWindows = process.platform === 'win32';
+// The Microsoft 365 calendar through Microsoft Graph, its sign-in kept in the data folder, and with
+// SF_DESK_OUTLOOK_MARK=1 meetings tagged in Outlook.
+const GRAPH_TOKEN = path.join(path.dirname(DB_FILE), 'graph-token.json');
+const graphCal = graphCalendar({
+  clientId: process.env.SF_DESK_GRAPH_CLIENT_ID, tenant: process.env.SF_DESK_GRAPH_TENANT,
+  markEnabled: /^(1|true|yes)$/i.test(process.env.SF_DESK_OUTLOOK_MARK || ''),
+  fetch: (...a) => fetch(...a), sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  load: () => (fs.existsSync(GRAPH_TOKEN) ? JSON.parse(fs.readFileSync(GRAPH_TOKEN, 'utf8')) : null),
+  save: (saved) => {
+    fs.mkdirSync(path.dirname(GRAPH_TOKEN), { recursive: true });
+    if (saved) fs.writeFileSync(GRAPH_TOKEN, JSON.stringify(saved), { mode: 0o600 });
+    else fs.rmSync(GRAPH_TOKEN, { force: true });
+  },
+});
 
 const app = express();
 // Only this computer's own names: a web page whose domain is pointed at 127.0.0.1 (DNS rebinding) would
@@ -226,7 +234,7 @@ async function refreshAccess(req) {
 
 const api = createApi({
   router: express.Router(), store, refreshAccess, version: VERSION, platform: process.platform, isMac, useCli: USE_CLI,
-  localCal, localCalName: LOCAL_CAL_NAME, graphCal, markEnabled: MARK_ENABLED,
+  graphCal,
   // The CLI's browser sign-in, for when connecting finds no CLI login (or an expired one).
   cliLogin: () => runCli(['org', 'login', 'web', '--instance-url', CLI_INSTANCE_URL, ...(SF_TARGET_ORG ? ['--alias', SF_TARGET_ORG] : ['--set-default'])],
     { targetOrg: false, timeout: 15 * 60_000 }),

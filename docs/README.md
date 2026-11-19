@@ -33,14 +33,12 @@ calendar permission and troubleshooting.
 - **Export to Excel** on the Pipeline deal list and the My Time activity list downloads the rows shown (after
   filters, hidden records and any clicked bar, tile or opportunity) as an .xlsx with typed dates, amounts and
   hours, a total row and a link to each record
-- **Time Entry** shows your calendar a week at a time. It reads your Exchange calendar only: on a Mac, the Exchange
-  account in System Settings > Internet Accounts; on Windows, your Exchange mailbox in classic Outlook or
-  Microsoft 365. Other calendars aren't offered. The list at the top picks between the Exchange account's
-  calendars and **Salesforce events** (the Event records you own).
-  The first time, macOS asks to let SF Desk access your calendars (when you run the server yourself, it asks
-  for the app you started it from, e.g. Terminal); if you say no, the tab says so and shows Salesforce events.
-  The calendar reader (`mac/calendar.swift`) is built into the Mac app; a checkout builds it with the Xcode
-  Command Line Tools on first use, and needs them to read the calendar.
+- **Time Entry** shows your calendar a week at a time. It reads your **Microsoft 365** calendars through
+  Microsoft Graph (`graphCalendar.js`), on the Mac, Windows and the iPad alike: a one-time sign-in with
+  SailPoint's SF Desk app registration (**Sign in to Microsoft 365...** in the list at the top; the Mac and
+  iPad apps show Microsoft's page in a sheet and enter the code themselves). The same list picks
+  **Salesforce events** (the Event records you own) instead. Calendars on the computer itself (macOS
+  Calendar, classic Outlook) and on the iPad aren't read any more.
   Events with a Deal Support are green, events without one are red, and ones you mark **No Deal Support needed**
   turn grey. Click an event to see its details, then **Create Deal Support**: type to find the opportunity among
   all open opportunities (opportunities on accounts named in the meeting title come first), and the form is
@@ -48,7 +46,7 @@ calendar permission and troubleshooting.
   event description in the details field (without the Teams, Zoom or Webex joining details; when nothing else is
   written, the details default to "Requested Activity - Platform Request" from the form), and you as the Assigned SE. An event counts as covered when a Deal
   Support was created from it here (remembered in the local database), or when one of yours has the same
-  activity date and the same opportunity, account or name. For Mac calendar events the account and opportunity
+  activity date and the same opportunity, account or name. For Microsoft 365 events the account and opportunity
   come from the matching Salesforce event (e.g. synced by Outreach) at the same time, else from the meeting
   title and the attendees' email domains. Salesforce events logged twice at the same time (e.g. by
   Outreach, on the account and on the opportunity) are shown once. The open opportunity list is kept in the
@@ -83,7 +81,7 @@ calendar permission and troubleshooting.
 ## The Mac app
 
 SF Desk.app (source in `mac/app`, built by `scripts/build-mac-app.sh`; see
-[INSTALL.md](INSTALL.md#the-sf-desk-app-recommended)) carries the server, Node.js and the calendar reader, and
+[INSTALL.md](INSTALL.md#the-sf-desk-app-recommended)) carries the server and Node.js, and
 shows SF Desk in its own window. On first launch it downloads the Salesforce CLI if you don't have one and
 signs you in (Option A below), so the setup steps that follow are only for running from a checkout.
 
@@ -105,12 +103,8 @@ see [INSTALL.md](INSTALL.md#windows)). `SF-Desk-windows.zip` holds the app, Node
 **Install SF Desk** script that needs no admin rights. SF Desk opens in an Edge window of its own and keeps an
 icon by the clock to reopen it, edit settings, restart the server, see the log or quit.
 
-- **Calendar:** Time Entry reads classic Outlook's calendars through Outlook's COM API
-  (`windows/outlook-calendar.ps1`, run by `windowsCalendar.js` with Windows PowerShell), with the same details
-  as on a Mac: title, times, location, body and attendee emails for matching the account. The new Outlook has
-  no COM API, so for it Time Entry can read your **Microsoft 365** calendar through Microsoft Graph instead
-  (`graphCalendar.js`): a one-time sign-in with a code at microsoft.com/devicelogin, using Microsoft's own
-  Graph Command Line Tools client, so no app registration (your tenant may require admin approval).
+- **Calendar:** Time Entry reads your **Microsoft 365** calendar through Microsoft Graph, as on a Mac (any
+  Outlook, new or classic): a one-time sign-in with a code on Microsoft's device sign-in page.
 - **Settings and data:** `%LOCALAPPDATA%\SF Desk` (`.env`, `data\`, `logs\server.log`, `sf-cli\`); the app is in
   `%LOCALAPPDATA%\Programs\SF Desk`.
 - **Not yet:** the Outlook add-in's certificate script is Mac-only.

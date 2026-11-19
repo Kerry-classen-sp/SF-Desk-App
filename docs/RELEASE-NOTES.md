@@ -119,6 +119,20 @@ Build 15 (November 18, 2026):
   occurrence) comes off the series and goes only on the occurrence a Deal Support covers, and meetings without
   one lose a stray Deal Support category. No DS Required put on a whole series is left alone.
 
+Build 16 (November 18, 2026):
+
+- **Microsoft 365 is the calendar:** Time Entry reads meetings from Microsoft 365 (through Microsoft Graph)
+  or Salesforce events, and nothing else. SF Desk no longer reads the Mac's Calendar, classic Outlook on
+  Windows or the iPad's calendars, so it doesn't ask for calendar access and the Mac app has no calendar
+  reader inside. If you used one of those, pick **Sign in to Microsoft 365...** in Time Entry's list. Meetings
+  still show as covered when one of your Deal Supports matches them (same date and opportunity, account or
+  title). Marks made on the Mac's Calendar carry over where SF Desk had already matched them to the meeting;
+  others may need making again.
+- **iPad:** Microsoft 365 works on the iPad too, with the same sign-in sheet as the Mac (a fresh session, the
+  code entered for you) and the same tagging in Outlook. The sign-in is kept in the Keychain.
+- **Installers:** the Mac Terminal installer no longer asks for the Xcode Command Line Tools or Internet
+  Accounts, and the Windows installer no longer looks for classic Outlook.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder

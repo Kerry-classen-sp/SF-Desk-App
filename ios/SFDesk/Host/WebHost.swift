@@ -5,7 +5,7 @@ import WebKit
 // What the app's window does for the host: iOS (App/iOSApp.swift) or the Mac test build (App/MacTestApp.swift).
 protocol HostUI: AnyObject {
   func show(page: WKWebView)
-  func show(signIn: WKWebView, cancel: @escaping () -> Void)
+  func show(signIn: WKWebView, title: String, cancel: @escaping () -> Void)
   func confirm(_ message: String, done: @escaping (Bool) -> Void)
   func alert(_ message: String, done: @escaping () -> Void)
   func prompt(_ message: String, defaultText: String?, done: @escaping (String?) -> Void)
@@ -14,8 +14,10 @@ protocol HostUI: AnyObject {
 }
 
 // The page (public/, copied to Generated/web) at sfdesk://app/, as the desktop server serves it: files, and
-// /api/* answered by the shared core in JavaScriptCore. Opening /login signs in to Salesforce.
-final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+// /api/* answered by the shared core in JavaScriptCore. Opening /login signs in to Salesforce; Microsoft's
+// device sign-in page (Microsoft 365) opens in a sheet that enters the page's code itself.
+final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
+                           WKScriptMessageHandler {
   static let scheme = "sfdesk"
   static let home = URL(string: "sfdesk://app/")!
 
@@ -25,7 +27,6 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
     var database: URL
     var loginUrl: String
     var version: String
-    var calendar: Bool = true
     // Test builds only: an access token from elsewhere (the Salesforce CLI) instead of signing in.
     var testToken: (() -> SalesforceAuth.Token?)?
   }
@@ -37,6 +38,7 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
   private(set) var web: WKWebView!
   private var stopped = Set<ObjectIdentifier>()
   private var downloads: [ObjectIdentifier: URL] = [:]
+  private var microsoftCode: MicrosoftCode?
 
   init(config: Config, ui: HostUI) throws {
     self.config = config
@@ -50,12 +52,12 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
       }
       self.auth.refresh(done)
     }
-    core = try CoreRuntime(bundle: config.coreBundle, db: SQLiteStore(file: config.database),
-                           calendar: config.calendar ? CalendarReader() : nil, version: config.version,
+    core = try CoreRuntime(bundle: config.coreBundle, db: SQLiteStore(file: config.database), version: config.version,
                            refresh: refresh, signOut: { [weak self] in self?.auth.signOut() })
 
     let wc = WKWebViewConfiguration()
     wc.setURLSchemeHandler(self, forURLScheme: Self.scheme)
+    wc.userContentController.add(self, name: "sfdesk")
     wc.websiteDataStore = .default()
     #if os(iOS)
     wc.allowsInlineMediaPlayback = true
@@ -116,9 +118,37 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
       case .failure(let err): self.ui?.alert(err.localizedDescription) {}
       }
     }
-    ui?.show(signIn: view) { [weak self] in
+    ui?.show(signIn: view, title: "Sign in to Salesforce") { [weak self] in
       self?.auth.cancelSignIn()
     }
+  }
+
+  // MARK: Microsoft 365 sign-in
+
+  static func isMicrosoftSignIn(_ url: URL) -> Bool {
+    let host = url.host?.lowercased() ?? "", path = url.path.lowercased()
+    return host == "login.microsoft.com" && path.hasPrefix("/device")
+      || ["microsoft.com", "www.microsoft.com"].contains(host) && path.hasPrefix("/devicelogin")
+      || host == "login.microsoftonline.com" && path.hasSuffix("/oauth2/deviceauth")
+  }
+
+  // A fresh session each time, so Microsoft asks which account instead of reusing one signed in elsewhere.
+  private func openMicrosoftSignIn(_ url: URL) {
+    let wc = WKWebViewConfiguration()
+    wc.websiteDataStore = .nonPersistent()
+    let view = WKWebView(frame: .zero, configuration: wc)
+    let code = MicrosoftCode(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "otc" }?.value ?? "")
+    view.navigationDelegate = code
+    microsoftCode = code
+    view.load(URLRequest(url: url))
+    ui?.show(signIn: view, title: "Sign in to Microsoft 365") { [weak self] in self?.microsoftCode = nil }
+  }
+
+  // The page says "signInDone" when the Microsoft 365 sign-in has finished, failed or been cancelled.
+  func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    guard message.body as? String == "signInDone", microsoftCode != nil else { return }
+    microsoftCode = nil
+    ui?.show(page: web)
   }
 
   // MARK: sfdesk://app/
@@ -204,7 +234,7 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
     if url.scheme == "blob" || url.scheme == "data" || url.scheme == "about" { return decisionHandler(.allow) }
     // Salesforce and other links open in the browser (or the Salesforce app), not in place of the page.
     decisionHandler(.cancel)
-    ui?.open(external: url)
+    if Self.isMicrosoftSignIn(url) { openMicrosoftSignIn(url) } else { ui?.open(external: url) }
   }
 
   func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
@@ -228,7 +258,9 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
     if let url = action.request.url {
-      if url.scheme == Self.scheme { webView.load(action.request) } else { ui?.open(external: url) }
+      if url.scheme == Self.scheme { webView.load(action.request) }
+      else if Self.isMicrosoftSignIn(url) { openMicrosoftSignIn(url) }
+      else { ui?.open(external: url) }
     }
     return nil
   }
@@ -273,5 +305,21 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
   func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
     downloads.removeValue(forKey: ObjectIdentifier(download))
     ui?.alert("The download failed: \(error.localizedDescription)") {}
+  }
+}
+
+// Enters the device code on Microsoft's page once and submits it, as Microsoft ignores the code in the link.
+private final class MicrosoftCode: NSObject, WKNavigationDelegate {
+  let code: String
+  var entered = false
+  init(_ code: String) { self.code = code }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    guard !entered, !code.isEmpty, let literal = String(data: (try? JSONEncoder().encode(code)) ?? Data(), encoding: .utf8) else { return }
+    webView.evaluateJavaScript("""
+      (() => { const i = document.querySelector('input[name=otc]'); if (!i || i.value) return false;
+        i.value = \(literal); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true }));
+        (document.querySelector('#idSIButton9') || i.form?.querySelector('[type=submit]'))?.click(); return true; })()
+      """) { [weak self] done, _ in if done as? Bool == true { self?.entered = true } }
   }
 }

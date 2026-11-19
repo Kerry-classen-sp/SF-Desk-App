@@ -72,13 +72,8 @@ foreach ($path in $links) {
 }
 Say 'Added SF Desk to the Start menu and the Desktop.'
 
-# 4. Time Entry reads meetings from classic Outlook. New Outlook has no COM API.
-if (Test-Path 'Registry::HKEY_CLASSES_ROOT\Outlook.Application') {
-  Say 'Found classic Outlook: Time Entry will read your calendar from it.'
-} else {
-  Write-Host '  Classic Outlook isn''t installed, so Time Entry can only show Salesforce events.' -ForegroundColor Yellow
-  Say 'If you use the new Outlook, switch back to classic Outlook to see your Outlook calendar.'
-}
+# 4. Time Entry reads meetings from Microsoft 365 (or Salesforce events).
+Say 'For your meetings in Time Entry, pick Microsoft 365 in its calendar list and sign in with your work account.'
 
 Write-Host "`nDone. Starting SF Desk..." -ForegroundColor Cyan
 Say 'The first time, it offers to download the Salesforce CLI and opens your browser to sign in.'
