@@ -140,6 +140,14 @@ printf '{"INSTALL.md":"Read Me First.html","README.md":"About SF Desk.html","OUT
 cp "$C/Resources/AppIcon.icns" "$DMG/.VolumeIcon.icns"
 SetFile -a C "$DMG" 2>/dev/null || true # use that icon for the mounted disk, where SetFile is installed
 rm -f "$OUT/SF-Desk.dmg"
-hdiutil create -quiet -volname "SF Desk" -srcfolder "$DMG" -fs HFS+ -format UDZO -ov "$OUT/SF-Desk.dmg"
+# Made in steps rather than with -srcfolder, which fails with "Resource busy" when something (e.g. a scanner) still
+# holds the new volume as it detaches: an empty image is filled, detached (forced if need be) and compressed.
+SIZE_MB=$(( $(du -sm "$DMG" | cut -f1) + 60 ))
+hdiutil create -quiet -size "${SIZE_MB}m" -fs HFS+ -volname "SF Desk" -ov "$TMP/rw.dmg"
+MNT=$(hdiutil attach -nobrowse -noverify -noautoopen "$TMP/rw.dmg" | awk -F'\t' '/\/Volumes\// {print $NF}')
+[ -n "$MNT" ] || die "Couldn't attach the disk image."
+ditto "$DMG" "$MNT"
+hdiutil detach "$MNT" -quiet 2>/dev/null || { sleep 3; hdiutil detach "$MNT" -force -quiet; }
+hdiutil convert -quiet "$TMP/rw.dmg" -format UDZO -ov -o "$OUT/SF-Desk.dmg"
 
 echo "Built $APP, $OUT/SF-Desk-app.zip and $OUT/SF-Desk.dmg ($(du -h "$OUT/SF-Desk.dmg" | cut -f1)): $BUILD_INFO"
