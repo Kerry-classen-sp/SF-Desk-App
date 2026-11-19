@@ -1891,7 +1891,7 @@ api.post('/opportunities/:id/tes', wrap(async (req, res) => createRequest(req, r
 api.post('/opportunities/:id/rfp', wrap(async (req, res) => createRequest(req, res, RFP_RECORD_TYPE, await rfpMeta(req))));
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 8) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 9) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
@@ -1902,10 +1902,10 @@ async function tesMeta(req) {
     const f = d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name);
     if (f) {
       fields[key] = { name: f.name, label: f.label, type: f.type, rel: f.type === 'reference' ? f.relationshipName || null : null,
-        isUser: isUserRef(f) };
+        isUser: isUserRef(f), length: f.length || null };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 8, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
+  req.session.tesMeta = { v: 9, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
     recordTypeId: rt.available ? rt.recordTypeId : null, canCreate: !!d.createable,
     fields, missing, updates: await tesUpdatesMeta(req, d), stageEdit: await tesStageEdit(req, d, rt, fields.stage),
     createForm: await requestCreateForm(req, d, rt, TES_CREATE_FIELDS) };
@@ -1941,7 +1941,7 @@ async function tesUpdatesMeta(req, dsDescribe) {
     if (!status) continue;
     return {
       object: c.name, label: c.label, labelPlural: pluralLabel(c), parentField: rel.field,
-      status: status.name, notes: notes?.name || null,
+      status: status.name, notes: notes?.name || null, notesLength: notes?.length || null,
       options: (status.picklistValues || []).filter((v) => v.active).map((v) => v.value),
       canCreate: !!c.createable && !!status.createable,
     };
@@ -1956,6 +1956,57 @@ async function tesUpdatesOrFail(req) {
 }
 const listTesUpdates = (req, u, id) => query(req, `SELECT Id, Name, ${u.status}${u.notes ? `, ${u.notes}` : ''}, CreatedBy.Name, CreatedDate ` +
   `FROM ${u.object} WHERE ${u.parentField} = '${id}' ORDER BY CreatedDate DESC`, 500);
+
+// A status update's notes start with my initials ("KC:  ", unless they already do) and end with the TES Request's
+// dates, assigned engineer, the opportunity's primary competitor and close date. Fields the org doesn't have, or
+// that are empty, say "not set".
+async function tesNoteFields(req) {
+  if (req.session.tesNoteFields?.v === 1) return req.session.tesNoteFields;
+  const ds = await dealSupportMeta(req);
+  const find = (d, label, name) => d.fields.find((x) => lower(x.label) === lower(label)) || d.fields.find((x) => x.name === name);
+  const pick = (f) => f ? { name: f.name, rel: f.type === 'reference' ? f.relationshipName || null : null } : null;
+  const [dsD, oppD] = await Promise.all([ds.object, 'Opportunity'].map((o) => sf(req, 'GET', `/services/data/${API}/sobjects/${o}/describe`)));
+  req.session.tesNoteFields = { v: 1, start: pick(find(dsD, 'TES Start Date', 'TES_Start_Date__c')),
+    competitor: pick(find(oppD, 'Primary Competitor', 'Primary_Competitor__c')) };
+  return req.session.tesNoteFields;
+}
+const initialsOf = (name) => {
+  const words = String(name || '').split(/\s+/).map((w) => w.replace(/[^\p{L}]/gu, '')).filter(Boolean);
+  return words.length ? (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : '')).toUpperCase() : '';
+};
+async function tesNoteParts(req, id) {
+  const ds = await dealSupportMeta(req), tm = await tesMeta(req), nf = await tesNoteFields(req);
+  const f = tm.fields, o = ds.oppRel;
+  const col = (x, via = '') => x ? (x.rel ? `${via}${x.rel}.Name` : `${via}${x.name}`) : null;
+  const cols = [col(nf.start), col(f.endDate), col(f.assignedSe), `${o}.CloseDate`, col(nf.competitor, `${o}.`)].filter(Boolean);
+  const [rec] = await query(req, `SELECT ${[...new Set(cols)].join(', ')} FROM ${ds.object} WHERE Id = '${id}'`);
+  if (!rec) throw new HttpError(404, `${tm.label} not found`);
+  const get = (path) => path?.split('.').reduce((v, k) => v?.[k], rec) ?? null;
+  const date = (v) => /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? `${+v.slice(5, 7)}/${+v.slice(8, 10)}/${v.slice(0, 4)}` : null;
+  const val = (v) => v == null || v === '' ? 'not set' : String(v).replace(/;/g, ', ');
+  const initials = initialsOf(req.session.sf.user.name);
+  return {
+    initials,
+    footer: [
+      `TES event Duration: ${date(get(col(nf.start))) || 'not set'} to ${date(get(col(f.endDate))) || 'not set'}`,
+      `Assigned Engineer: ${val(get(col(f.assignedSe)))}`,
+      `Primary Competitor: ${val(get(col(nf.competitor, `${o}.`)))}`,
+      `Opportunity Close Date: ${date(get(`${o}.CloseDate`)) || 'not set'}`,
+    ].join('\n'),
+  };
+}
+// The notes as saved: initials, what was entered, then the footer, within the field's length.
+function tesNoteText({ initials, footer }, entered, max) {
+  let notes = String(entered ?? '').trim();
+  if (initials && !new RegExp(`^${initials}\\b`, 'i').test(notes)) notes = `${initials}:  ${notes}`;
+  const room = max ? max - footer.length - 2 : Infinity;
+  return `${notes.slice(0, Math.max(0, room))}\n\n${footer}`;
+}
+
+// What a new status update's notes get around what's entered, for the form to show.
+api.get('/tes/:id/update-parts', wrap(async (req, res) => {
+  res.json(await tesNoteParts(req, sfId(req.params.id)));
+}));
 
 // A TES Request's status updates, newest first.
 api.get('/tes/:id/updates', wrap(async (req, res) => {
@@ -1972,11 +2023,11 @@ api.post('/tes/:id/updates', wrap(async (req, res) => {
   if (!u.canCreate) throw new HttpError(403, `Your user can't create ${u.labelPlural}.`);
   const status = String(req.body?.status || '');
   if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
-  const notes = String(req.body?.notes ?? '').trim();
+  const notes = tesNoteText(await tesNoteParts(req, id), req.body?.notes, u.notesLength);
   await sf(req, 'POST', `/services/data/${API}/sobjects/${u.object}`,
     { body: { [u.parentField]: id, [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
   const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
-  const latest = [[f.tesStatus, status], [f.statusNotes, notes || null], [f.lastStatus, new Date().toLocaleDateString('en-CA')]]
+  const latest = [[f.tesStatus, status], [f.statusNotes, f.statusNotes?.length ? notes.slice(0, f.statusNotes.length) : notes], [f.lastStatus, new Date().toLocaleDateString('en-CA')]]
     .filter(([x]) => x?.name);
   let warning = null;
   if (latest.length) {
