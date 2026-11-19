@@ -55,6 +55,8 @@ calendar permission and troubleshooting.
   Click free time on the calendar to add a meeting with its Deal Support in one go: the meeting's title and time
   (starting on the half hour clicked, an hour long) above the same form. The meeting goes in the calendar shown:
   a Microsoft 365 meeting with no attendees (so no invitations go out), or a Salesforce event on the opportunity.
+  Tabs at the top switch to **Calendar Event Only** (the Edit form below, empty, for an event with no Deal Support;
+  attendees you add get invitations) or **Deal Support Only** (the usual new Deal Support, dated the day clicked).
   Meetings you declined in Microsoft 365 are hidden; tick **Show declined** above the calendar to show them in
   yellow. Right-click an event (long-press it on the iPad) and choose **Edit** to change it in a form with
   Outlook's options: title, attendees, start and end, all day, repeat (for a single meeting), location, Teams

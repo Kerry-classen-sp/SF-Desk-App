@@ -15,6 +15,13 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 4
+
+- **Three ways from free time:** clicking free time on Time Entry opens tabs: **Meeting with Deal Support** (as
+  before, the default), **Calendar Event Only** (the Edit form, empty: title, attendees, time, repeat, location,
+  Teams meeting and the rest, with no Deal Support; attendees get invitations) and **Deal Support Only** (the usual
+  new Deal Support form, dated the day clicked). Each tab keeps what you've entered when you switch.
+
 ### Build 3
 
 - **Show declined:** meetings you declined in Microsoft 365 are hidden on Time Entry. Tick **Show declined** above

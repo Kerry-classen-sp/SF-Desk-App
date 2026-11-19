@@ -4638,10 +4638,32 @@ async function editEventDialog(e) {
   let d;
   try { d = await api(`/calendar/events/${e.id}/details`, { method: 'POST', body: { graphId: e.graphId || '' } }); }
   catch (err) { return toast(err.message, 'err'); }
-  const graph = d.kind === 'graph';
-  if (graph && !cal.sources?.graph?.canWrite) {
+  if (d.kind === 'graph' && !cal.sources?.graph?.canWrite) {
     return toast('To change Microsoft 365 meetings, sign out of it and sign in again, accepting updates to your calendar.', 'err');
   }
+  let form;
+  formDialog((close) => (form = eventForm(e, d, { close })), `Edit ${d.kind === 'graph' ? 'meeting' : 'event'}`);
+  form.focusFirst();
+}
+
+// A new event (no Deal Support) in the calendar shown, as the edit form with nothing in it, from date and
+// startMins (an hour long). Saved through /calendar/events.
+function blankEvent(source, date, startMins) {
+  const graph = source !== 'salesforce';
+  const s = new Date(`${date}T00:00`); s.setMinutes(startMins);
+  const calName = graph ? (cal.sources?.graph?.calendars || []).find((c) => c.id === source)?.title : null;
+  return {
+    e: { id: null, calendar: calName, copies: [], supports: [] },
+    d: { kind: graph ? 'graph' : 'salesforce', subject: '', body: '', allDay: false, start: s.toISOString(), end: new Date(+s + 3600_000).toISOString(),
+      location: '', attendees: [], rooms: [], showAs: graph ? 'busy' : 'Busy', reminder: 15, private: false, importance: 'normal', categories: [],
+      teams: false, isOrganizer: true, responseRequested: true, allowNewTimeProposals: true, type: 'singleInstance' },
+  };
+}
+
+// The form itself: d is the event as /details gives it (or blankEvent's), e the calendar event. create: { source }
+// makes a new event from it rather than saving changes.
+function eventForm(e, d, { close, create = null }) {
+  const graph = d.kind === 'graph';
   const own = d.isOrganizer;
   const locked = !own; // details only the organizer can change
   const dateOf = (iso) => localDay(new Date(iso));
@@ -4736,16 +4758,18 @@ async function editEventDialog(e) {
   const calName = graph ? `Microsoft 365${e.calendar ? ` (${e.calendar})` : ''}` : 'Salesforce event';
   const attendeeCount = (d.attendees || []).length;
 
-  formDialog((close) => {
-    const save = el('button', { class: 'primary', type: 'button' }, 'Save');
+  {
+    const save = el('button', { class: 'primary', type: 'button' }, create ? 'Create event' : 'Save');
     const sec = el('section', {},
-      el('h3', {}, `Edit ${graph ? 'meeting' : 'event'}`, el('span', { class: 'spacer' }),
+      el('h3', {}, create ? 'New calendar event' : `Edit ${graph ? 'meeting' : 'event'}`, el('span', { class: 'spacer' }),
         d.webLink ? el('a', { href: d.webLink, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Outlook ↗') : null,
-        !graph ? el('a', { href: `${me.instanceUrl}/${e.id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Salesforce ↗') : null),
+        !graph && e.id ? el('a', { href: `${me.instanceUrl}/${e.id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Salesforce ↗') : null),
       el('div', { class: 'sub', style: 'margin:-4px 0 12px' }, [
         calName,
         graph && !own ? `Organized by ${d.organizer.name || d.organizer.email}. Only the organizer can change the meeting itself; you can answer it and change how it shows on your calendar.` : null,
         graph && own && attendeeCount ? `Saving sends ${plural(attendeeCount, 'attendee')} an update.` : null,
+        create && graph ? 'Attendees you add get an invitation when you create it.' : null,
+        create ? 'No Deal Support is created with it.' : null,
         e.recurring ? 'One occurrence of a recurring meeting: changes apply to this one only.' : null,
         !graph && d.what ? `Related to ${d.what.name || d.what.id}.` : null,
       ].filter(Boolean).join(' · ')),
@@ -4788,10 +4812,10 @@ async function editEventDialog(e) {
         if (!locked) {
           if (!subject.value.trim()) { subject.focus(); throw new Error('Give it a title.'); }
           if (!t.ok) throw new Error(t.allDay ? 'The end date can\'t be before the start date.' : 'It has to end after it starts.');
-          if (subject.value.trim() !== d.subject) c.subject = subject.value.trim();
+          if (subject.value.trim() !== d.subject || create) c.subject = subject.value.trim();
           const sameTime = t.allDay === d.allDay && (t.allDay ? t.start === d.start && t.end === d.end
             : Date.parse(t.start) === Date.parse(d.start) && Date.parse(t.end) === Date.parse(d.end));
-          if (!sameTime) Object.assign(c, { allDay: t.allDay, start: t.start, end: t.end, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+          if (!sameTime || create) Object.assign(c, { allDay: t.allDay, start: t.start, end: t.end, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
           if (location.value !== d.location) c.location = location.value;
           if (body.value !== d.body) c.body = body.value;
           if (graph) {
@@ -4805,9 +4829,9 @@ async function editEventDialog(e) {
             if (canRepeat && repeat.value !== 'never') c.repeat = { type: repeat.value, until: until.value || null, startDate: sd.value };
           }
         }
-        if (showAs.value !== String(d.showAs)) c.showAs = showAs.value;
+        if (showAs.value !== String(d.showAs) || create) c.showAs = showAs.value;
         const rem = reminder.value === '' ? null : Number(reminder.value);
-        if (rem !== d.reminder && !(allDay.checked && !graph)) c.reminder = rem;
+        if ((rem !== d.reminder || create) && !(allDay.checked && !graph)) c.reminder = rem;
         if (priv.checked !== d.private) c.private = priv.checked;
         if (graph) {
           const cats = categories.value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -4817,6 +4841,13 @@ async function editEventDialog(e) {
         if (!Object.keys(c).length && !respond) { close(); return toast('Nothing changed.'); }
         save.disabled = true;
         const final = times();
+        if (create) {
+          const r = await api('/calendar/events', { method: 'POST', body: { source: create.source, changes: c } });
+          close();
+          toast(`Created "${c.subject}"`, 'ok');
+          if (r.id) { cal.sel = r.id; cal.editing = null; }
+          return await loadCalendar();
+        }
         const r = await api(`/calendar/events/${e.id}/update`, { method: 'POST', body: {
           graphId: e.graphId || '', changes: c, respond, copies: e.copies || [],
           now: { subject: c.subject ?? d.subject, allDay: final.allDay, start: final.allDay ? null : final.start, date: sd.value } } });
@@ -4832,9 +4863,9 @@ async function editEventDialog(e) {
         toast(err.message, 'err');
       }
     });
+    sec.focusFirst = () => (locked ? showAs : subject).focus();
     return sec;
-  }, `Edit ${graph ? 'meeting' : 'event'}`);
-  (locked ? showAs : subject).focus();
+  }
 }
 
 document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('#evMenu')) closeEventMenu(); });
@@ -5099,8 +5130,45 @@ function newMeetingDialog(date, startMins) {
       el('div', { class: 'sub', style: 'margin:6px 0 0' }, source === 'salesforce'
         ? `Added to ${calName} on the opportunity you pick.`
         : `Added to Microsoft 365 (${calName}) with no attendees, so no invitations are sent.`)));
-    return form;
-  });
+
+    // Two more ways from the same click: a calendar event only (the edit form, empty) or a Deal Support only
+    // (the usual new one, dated that day). Each is made the first time its tab is picked, and keeps what's
+    // entered when switching.
+    const panes = { both: form, event: null, ds: null };
+    const make = {
+      event: () => {
+        const [h, m] = (from.value || '').split(':').map(Number);
+        const { e, d } = blankEvent(source, day.value || date, Number.isFinite(h) ? h * 60 + (m || 0) : startMins);
+        return eventForm(e, d, { close, create: { source } });
+      },
+      ds: () => newDsForm({
+        values: eventPrefill({ date: day.value, allDay: true }),
+        save: (opp, fields) => api(`/opportunities/${opp.Id}/deal-supports`, { method: 'POST', body: { fields, mine: true } }),
+        onCreated: async () => { close(); await loadCalendar(); },
+        close,
+      }),
+    };
+    const TABS = [['both', `Meeting with ${dsMeta.label}`], ['event', 'Calendar Event Only'], ['ds', `${dsMeta.label} Only`]];
+    const tabs = el('div', { class: 'opp-tabs', role: 'tablist', 'aria-label': 'What to create' },
+      TABS.map(([k, label]) => el('button', { type: 'button', role: 'tab', 'data-tab': k, onclick: () => show(k) }, label)));
+    const holder = document.createDocumentFragment();
+    const show = (k) => {
+      if (!panes[k]) { panes[k] = make[k](); form.parentNode.append(panes[k]); }
+      for (const [name, pane] of Object.entries(panes)) if (pane) pane.hidden = name !== k;
+      panes[k].prepend(tabs);
+      for (const b of tabs.children) {
+        b.classList.toggle('on', b.dataset.tab === k);
+        b.setAttribute('aria-selected', String(b.dataset.tab === k));
+      }
+      (k === 'both' ? subject : k === 'event' ? null : panes[k].querySelector('input[role=combobox]'))?.focus();
+      if (k === 'event') panes[k].focusFirst();
+    };
+    holder.append(form);
+    form.prepend(tabs);
+    tabs.children[0].classList.add('on');
+    tabs.children[0].setAttribute('aria-selected', 'true');
+    return holder;
+  }, 'New meeting');
   subject.focus();
 }
 

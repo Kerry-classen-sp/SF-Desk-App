@@ -192,17 +192,15 @@ export function graphCalendar(opts) {
     }));
   }
 
-  // A meeting with no attendees (so no invitations go out) in one of my calendars. Returns its id as events() gives it.
-  async function createEvent(calendarId, { subject, start, end }) {
-    if (!canWrite(saved?.scope)) {
-      throw new CalendarError('Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to add meetings to it.', 403);
-    }
+  // A meeting in one of my calendars, from Graph's event fields (subject, start, end and so on; attendees, if any,
+  // get invitations). Returns its id as events() gives it.
+  async function createEvent(calendarId, fields) {
+    needWrite('add meetings to it');
     const calId = String(calendarId).replace(/^graph:/, '');
-    const utc = (iso) => ({ dateTime: new Date(iso).toISOString().slice(0, 19), timeZone: 'UTC' });
-    const e = await graph(`/me/calendars/${encodeURIComponent(calId)}/events`, { Prefer: 'outlook.timezone="UTC"' },
-      { method: 'POST', body: { subject, start: utc(start), end: utc(end), showAs: 'busy' } });
-    const startIso = new Date(String(e.start?.dateTime || start).replace(/Z?$/, 'Z')).toISOString();
-    return { id: 'gr_' + sha1Hex(`${e.iCalUId || e.id}|${startIso}`).slice(0, 24) };
+    const body = { ...fields };
+    if (body.isOnlineMeeting) body.onlineMeetingProvider = 'teamsForBusiness';
+    const e = await graph(`/me/calendars/${encodeURIComponent(calId)}/events`, { Prefer: 'outlook.timezone="UTC"' }, { method: 'POST', body });
+    return { id: occurrenceId(e, e.id) };
   }
 
   // The id events() gives a meeting, from Graph's (UTC) start and iCalUId.

@@ -1150,7 +1150,10 @@ async function createDealSupport(req, meta, oppId, fields, extra = {}) {
 api.post('/opportunities/:id/deal-supports', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const meta = await dealSupportMeta(req);
-  res.status(201).json(await createDealSupport(req, meta, id, req.body?.fields));
+  // mine: from Time Entry, so it's mine (the user field) even when that field isn't on the form.
+  const cm = req.body?.mine ? await calendarMeta(req) : null;
+  const extra = cm?.userField && !cm.userField.onForm ? { [cm.userField.name]: sfId(req.session.sf.user.id) } : {};
+  res.status(201).json(await createDealSupport(req, meta, id, req.body?.fields, extra));
 }));
 
 // One Deal Support with the form's fields and its opportunity, for the edit form.
@@ -2747,7 +2750,8 @@ api.post('/calendar/new-event', wrap(async (req, res) => {
         { body: { Subject: subject, StartDateTime: start, EndDateTime: end, OwnerId: me, WhatId: oppId } });
       evId = sfId(created.id);
     } else {
-      evId = (await graphCal.createEvent(source, { subject, start, end })).id;
+      const utc = (iso) => ({ dateTime: iso.replace(/Z$/, '').slice(0, 19), timeZone: 'UTC' });
+      evId = (await graphCal.createEvent(source, { subject, start: utc(start), end: utc(end), showAs: 'busy' })).id;
     }
   } catch (err) {
     warning = `The ${ds.label} was created, but the meeting couldn't be added to your calendar: ${err.message}`;
@@ -2823,20 +2827,14 @@ api.post('/calendar/events/:id/details', wrap(async (req, res) => {
   });
 }));
 
-// Save changes from the edit form. `changes` holds only what changed: subject, body, allDay, start/end (UTC instants,
-// or dates for all-day events with the end date exclusive), timeZone (the page's, for all-day Microsoft 365 meetings),
-// location, showAs, reminder (minutes before, or null for none), private, and for Microsoft 365 also attendees
-// ([{ email, name, type: required|optional }]), importance, categories, teams (turn a Teams meeting on),
-// responseRequested, allowNewTimeProposals and repeat ({ type: daily|weekdays|weekly|monthly|yearly, until }).
-// respond ({ action: accept|tentativelyAccept|decline, comment, send }) answers an invitation. A changed subject or
-// start changes the event's key (and a Microsoft 365 meeting's id), so its marks (the Deal Support created from it,
-// "No Deal Support needed") are copied to the new ones; `copies` are the other ids Time Entry shows it under, and
-// `now` ({ subject, start, allDay, date }) is the event after the change. Replies { id }.
-api.post('/calendar/events/:id/update', wrap(async (req, res) => {
-  const evId = eventId(req.params.id);
-  editableEvent(evId);
-  const b = req.body || {};
-  const c = b.changes && typeof b.changes === 'object' ? b.changes : {};
+// The edit form's fields (`changes`): subject, body, allDay, start/end (UTC instants, or dates for all-day events with
+// the end date exclusive), timeZone (the page's, for all-day Microsoft 365 meetings), location, showAs, reminder
+// (minutes before, or null for none), private, and for Microsoft 365 also attendees ([{ email, name, type:
+// required|optional }]), importance, categories, teams (make it a Teams meeting), responseRequested,
+// allowNewTimeProposals and repeat ({ type: daily|weekdays|weekly|monthly|yearly, until, startDate }). Checked here;
+// graphEventFields and salesforceEventFields turn them into each calendar's fields.
+function eventChanges(changes) {
+  const c = changes && typeof changes === 'object' ? changes : {};
   const has = (k) => Object.prototype.hasOwnProperty.call(c, k);
   const text = (v, max) => String(v ?? '').slice(0, max);
   const date = (v) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw new HttpError(400, 'Dates must be YYYY-MM-DD.'); return String(v); };
@@ -2852,87 +2850,110 @@ api.post('/calendar/events/:id/update', wrap(async (req, res) => {
     if (length > 366 * 86_400_000) throw new HttpError(400, 'An event can last at most a year.');
   }
   const reminder = has('reminder') ? (c.reminder == null ? null : Math.max(0, Math.min(40_320, Math.round(Number(c.reminder) || 0)))) : undefined;
-  let id = evId;
+  return { c, has, text, date, allDay, start, end, reminder };
+}
 
+function graphEventFields({ c, has, text, date, allDay, start, end, reminder }) {
+  const p = {};
+  if (has('subject')) p.subject = text(c.subject, 255).trim();
+  if (has('body')) p.body = { contentType: 'text', content: text(c.body, 32000) };
+  if (start) {
+    const tz = /^[A-Za-z0-9_+\-/]{1,64}$/.test(String(c.timeZone || '')) ? String(c.timeZone) : 'UTC';
+    p.isAllDay = allDay;
+    p.start = allDay ? { dateTime: `${start}T00:00:00`, timeZone: tz } : { dateTime: start.replace(/Z$/, '').slice(0, 19), timeZone: 'UTC' };
+    p.end = allDay ? { dateTime: `${end}T00:00:00`, timeZone: tz } : { dateTime: end.replace(/Z$/, '').slice(0, 19), timeZone: 'UTC' };
+  }
+  if (has('location')) p.location = { displayName: text(c.location, 255) };
+  if (has('attendees')) {
+    p.attendees = (Array.isArray(c.attendees) ? c.attendees : []).slice(0, 500).map((a) => {
+      const email = text(a?.email, 254).trim();
+      if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) throw new HttpError(400, `"${email}" isn't an email address.`);
+      return { emailAddress: { address: email, name: text(a?.name, 120).trim() || email }, type: a?.type === 'optional' ? 'optional' : 'required' };
+    });
+  }
+  if (has('showAs')) {
+    if (!['free', 'tentative', 'busy', 'oof', 'workingElsewhere'].includes(c.showAs)) throw new HttpError(400, 'Unknown Show as.');
+    p.showAs = c.showAs;
+  }
+  if (reminder !== undefined) {
+    p.isReminderOn = reminder != null;
+    if (reminder != null) p.reminderMinutesBeforeStart = reminder;
+  }
+  if (has('private')) p.sensitivity = c.private ? 'private' : 'normal';
+  if (has('importance')) p.importance = ['low', 'normal', 'high'].includes(c.importance) ? c.importance : 'normal';
+  if (has('categories')) p.categories = (Array.isArray(c.categories) ? c.categories : []).slice(0, 25).map((x) => text(x, 255).trim()).filter(Boolean);
+  if (c.teams) p.isOnlineMeeting = true;
+  if (has('responseRequested')) p.responseRequested = !!c.responseRequested;
+  if (has('allowNewTimeProposals')) p.allowNewTimeProposals = !!c.allowNewTimeProposals;
+  if (has('repeat')) {
+    const r = c.repeat || {};
+    const first = date(r.startDate);
+    const d = new Date(first + 'T00:00:00Z');
+    const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const pattern = {
+      daily: { type: 'daily', interval: 1 },
+      weekdays: { type: 'weekly', interval: 1, daysOfWeek: DAYS.slice(1, 6), firstDayOfWeek: 'sunday' },
+      weekly: { type: 'weekly', interval: 1, daysOfWeek: [DAYS[d.getUTCDay()]], firstDayOfWeek: 'sunday' },
+      monthly: { type: 'absoluteMonthly', interval: 1, dayOfMonth: d.getUTCDate() },
+      yearly: { type: 'absoluteYearly', interval: 1, dayOfMonth: d.getUTCDate(), month: d.getUTCMonth() + 1 },
+    }[r.type];
+    if (!pattern) throw new HttpError(400, 'Unknown repeat.');
+    p.recurrence = { pattern, range: r.until ? { type: 'endDate', startDate: first, endDate: date(r.until) } : { type: 'noEnd', startDate: first } };
+  }
+  return p;
+}
+
+// `ev`: the event as it is (EVENT_EDIT fields), or {} for a new one.
+function salesforceEventFields({ c, has, text, allDay, start, end, reminder }, ev) {
+  const p = {};
+  if (has('subject')) p.Subject = text(c.subject, 255).trim();
+  if (has('body')) p.Description = text(c.body, 32000);
+  if (has('location')) p.Location = text(c.location, 255);
+  if (has('showAs')) {
+    if (!['Busy', 'Free', 'OutOfOffice'].includes(c.showAs)) throw new HttpError(400, 'Unknown Show as.');
+    p.ShowAs = c.showAs;
+  }
+  if (has('private')) p.IsPrivate = !!c.private;
+  const isAllDay = allDay ?? !!ev.IsAllDayEvent;
+  if (start) {
+    p.IsAllDayEvent = allDay;
+    if (allDay) { p.ActivityDate = start; p.DurationInMinutes = Math.round((Date.parse(end) - Date.parse(start)) / 60000); }
+    else { p.StartDateTime = start; p.EndDateTime = end; }
+  }
+  // Salesforce keeps the reminder as a time, so it moves with the start. All-day events get none here.
+  const sfIso = (s) => String(s).replace(/\+0000$/, 'Z');
+  const startAt = isAllDay ? null : start || (ev.StartDateTime ? sfIso(ev.StartDateTime) : null);
+  let before = reminder;
+  if (before === undefined && start && ev.IsReminderSet && ev.ReminderDateTime && !ev.IsAllDayEvent) {
+    before = (Date.parse(sfIso(ev.StartDateTime)) - Date.parse(sfIso(ev.ReminderDateTime))) / 60000;
+  }
+  if (before !== undefined) {
+    p.IsReminderSet = before != null && !!startAt;
+    if (p.IsReminderSet) p.ReminderDateTime = new Date(Date.parse(startAt) - before * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  }
+  return p;
+}
+
+// Save changes from the edit form: `changes` (see eventChanges) holds only what changed. respond ({ action:
+// accept|tentativelyAccept|decline, comment, send }) answers an invitation. A changed subject or start changes the
+// event's key (and a Microsoft 365 meeting's id), so its marks (the Deal Support created from it, "No Deal Support
+// needed") are copied to the new ones; `copies` are the other ids Time Entry shows it under, and `now` ({ subject,
+// start, allDay, date }) is the event after the change. Replies { id }.
+api.post('/calendar/events/:id/update', wrap(async (req, res) => {
+  const evId = eventId(req.params.id);
+  editableEvent(evId);
+  const b = req.body || {};
+  const x = eventChanges(b.changes);
+  const { text } = x;
+  let id = evId;
   if (evId.startsWith('gr_')) {
     const graphId = text(b.graphId, 1000);
-    const p = {};
-    if (has('subject')) p.subject = text(c.subject, 255).trim();
-    if (has('body')) p.body = { contentType: 'text', content: text(c.body, 32000) };
-    if (start) {
-      const tz = /^[A-Za-z0-9_+\-/]{1,64}$/.test(String(c.timeZone || '')) ? String(c.timeZone) : 'UTC';
-      p.isAllDay = allDay;
-      p.start = allDay ? { dateTime: `${start}T00:00:00`, timeZone: tz } : { dateTime: start.replace(/Z$/, '').slice(0, 19), timeZone: 'UTC' };
-      p.end = allDay ? { dateTime: `${end}T00:00:00`, timeZone: tz } : { dateTime: end.replace(/Z$/, '').slice(0, 19), timeZone: 'UTC' };
-    }
-    if (has('location')) p.location = { displayName: text(c.location, 255) };
-    if (has('attendees')) {
-      p.attendees = (Array.isArray(c.attendees) ? c.attendees : []).slice(0, 500).map((a) => {
-        const email = text(a?.email, 254).trim();
-        if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) throw new HttpError(400, `"${email}" isn't an email address.`);
-        return { emailAddress: { address: email, name: text(a?.name, 120).trim() || email }, type: a?.type === 'optional' ? 'optional' : 'required' };
-      });
-    }
-    if (has('showAs')) {
-      if (!['free', 'tentative', 'busy', 'oof', 'workingElsewhere'].includes(c.showAs)) throw new HttpError(400, 'Unknown Show as.');
-      p.showAs = c.showAs;
-    }
-    if (reminder !== undefined) {
-      p.isReminderOn = reminder != null;
-      if (reminder != null) p.reminderMinutesBeforeStart = reminder;
-    }
-    if (has('private')) p.sensitivity = c.private ? 'private' : 'normal';
-    if (has('importance')) p.importance = ['low', 'normal', 'high'].includes(c.importance) ? c.importance : 'normal';
-    if (has('categories')) p.categories = (Array.isArray(c.categories) ? c.categories : []).slice(0, 25).map((x) => text(x, 255).trim()).filter(Boolean);
-    if (c.teams) p.isOnlineMeeting = true;
-    if (has('responseRequested')) p.responseRequested = !!c.responseRequested;
-    if (has('allowNewTimeProposals')) p.allowNewTimeProposals = !!c.allowNewTimeProposals;
-    if (has('repeat')) {
-      const r = c.repeat || {};
-      const first = date(r.startDate);
-      const d = new Date(first + 'T00:00:00Z');
-      const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-      const pattern = {
-        daily: { type: 'daily', interval: 1 },
-        weekdays: { type: 'weekly', interval: 1, daysOfWeek: DAYS.slice(1, 6), firstDayOfWeek: 'sunday' },
-        weekly: { type: 'weekly', interval: 1, daysOfWeek: [DAYS[d.getUTCDay()]], firstDayOfWeek: 'sunday' },
-        monthly: { type: 'absoluteMonthly', interval: 1, dayOfMonth: d.getUTCDate() },
-        yearly: { type: 'absoluteYearly', interval: 1, dayOfMonth: d.getUTCDate(), month: d.getUTCMonth() + 1 },
-      }[r.type];
-      if (!pattern) throw new HttpError(400, 'Unknown repeat.');
-      p.recurrence = { pattern, range: r.until ? { type: 'endDate', startDate: first, endDate: date(r.until) } : { type: 'noEnd', startDate: first } };
-    }
+    const p = graphEventFields(x);
     if (Object.keys(p).length) id = (await graphCal.updateEvent(evId, graphId, p)).id;
     const r = b.respond;
     if (r?.action) await graphCal.respondEvent(id, graphId, r.action, { comment: text(r.comment, 2000), sendResponse: r.send !== false });
   } else {
-    const ev = await myEvent(req, evId, EVENT_EDIT);
-    const p = {};
-    if (has('subject')) p.Subject = text(c.subject, 255).trim();
-    if (has('body')) p.Description = text(c.body, 32000);
-    if (has('location')) p.Location = text(c.location, 255);
-    if (has('showAs')) {
-      if (!['Busy', 'Free', 'OutOfOffice'].includes(c.showAs)) throw new HttpError(400, 'Unknown Show as.');
-      p.ShowAs = c.showAs;
-    }
-    if (has('private')) p.IsPrivate = !!c.private;
-    const isAllDay = allDay ?? !!ev.IsAllDayEvent;
-    if (start) {
-      p.IsAllDayEvent = allDay;
-      if (allDay) { p.ActivityDate = start; p.DurationInMinutes = Math.round((Date.parse(end) - Date.parse(start)) / 60000); }
-      else { p.StartDateTime = start; p.EndDateTime = end; }
-    }
-    // Salesforce keeps the reminder as a time, so it moves with the start. All-day events get none here.
-    const sfIso = (s) => String(s).replace(/\+0000$/, 'Z');
-    const startAt = isAllDay ? null : start || sfIso(ev.StartDateTime);
-    let before = reminder;
-    if (before === undefined && start && ev.IsReminderSet && ev.ReminderDateTime && !ev.IsAllDayEvent) {
-      before = (Date.parse(sfIso(ev.StartDateTime)) - Date.parse(sfIso(ev.ReminderDateTime))) / 60000;
-    }
-    if (before !== undefined) {
-      p.IsReminderSet = before != null && !!startAt;
-      if (p.IsReminderSet) p.ReminderDateTime = new Date(Date.parse(startAt) - before * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
-    }
+    const p = salesforceEventFields(x, await myEvent(req, evId, EVENT_EDIT));
     if (Object.keys(p).length) await sf(req, 'PATCH', `/services/data/${API}/sobjects/Event/${evId}`, { body: p });
   }
 
@@ -2948,6 +2969,27 @@ api.post('/calendar/events/:id/update', wrap(async (req, res) => {
     if (skipped) store.skipEvent(orgOf(req), x, true);
   }
   res.json({ ok: true, id });
+}));
+
+// A calendar event with no Deal Support, from the edit form's fields (see eventChanges; subject, start, end and
+// allDay required) in the calendar shown: a Microsoft 365 meeting (attendees get invitations) or a Salesforce
+// event of mine. Replies { id }.
+api.post('/calendar/events', wrap(async (req, res) => {
+  const b = req.body || {};
+  const x = eventChanges(b.changes);
+  if (!x.has('subject')) throw new HttpError(400, 'Give the event a title.');
+  if (!x.start) throw new HttpError(400, 'Give the event a start and an end.');
+  const source = isGraphSource(b.source) ? String(b.source).slice(0, 300) : 'salesforce';
+  let id;
+  if (source !== 'salesforce') {
+    if (!graphCal?.status().canWrite) throw new HttpError(403, 'Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to add meetings to it.');
+    id = (await graphCal.createEvent(source, { showAs: 'busy', ...graphEventFields(x) })).id;
+  } else {
+    const created = await sf(req, 'POST', `/services/data/${API}/sobjects/Event`,
+      { body: { ...salesforceEventFields(x, {}), OwnerId: sfId(req.session.sf.user.id) } });
+    id = sfId(created.id);
+  }
+  res.status(201).json({ id });
 }));
 
 // Mark an event as needing no Deal Support (skip: true), or undo that.
