@@ -15,6 +15,12 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 6
+
+- **Competitor and Exec Readout Date on TES updates:** the update form has these two fields, kept by SF Desk for
+  each TES Request (in its own database, not in Salesforce). They start as last saved, can be changed with any
+  update, and go into every update's notes after the Primary Competitor line.
+
 ### Build 5
 
 - **TES status update notes:** a new update's notes start with your initials ("KC:  ", unless they already do) and

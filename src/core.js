@@ -1958,7 +1958,8 @@ const listTesUpdates = (req, u, id) => query(req, `SELECT Id, Name, ${u.status}$
   `FROM ${u.object} WHERE ${u.parentField} = '${id}' ORDER BY CreatedDate DESC`, 500);
 
 // A status update's notes start with my initials ("KC:  ", unless they already do) and end with the TES Request's
-// dates, assigned engineer, the opportunity's primary competitor and close date. Fields the org doesn't have, or
+// dates, assigned engineer, the opportunity's primary competitor, the request's Competitor and Exec Readout Date
+// (kept here, not in Salesforce: see tesLocal) and the opportunity's close date. Fields the org doesn't have, or
 // that are empty, say "not set".
 async function tesNoteFields(req) {
   if (req.session.tesNoteFields?.v === 1) return req.session.tesNoteFields;
@@ -1985,18 +1986,36 @@ async function tesNoteParts(req, id) {
   const date = (v) => /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? `${+v.slice(5, 7)}/${+v.slice(8, 10)}/${v.slice(0, 4)}` : null;
   const val = (v) => v == null || v === '' ? 'not set' : String(v).replace(/;/g, ', ');
   const initials = initialsOf(req.session.sf.user.name);
+  // before/after: the footer's lines around the local ones, which the form fills in as they're typed.
   return {
     initials,
-    footer: [
+    before: [
       `TES event Duration: ${date(get(col(nf.start))) || 'not set'} to ${date(get(col(f.endDate))) || 'not set'}`,
       `Assigned Engineer: ${val(get(col(f.assignedSe)))}`,
       `Primary Competitor: ${val(get(col(nf.competitor, `${o}.`)))}`,
-      `Opportunity Close Date: ${date(get(`${o}.CloseDate`)) || 'not set'}`,
     ].join('\n'),
+    after: `Opportunity Close Date: ${date(get(`${o}.CloseDate`)) || 'not set'}`,
+    local: tesLocal.get(req, id),
   };
 }
+
+// Competitor and Exec Readout Date of a TES Request: kept in SF Desk's database (not Salesforce fields), set from
+// the update form and written into every update's notes.
+const tesLocal = {
+  get: (req, id) => ({ competitor: '', execReadout: '', ...store.getSetting(orgOf(req), `tesLocal:${id}`) }),
+  set(req, id, v) {
+    const competitor = String(v?.competitor ?? '').trim().slice(0, 120);
+    const execReadout = /^\d{4}-\d{2}-\d{2}$/.test(String(v?.execReadout || '')) ? v.execReadout : '';
+    store.saveSetting(orgOf(req), `tesLocal:${id}`, { competitor, execReadout });
+    return { competitor, execReadout };
+  },
+};
+const tesLocalLines = ({ competitor, execReadout }) => [`Competitor: ${competitor || 'not set'}`,
+  `Exec Readout Date: ${execReadout ? `${+execReadout.slice(5, 7)}/${+execReadout.slice(8, 10)}/${execReadout.slice(0, 4)}` : 'not set'}`].join('\n');
+
 // The notes as saved: initials, what was entered, then the footer, within the field's length.
-function tesNoteText({ initials, footer }, entered, max) {
+function tesNoteText({ initials, before, after, local }, entered, max) {
+  const footer = `${before}\n${tesLocalLines(local)}\n${after}`;
   let notes = String(entered ?? '').trim();
   if (initials && !new RegExp(`^${initials}\\b`, 'i').test(notes)) notes = `${initials}:  ${notes}`;
   const room = max ? max - footer.length - 2 : Infinity;
@@ -2015,15 +2034,18 @@ api.get('/tes/:id/updates', wrap(async (req, res) => {
   res.json({ records: await listTesUpdates(req, u, id) });
 }));
 
-// Add a status update. The TES Request's Most Recent TES Status, its notes and Last TES Status date
-// follow the newest update; when no automation in the org has set them, they're set here.
+// Add a status update. local ({ competitor, execReadout }) saves the request's local fields first (see tesLocal).
+// The TES Request's Most Recent TES Status, its notes and Last TES Status date follow the newest update; when no
+// automation in the org has set them, they're set here.
 api.post('/tes/:id/updates', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const u = await tesUpdatesOrFail(req);
   if (!u.canCreate) throw new HttpError(403, `Your user can't create ${u.labelPlural}.`);
   const status = String(req.body?.status || '');
   if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
-  const notes = tesNoteText(await tesNoteParts(req, id), req.body?.notes, u.notesLength);
+  const parts = await tesNoteParts(req, id);
+  if (req.body?.local) parts.local = tesLocal.set(req, id, req.body.local);
+  const notes = tesNoteText(parts, req.body?.notes, u.notesLength);
   await sf(req, 'POST', `/services/data/${API}/sobjects/${u.object}`,
     { body: { [u.parentField]: id, [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
   const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
