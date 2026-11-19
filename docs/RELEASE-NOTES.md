@@ -133,6 +133,14 @@ Build 16 (November 18, 2026):
 - **Installers:** the Mac Terminal installer no longer asks for the Xcode Command Line Tools or Internet
   Accounts, and the Windows installer no longer looks for classic Outlook.
 
+Build 17 (November 18, 2026):
+
+- **New meeting from free time:** click an empty spot on the Time Entry calendar to create a meeting and its
+  Deal Support together. The dialog starts with the meeting's title, date and times (on the half hour clicked,
+  for an hour) above the usual Deal Support form, whose date and hours follow the meeting's. The meeting is
+  added to the calendar shown: in Microsoft 365 with no attendees, so no invitations are sent, or as a
+  Salesforce event on the opportunity. It then shows on the calendar as covered by its Deal Support.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder

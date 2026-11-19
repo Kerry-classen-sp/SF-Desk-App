@@ -2715,6 +2715,45 @@ api.post('/calendar/events/:id/deal-support', wrap(async (req, res) => {
   res.status(201).json(rec);
 }));
 
+// A new meeting and its Deal Support, from a click on free time in Time Entry: the Deal Support first (its
+// required fields are what usually fails), then the meeting in the calendar shown (a Salesforce event on the
+// opportunity, or a Microsoft 365 meeting without attendees), linked to it. A failed meeting leaves the
+// Deal Support and says so in `warning`.
+api.post('/calendar/new-event', wrap(async (req, res) => {
+  const b = req.body || {};
+  const subject = String(b.subject ?? '').trim().slice(0, 255);
+  if (!subject) throw new HttpError(400, 'Give the meeting a title.');
+  const start = isoDateTime(b.start), end = isoDateTime(b.end);
+  const length = Date.parse(end) - Date.parse(start);
+  if (!(length > 0)) throw new HttpError(400, 'The meeting has to end after it starts.');
+  if (length > 24 * 3600_000) throw new HttpError(400, 'A meeting can last at most a day.');
+  const source = isGraphSource(b.source) ? String(b.source).slice(0, 300) : 'salesforce';
+  if (source !== 'salesforce' && !graphCal.status().canWrite) {
+    throw new HttpError(403, 'Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to add meetings to it.');
+  }
+  const oppId = sfId(b.opportunityId);
+  const me = sfId(req.session.sf.user.id);
+  const ds = await dealSupportMeta(req);
+  const cm = await calendarMeta(req);
+  const extra = cm.userField && !cm.userField.onForm ? { [cm.userField.name]: me } : {};
+  const rec = await createDealSupport(req, ds, oppId, b.fields, extra);
+
+  let evId = null, warning = '';
+  try {
+    if (source === 'salesforce') {
+      const created = await sf(req, 'POST', `/services/data/${API}/sobjects/Event`,
+        { body: { Subject: subject, StartDateTime: start, EndDateTime: end, OwnerId: me, WhatId: oppId } });
+      evId = sfId(created.id);
+    } else {
+      evId = (await graphCal.createEvent(source, { subject, start, end })).id;
+    }
+  } catch (err) {
+    warning = `The ${ds.label} was created, but the meeting couldn't be added to your calendar: ${err.message}`;
+  }
+  for (const id of [evId, meetingKey({ allDay: false, start, subject })].filter(Boolean)) store.linkEvent(orgOf(req), id, rec.Id);
+  res.status(201).json({ dealSupport: rec, eventId: evId, warning });
+}));
+
 // Mark an event as needing no Deal Support (skip: true), or undo that.
 api.post('/calendar/events/:id/skip', (req, res) => {
   // copies: the other records of the same meeting the page shows as one event.
