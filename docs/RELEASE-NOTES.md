@@ -1,5 +1,20 @@
 # SF Desk release notes
 
+## 1.9.0 (November 18, 2026)
+
+Everything from the 1.7.5 builds below, as one release:
+
+- **Microsoft 365 is the calendar:** Time Entry reads your meetings from Microsoft 365 (or Salesforce events) on the
+  Mac, Windows and the iPad, with SailPoint's SF Desk app registration built in. Sign-in opens in a sheet on the
+  Mac and iPad apps, with a fresh session and the code entered for you. Calendars on the device itself are no
+  longer read.
+- **Deal Support tags in Outlook:** meetings with a Deal Support get the green Deal Support category and those
+  needing none the gray No DS Required one, and a Deal Support covers only one occurrence of a recurring meeting.
+- **New meeting from free time:** click an empty spot on the Time Entry calendar to create a meeting and its Deal
+  Support together.
+- **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
+- **Security:** updated body-parser and qs.
+
 ## 1.7.5 (November 10, 2026)
 
 - **TES and RFP Requests on the opportunity:** above its Deal Supports, an opportunity shows a **TES/RFP
