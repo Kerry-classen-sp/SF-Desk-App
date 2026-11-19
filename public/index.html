@@ -38,7 +38,7 @@ darkQuery.addEventListener('change', applyTheme);
     --field: #12151a; --row-soft: #20252d; --tip: #2b313b;
   }
   :root[data-theme=dark] .dash { --grid: #2a303a; }
-  :root[data-theme=dark] .cal, :root[data-theme=dark] .ol-pane { --covered: #1e4630; --open: #4d2522; --skip: #262b33; }
+  :root[data-theme=dark] .cal, :root[data-theme=dark] .ol-pane { --covered: #1e4630; --open: #4d2522; --skip: #262b33; --declined: #4a3f10; }
   :root[data-theme=dark] .status-pill.covered { color: #9be3b8; } :root[data-theme=dark] .status-pill.open { color: #f6b1aa; }
   :root[data-theme=dark] .hours-col .hl { border-top-color: #262b33; }
   :root[data-theme=dark] .tes-chip.g { background: #1e4630; color: #9be3b8; }
@@ -320,7 +320,7 @@ darkQuery.addEventListener('change', applyTheme);
   .deals td.wrap { white-space: normal; min-width: 180px; }
   .pastdue { color: var(--err); }
   /* ---------- my calendar ---------- */
-  .cal { --covered: #c9f2d6; --covered-line: #12924a; --open: #fdd3cf; --open-line: #d92d20; --skip: #eef0f3; --skip-line: #98a2b3; --hour: 48px;
+  .cal { --covered: #c9f2d6; --covered-line: #12924a; --open: #fdd3cf; --open-line: #d92d20; --skip: #eef0f3; --skip-line: #98a2b3; --declined: #fff1a8; --declined-line: #d4a600; --hour: 48px;
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 18px clamp(12px, 2vw, 32px) 40px; height: calc(100vh - var(--chrome)); height: calc(100dvh - var(--chrome)); overflow: auto; }
   .cal.with-panel { grid-template-columns: minmax(0, 1fr) clamp(380px, 28vw, 540px); }
   .cal-panel { position: sticky; top: 0; align-self: start; max-height: calc(100vh - var(--chrome) - 36px); max-height: calc(100dvh - var(--chrome) - 36px); overflow: auto; }
@@ -332,6 +332,8 @@ darkQuery.addEventListener('change', applyTheme);
   .mobile-only { display: none; }
   .cal-main { min-width: 0; }
   .cal-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .cal-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  .cal-check input { width: auto; margin: 0; }
   .cal-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; border-left: 3px solid; }
   .week { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .week-row { display: grid; grid-template-columns: 52px repeat(var(--days), minmax(0, 1fr)); }
@@ -355,6 +357,7 @@ darkQuery.addEventListener('change', applyTheme);
   .ev.covered { background: var(--covered); border-color: var(--covered-line); }
   .ev.open { background: var(--open); border-color: var(--open-line); }
   .ev.skipped { background: var(--skip); border-color: var(--skip-line); color: var(--muted); }
+  .ev.declined { background: var(--declined); border-color: var(--declined-line); color: var(--ink); }
   .ev.sel { box-shadow: 0 0 0 2px var(--accent); z-index: 3; }
   .ev .t { font-size: 11px; opacity: .8; }
   .ev .s { font-weight: 600; overflow-wrap: anywhere; }
@@ -2309,8 +2312,8 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, create
 
 // A form in a dialog over the page, about 90% of the window; build(close) makes it. Only Cancel, Esc or
 // a save closes it, so a click outside doesn't lose what's been entered.
-function formDialog(build) {
-  const dlg = el('dialog', { class: 'popup ds-dialog', 'aria-label': `New ${dsMeta.label}` });
+function formDialog(build, label = `New ${dsMeta.label}`) {
+  const dlg = el('dialog', { class: 'popup ds-dialog', 'aria-label': label });
   dlg.addEventListener('close', () => dlg.remove());
   dlg.append(build(() => dlg.close()));
   document.body.append(dlg);
@@ -3934,6 +3937,9 @@ function exportTeam(d, cats, ranked, rankOf, all) {
 // day: the one day shown on phones (CAL_NARROW), in the week loaded.
 const cal = { week: null, day: null, data: null, sel: null, loading: 0, sources: null, source: null };
 const CAL_SOURCE = 'sfdesk.calSource';
+// Meetings you declined are hidden unless this is ticked (remembered on this device).
+const SHOW_DECLINED = 'sfdesk.showDeclined';
+try { cal.showDeclined = !!localStorage.getItem(SHOW_DECLINED); } catch { cal.showDeclined = false; }
 const evTime = (s) => new Date(String(s).replace(/\+0000$/, 'Z'));
 const hhmm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const evStatus = (e) => e.supports.length ? 'covered' : e.skipped ? 'skipped' : 'open';
@@ -3957,7 +3963,15 @@ function showCalendar() {
         el('span', { class: 'cal-legend' },
           el('span', {}, el('i', { style: 'background:var(--covered);border-color:var(--covered-line)' }), 'Has a Deal Support'),
           el('span', {}, el('i', { style: 'background:var(--open);border-color:var(--open-line)' }), 'No Deal Support'),
-          el('span', {}, el('i', { style: 'background:var(--skip);border-color:var(--skip-line)' }), 'Not needed')),
+          el('span', {}, el('i', { style: 'background:var(--skip);border-color:var(--skip-line)' }), 'Not needed'),
+          el('span', { id: 'calDeclinedKey', hidden: !cal.showDeclined }, el('i', { style: 'background:var(--declined);border-color:var(--declined-line)' }), 'Declined')),
+        el('label', { id: 'calDeclined', class: 'cal-check', title: 'Show Microsoft 365 meetings you declined, in yellow' },
+          el('input', { type: 'checkbox', checked: cal.showDeclined, onchange: (ev) => {
+            cal.showDeclined = ev.target.checked;
+            try { localStorage.setItem(SHOW_DECLINED, cal.showDeclined ? '1' : ''); } catch {}
+            document.getElementById('calDeclinedKey').hidden = !cal.showDeclined;
+            renderCalendar();
+          } }), 'Show declined'),
         el('span', { class: 'spacer', style: 'flex:1' }),
         el('button', { id: 'calMark', hidden: true, onclick: () => markOutlook(false),
           title: 'In Outlook, tag this week\'s meetings that have a Deal Support (green) or need none (gray)' }, 'Mark in Outlook'),
@@ -4174,13 +4188,19 @@ async function loadCalendar() {
 }
 
 function renderCalendar() {
-  const { events } = cal.data;
+  const fromGraph = cal.data.source && cal.data.source !== 'salesforce';
+  const declined = cal.data.events.filter((e) => e.declined).length;
+  const events = cal.showDeclined ? cal.data.events : cal.data.events.filter((e) => !e.declined);
+  if (cal.sel && !events.some((e) => e.id === cal.sel)) cal.sel = null;
+  const box = document.getElementById('calDeclined');
+  if (box) box.hidden = !fromGraph;
   const by = { covered: 0, open: 0, skipped: 0 };
   for (const e of events) by[evStatus(e)]++;
-  const fromGraph = cal.data.source && cal.data.source !== 'salesforce';
   document.getElementById('calSub').textContent = (cal.sourceNote && !fromGraph ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
-      (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed' +
+      (by.skipped ? ` · ${by.skipped} marked not needed` : '') +
+      (declined ? ` · ${plural(declined, 'declined meeting')} ${cal.showDeclined ? 'shown in yellow' : 'hidden'}` : '') +
+      ' · Click an event to see it, or right-click it to edit it, create a ' + dsMeta.label + ' or mark it not needed' +
       (dsMeta.canCreate ? `. Click free time to add a meeting with a ${dsMeta.label}` : '')
     : fromGraph ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here: pick Microsoft 365 in the calendar list to see them.');
@@ -4202,7 +4222,8 @@ function renderCalendar() {
   const hourPx = 48, height = (h1 - h0) * hourPx, today = todayStr();
   const evBox = (e) => {
     const st = evStatus(e);
-    const n = el('button', { class: `ev ${st}${cal.sel === e.id ? ' sel' : ''}`, title: `${e.title || e.subject} · ${STATUS_TEXT[st]}`,
+    const n = el('button', { class: `ev ${st}${e.declined ? ' declined' : ''}${cal.sel === e.id ? ' sel' : ''}`,
+      title: `${e.title || e.subject} · ${e.declined ? 'Declined · ' : ''}${STATUS_TEXT[st]}`,
       onclick: () => { if (!pressedLong()) selectEvent(e.id); },
       oncontextmenu: (ev) => { if (openEventMenu(e, ev.clientX, ev.clientY)) ev.preventDefault(); } },
       el('div', { class: 's' }, e.title || e.subject),
@@ -4528,8 +4549,8 @@ document.addEventListener('pointerup', () => { if (longPressHeld) { longPressHel
 document.addEventListener('pointercancel', () => { if (longPressHeld) { longPressHeld = false; longPressAt = Date.now(); } }, true);
 const pressedLong = () => longPressHeld || Date.now() - longPressAt < 600;
 
-// Right-click an event (or long-press it on a touch screen): create a Deal Support or mark that none is needed
-// (while it still needs time), or remove it.
+// Right-click an event (or long-press it on a touch screen): edit it, create a Deal Support or mark that none is
+// needed (while it still needs time), or remove it.
 function closeEventMenu() { document.getElementById('evMenu')?.remove(); }
 function openEventMenu(e, x, y) {
   closeEventMenu();
@@ -4546,7 +4567,10 @@ function openEventMenu(e, x, y) {
       renderCalendar();
     },
   });
-  if (e.graphId || e.sfEvent) items.push({ label: 'Remove this event', run: () => removeEvent(e) });
+  if (e.graphId || e.sfEvent) {
+    items.unshift({ label: 'Edit', run: () => editEventDialog(e) });
+    items.push({ label: 'Remove this event', run: () => removeEvent(e) });
+  }
   if (!items.length) return false;
   if (cal.sel !== e.id) {
     cal.sel = e.id;
@@ -4588,6 +4612,231 @@ async function removeEvent(e) {
   if (cal.sel === e.id) cal.sel = null;
   await loadCalendar();
 }
+// The event's details as Outlook offers them, to change and save: title, attendees, time, all day, repeat,
+// location, Teams meeting, show as, reminder, private, importance, categories, response options and description
+// for a Microsoft 365 meeting; title, time, all day, location, show as, reminder, private and description for a
+// Salesforce event. A meeting someone else organized keeps its details as they are (as in Outlook): you answer it
+// and change how it shows on your calendar. Only what changed is sent (see /calendar/events/:id/update).
+const SHOW_AS = {
+  graph: [['free', 'Free'], ['workingElsewhere', 'Working elsewhere'], ['tentative', 'Tentative'], ['busy', 'Busy'], ['oof', 'Away']],
+  salesforce: [['Free', 'Free'], ['Busy', 'Busy'], ['OutOfOffice', 'Out of Office']],
+};
+const REMINDERS = [[null, "Don't remind me"], [0, 'At time of event'], [5, '5 minutes before'], [15, '15 minutes before'], [30, '30 minutes before'],
+  [60, '1 hour before'], [120, '2 hours before'], [720, '12 hours before'], [1440, '1 day before'], [10080, '1 week before']];
+const RESPONSES = { accepted: 'You accepted', tentativelyAccepted: 'You tentatively accepted', declined: 'You declined', notResponded: "You haven't responded", none: "You haven't responded" };
+const personText = (p) => p.name && p.name !== p.email ? `${p.name} <${p.email}>` : p.email;
+// "Name <a@b.c>; d@e.f" -> [{ name, email }]; throws on anything that isn't an address.
+function parsePeople(text) {
+  return String(text || '').split(/[;\n]|,(?![^<]*>)/).map((s) => s.trim()).filter(Boolean).map((s) => {
+    const m = s.match(/^"?([^"<]*?)"?\s*<([^<>\s]+@[^<>\s]+\.[^<>\s]+)>$/) || s.match(/^()([^<>\s]+@[^<>\s]+\.[^<>\s]+)$/);
+    if (!m) throw new Error(`"${s}" isn't an email address.`);
+    return { name: m[1].trim(), email: m[2] };
+  });
+}
+
+async function editEventDialog(e) {
+  let d;
+  try { d = await api(`/calendar/events/${e.id}/details`, { method: 'POST', body: { graphId: e.graphId || '' } }); }
+  catch (err) { return toast(err.message, 'err'); }
+  const graph = d.kind === 'graph';
+  if (graph && !cal.sources?.graph?.canWrite) {
+    return toast('To change Microsoft 365 meetings, sign out of it and sign in again, accepting updates to your calendar.', 'err');
+  }
+  const own = d.isOrganizer;
+  const locked = !own; // details only the organizer can change
+  const dateOf = (iso) => localDay(new Date(iso));
+  const timeOf = (iso) => hhmm24(new Date(iso));
+  // All-day ends are exclusive in the calendars and shown inclusive, as Outlook does.
+  const endShown = d.allDay ? addDays(d.end, -1) : dateOf(d.end);
+  const startIso = d.allDay ? null : d.start;
+  const input = (props) => el('input', { type: 'text', ...props, disabled: locked && !props.free });
+
+  const subject = input({ value: d.subject, maxlength: 255, 'aria-label': 'Title' });
+  const allDay = el('input', { type: 'checkbox', checked: d.allDay, disabled: locked });
+  const sd = input({ type: 'date', value: d.allDay ? d.start : dateOf(d.start), 'aria-label': 'Start date' });
+  const st = input({ type: 'time', step: 300, value: d.allDay ? '09:00' : timeOf(d.start), 'aria-label': 'Start time' });
+  const ed = input({ type: 'date', value: endShown, 'aria-label': 'End date' });
+  const et = input({ type: 'time', step: 300, value: d.allDay ? '09:30' : timeOf(d.end), 'aria-label': 'End time' });
+  const location = input({ value: d.location, maxlength: 255, 'aria-label': 'Location' });
+  const pick = (opts, value, props = {}) => {
+    const s = el('select', props, opts.map(([v, label]) => el('option', { value: v == null ? '' : String(v) }, label)));
+    if (value != null && !opts.some(([v]) => String(v) === String(value))) s.append(el('option', { value: String(value) }, `${value} minutes before`));
+    s.value = value == null ? '' : String(value);
+    return s;
+  };
+  const showAs = pick(SHOW_AS[d.kind], d.showAs, { 'aria-label': 'Show as' });
+  const reminder = pick(REMINDERS, d.reminder, { 'aria-label': 'Reminder' });
+  const priv = el('input', { type: 'checkbox', checked: d.private });
+  const body = el('textarea', { rows: 10, disabled: locked, 'aria-label': 'Description', style: 'width:100%;box-sizing:border-box;font:inherit' });
+  body.value = d.body;
+  const bodyNote = el('div', { class: 'sub', style: 'margin:4px 0 0', hidden: true },
+    graph ? 'The description is saved as plain text, so its formatting (bold, links shown as text) is lost.' : '');
+  body.addEventListener('input', () => { bodyNote.hidden = !graph || body.value === d.body; });
+
+  const people = (type) => (d.attendees || []).filter((a) => a.type === type);
+  const required = el('textarea', { rows: 2, disabled: locked, 'aria-label': 'Required attendees', placeholder: 'Name <name@company.com>; …', style: 'width:100%;box-sizing:border-box;font:inherit' });
+  const optional = el('textarea', { rows: 1, disabled: locked, 'aria-label': 'Optional attendees', placeholder: 'Name <name@company.com>; …', style: 'width:100%;box-sizing:border-box;font:inherit' });
+  required.value = people('required').map(personText).join('; ');
+  optional.value = people('optional').map(personText).join('; ');
+  const teams = el('input', { type: 'checkbox', checked: !!d.teams, disabled: locked || d.teams });
+  const importance = pick([['low', 'Low'], ['normal', 'Normal'], ['high', 'High']], d.importance || 'normal', { disabled: locked, 'aria-label': 'Importance' });
+  const categories = el('input', { type: 'text', value: (d.categories || []).join(', '), 'aria-label': 'Categories', placeholder: 'Comma-separated' });
+  const askResponses = el('input', { type: 'checkbox', checked: d.responseRequested, disabled: locked });
+  const newTimes = el('input', { type: 'checkbox', checked: d.allowNewTimeProposals, disabled: locked });
+  const canRepeat = graph && own && d.type === 'singleInstance';
+  const repeat = pick([['never', 'Never'], ['daily', 'Every day'], ['weekdays', 'Every weekday'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['yearly', 'Every year']],
+    'never', { 'aria-label': 'Repeat' });
+  const until = el('input', { type: 'date', 'aria-label': 'Repeat until', hidden: true });
+  repeat.addEventListener('change', () => { until.hidden = repeat.value === 'never'; });
+
+  // Answering an invitation (meetings organized by someone else).
+  let answer = null;
+  const answerBtns = [['accept', 'Accept', 'accepted'], ['tentativelyAccept', 'Tentative', 'tentativelyAccepted'], ['decline', 'Decline', 'declined']]
+    .map(([action, label, state]) => {
+      const b = el('button', { type: 'button', class: d.response === state ? 'primary' : null, onclick: () => {
+        answer = answer === action ? null : action;
+        answerBtns.forEach((x) => x.classList.toggle('primary', x.dataset.action === (answer || '') || (!answer && x.dataset.state === d.response)));
+        answerNote.textContent = answer ? `${label} when you save.` : '';
+      } }, label);
+      b.dataset.action = action; b.dataset.state = state;
+      return b;
+    });
+  const answerNote = el('span', { class: 'sub', style: 'margin:0 0 0 8px' });
+  const sendAnswer = el('input', { type: 'checkbox', checked: d.responseRequested !== false });
+  const answerComment = el('input', { type: 'text', maxlength: 2000, placeholder: 'Add a message (optional)', 'aria-label': 'Message to the organizer' });
+
+  // Moving the start keeps the length, as in Outlook.
+  const times = () => {
+    if (allDay.checked) return { allDay: true, start: sd.value, end: addDays(ed.value, 1), ok: !!sd.value && !!ed.value && ed.value >= sd.value };
+    const s = new Date(`${sd.value}T${st.value}`), en = new Date(`${ed.value}T${et.value}`);
+    return { allDay: false, start: isNaN(s) ? '' : s.toISOString(), end: isNaN(en) ? '' : en.toISOString(), ok: !isNaN(s) && !isNaN(en) && en > s };
+  };
+  let was = times();
+  const shiftEnd = () => {
+    const now = times();
+    if (was.ok && now.start && was.start) {
+      if (now.allDay && was.allDay) {
+        const days = (localDate(was.end) - localDate(was.start)) / 86_400_000;
+        ed.value = addDays(now.start, days - 1);
+      } else if (!now.allDay && !was.allDay) {
+        const end = new Date(Date.parse(now.start) + (Date.parse(was.end) - Date.parse(was.start)));
+        ed.value = localDay(end); et.value = hhmm24(end);
+      }
+    }
+    was = times();
+  };
+  for (const n of [sd, st]) n.addEventListener('change', shiftEnd);
+  for (const n of [ed, et]) n.addEventListener('change', () => { was = times(); });
+  const timeRow = () => { st.hidden = et.hidden = allDay.checked; };
+  allDay.addEventListener('change', () => { timeRow(); was = times(); });
+  timeRow();
+
+  const field = (label, n, cls) => el('label', { class: cls || null }, el('span', {}, label), n);
+  const check = (n, label) => el('label', { class: 'cal-check' }, n, label);
+  const calName = graph ? `Microsoft 365${e.calendar ? ` (${e.calendar})` : ''}` : 'Salesforce event';
+  const attendeeCount = (d.attendees || []).length;
+
+  formDialog((close) => {
+    const save = el('button', { class: 'primary', type: 'button' }, 'Save');
+    const sec = el('section', {},
+      el('h3', {}, `Edit ${graph ? 'meeting' : 'event'}`, el('span', { class: 'spacer' }),
+        d.webLink ? el('a', { href: d.webLink, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Outlook ↗') : null,
+        !graph ? el('a', { href: `${me.instanceUrl}/${e.id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Salesforce ↗') : null),
+      el('div', { class: 'sub', style: 'margin:-4px 0 12px' }, [
+        calName,
+        graph && !own ? `Organized by ${d.organizer.name || d.organizer.email}. Only the organizer can change the meeting itself; you can answer it and change how it shows on your calendar.` : null,
+        graph && own && attendeeCount ? `Saving sends ${plural(attendeeCount, 'attendee')} an update.` : null,
+        e.recurring ? 'One occurrence of a recurring meeting: changes apply to this one only.' : null,
+        !graph && d.what ? `Related to ${d.what.name || d.what.id}.` : null,
+      ].filter(Boolean).join(' · ')),
+      graph && !own ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px' },
+        el('b', { style: 'margin-right:4px' }, RESPONSES[d.response] || RESPONSES.none), ...answerBtns, answerNote) : null,
+      graph && !own ? el('div', { class: 'grid', style: 'margin-bottom:12px' },
+        field('Message to the organizer', answerComment, 'wide'), check(sendAnswer, 'Send a response to the organizer')) : null,
+      el('div', { class: 'grid' },
+        field('Title', subject, 'wide'),
+        graph ? field('Required attendees', required, 'wide') : null,
+        graph ? field('Optional attendees', optional, 'wide') : null,
+        graph && d.rooms?.length ? el('div', { class: 'sub wide', style: 'grid-column:1/-1;margin:0' }, `Rooms: ${d.rooms.map((r) => r.name || r.email).join(', ')}`) : null,
+        !graph && d.invitees?.length ? el('div', { class: 'sub', style: 'grid-column:1/-1;margin:0' },
+          `Invitees (change these in Salesforce): ${d.invitees.map((r) => `${r.name || r.email}${r.status ? ` (${r.status})` : ''}`).join(', ')}`) : null,
+        el('div', { style: 'grid-column:1/-1;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end' },
+          field('Start', el('span', { style: 'display:flex;gap:6px' }, sd, st)),
+          field('End', el('span', { style: 'display:flex;gap:6px' }, ed, et)),
+          el('span', { style: 'padding-bottom:7px' }, check(allDay, 'All day'))),
+        canRepeat ? field('Repeat', el('span', { style: 'display:flex;gap:6px' }, repeat, until)) : null,
+        field('Location', location),
+        graph ? el('div', { style: 'display:flex;align-items:flex-end;padding-bottom:7px' }, check(teams, 'Teams meeting'),
+          d.joinUrl ? el('a', { href: d.joinUrl, target: '_blank', rel: 'noopener', style: 'margin-left:10px;font-size:13px' }, 'Join link') : null) : null,
+        field('Show as', showAs),
+        allDay.checked && !graph ? null : field('Reminder', reminder),
+        graph ? field('Importance', importance) : null,
+        graph ? field('Categories', categories) : null,
+        el('div', { style: 'display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;padding-bottom:7px;grid-column:1/-1' },
+          check(priv, 'Private'),
+          graph && own ? check(askResponses, 'Request responses') : null,
+          graph && own ? check(newTimes, 'Allow new time proposals') : null),
+        el('label', { class: 'wide' }, el('span', {}, 'Description'), body, bodyNote),
+      ),
+      el('div', { class: 'form-actions' }, el('button', { type: 'button', onclick: close }, 'Cancel'), save),
+    );
+
+    save.addEventListener('click', async () => {
+      const c = {};
+      try {
+        const t = times();
+        if (!locked) {
+          if (!subject.value.trim()) { subject.focus(); throw new Error('Give it a title.'); }
+          if (!t.ok) throw new Error(t.allDay ? 'The end date can\'t be before the start date.' : 'It has to end after it starts.');
+          if (subject.value.trim() !== d.subject) c.subject = subject.value.trim();
+          const sameTime = t.allDay === d.allDay && (t.allDay ? t.start === d.start && t.end === d.end
+            : Date.parse(t.start) === Date.parse(d.start) && Date.parse(t.end) === Date.parse(d.end));
+          if (!sameTime) Object.assign(c, { allDay: t.allDay, start: t.start, end: t.end, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+          if (location.value !== d.location) c.location = location.value;
+          if (body.value !== d.body) c.body = body.value;
+          if (graph) {
+            const list = [...parsePeople(required.value).map((p) => ({ ...p, type: 'required' })), ...parsePeople(optional.value).map((p) => ({ ...p, type: 'optional' }))];
+            const sig = (l) => l.map((p) => `${p.type}:${p.email.toLowerCase()}`).sort().join('|');
+            if (sig(list) !== sig(d.attendees || [])) c.attendees = list;
+            if (teams.checked && !d.teams) c.teams = true;
+            if (importance.value !== (d.importance || 'normal')) c.importance = importance.value;
+            if (askResponses.checked !== d.responseRequested) c.responseRequested = askResponses.checked;
+            if (newTimes.checked !== d.allowNewTimeProposals) c.allowNewTimeProposals = newTimes.checked;
+            if (canRepeat && repeat.value !== 'never') c.repeat = { type: repeat.value, until: until.value || null, startDate: sd.value };
+          }
+        }
+        if (showAs.value !== String(d.showAs)) c.showAs = showAs.value;
+        const rem = reminder.value === '' ? null : Number(reminder.value);
+        if (rem !== d.reminder && !(allDay.checked && !graph)) c.reminder = rem;
+        if (priv.checked !== d.private) c.private = priv.checked;
+        if (graph) {
+          const cats = categories.value.split(',').map((s) => s.trim()).filter(Boolean);
+          if (cats.join('\n') !== (d.categories || []).join('\n')) c.categories = cats;
+        }
+        const respond = answer ? { action: answer, comment: answerComment.value.trim(), send: sendAnswer.checked } : null;
+        if (!Object.keys(c).length && !respond) { close(); return toast('Nothing changed.'); }
+        save.disabled = true;
+        const final = times();
+        const r = await api(`/calendar/events/${e.id}/update`, { method: 'POST', body: {
+          graphId: e.graphId || '', changes: c, respond, copies: e.copies || [],
+          now: { subject: c.subject ?? d.subject, allDay: final.allDay, start: final.allDay ? null : final.start, date: sd.value } } });
+        close();
+        const moved = e.supports?.length && (final.allDay ? sd.value : dateOf(final.start)) !== e.date;
+        toast(`Saved "${c.subject ?? (e.title || e.subject)}"` +
+          (respond?.action === 'decline' && !cal.showDeclined ? '. Declined meetings are hidden unless Show declined is ticked' : '') +
+          (moved ? `. Its ${dsMeta.label} keeps its own date: edit it if that should change too` : ''), 'ok');
+        if (cal.sel === e.id && r.id) cal.sel = r.id;
+        await loadCalendar();
+      } catch (err) {
+        save.disabled = false;
+        toast(err.message, 'err');
+      }
+    });
+    return sec;
+  }, `Edit ${graph ? 'meeting' : 'event'}`);
+  (locked ? showAs : subject).focus();
+}
+
 document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('#evMenu')) closeEventMenu(); });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeEventMenu(); });
 window.addEventListener('scroll', closeEventMenu, true);
