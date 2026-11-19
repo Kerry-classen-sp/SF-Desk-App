@@ -55,10 +55,11 @@ calendar permission and troubleshooting.
   Click free time on the calendar to add a meeting with its Deal Support in one go: the meeting's title and time
   (starting on the half hour clicked, an hour long) above the same form. The meeting goes in the calendar shown:
   a Microsoft 365 meeting with no attendees (so no invitations go out), or a Salesforce event on the opportunity.
-  Right-click an event and choose **Remove this event** to take it off its calendar, after a confirmation that
-  says what happens: a Microsoft 365 meeting you organized is cancelled for its attendees, one you were invited
-  to just leaves your calendar (the organizer isn't told), only that occurrence of a recurring meeting goes, and
-  a Salesforce event goes to the Recycle Bin. Its Deal Supports stay
+  Right-click an event (long-press it on the iPad) and choose **Remove this event** to take it off its calendar,
+  after a confirmation that says what happens: a Microsoft 365 meeting you organized is cancelled for its
+  attendees, one you were invited to just leaves your calendar (the organizer isn't told), only that occurrence
+  of a recurring meeting goes, and a Salesforce event goes to the Recycle Bin. The Deal Supports shown on the
+  event are deleted with it (they go to Salesforce's Recycle Bin)
 - **Outlook add-in** (optional): a **Create Deal Support** button on Outlook meetings opens the same prefilled
   form beside the meeting. See [OUTLOOK.md](OUTLOOK.md) to set it up
 - Works from phone width up to wide desktops: on phones the tabs fold into a ☰ menu, Accounts shows the list

@@ -2757,9 +2757,14 @@ api.post('/calendar/new-event', wrap(async (req, res) => {
 }));
 
 // Remove an event from its calendar: a Microsoft 365 meeting (graphId, as Time Entry has it; for a meeting I
-// organized, Microsoft cancels it for the attendees) or one of my Salesforce events. Deal Supports stay.
+// organized, Microsoft cancels it for the attendees) or one of my Salesforce events. Then the Deal Supports
+// Time Entry shows on it (dealSupportIds) are deleted too, after the event, so a failed removal leaves them.
+// Replies { deleted, failed: [{ id, error }] }.
 api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
   const evId = eventId(req.params.id);
+  const dsIds = [...new Set((Array.isArray(req.body?.dealSupportIds) ? req.body.dealSupportIds : []).slice(0, 20).map((x) => sfId(x)))];
+  const meta = dsIds.length ? await dealSupportMeta(req) : null;
+  if (dsIds.length && !meta.canDelete) throw new HttpError(403, `Your Salesforce user can't delete ${meta.labelPlural}, so the event was left as it is.`);
   if (evId.startsWith('gr_')) {
     if (!graphCal) throw new HttpError(400, 'Microsoft 365 isn\'t set up.');
     await graphCal.deleteEvent(evId, String(req.body?.graphId || '').slice(0, 1000));
@@ -2771,7 +2776,16 @@ api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
     if (!ev) throw new HttpError(404, 'That event is not on your calendar.');
     await sf(req, 'DELETE', `/services/data/${API}/sobjects/Event/${evId}`);
   }
-  res.json({ ok: true });
+  let deleted = 0;
+  const failed = [];
+  for (const id of dsIds) {
+    try {
+      await sf(req, 'DELETE', `/services/data/${API}/sobjects/${meta.object}/${id}`);
+      store.unlinkDealSupport(orgOf(req), id);
+      deleted++;
+    } catch (err) { failed.push({ id, error: err.message }); }
+  }
+  res.json({ ok: true, deleted, failed });
 }));
 
 // Mark an event as needing no Deal Support (skip: true), or undo that.

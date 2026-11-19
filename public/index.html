@@ -349,7 +349,8 @@ darkQuery.addEventListener('change', applyTheme);
   .hours-col .now-line { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); z-index: 2; }
   .gutter .hl-label { position: absolute; right: 6px; font-size: 11px; color: var(--muted); transform: translateY(-50%); }
   .ev { position: absolute; border-radius: 4px; padding: 2px 5px; font-size: 12px; line-height: 1.3; overflow: hidden; cursor: pointer;
-    border-left: 3px solid; text-align: left; font-family: inherit; color: var(--ink); min-height: 18px; }
+    border-left: 3px solid; text-align: left; font-family: inherit; color: var(--ink); min-height: 18px;
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .allday .ev { position: static; }
   .ev.covered { background: var(--covered); border-color: var(--covered-line); }
   .ev.open { background: var(--open); border-color: var(--open-line); }
@@ -4202,10 +4203,11 @@ function renderCalendar() {
   const evBox = (e) => {
     const st = evStatus(e);
     const n = el('button', { class: `ev ${st}${cal.sel === e.id ? ' sel' : ''}`, title: `${e.title || e.subject} · ${STATUS_TEXT[st]}`,
-      onclick: () => selectEvent(e.id),
+      onclick: () => { if (!pressedLong()) selectEvent(e.id); },
       oncontextmenu: (ev) => { if (openEventMenu(e, ev.clientX, ev.clientY)) ev.preventDefault(); } },
       el('div', { class: 's' }, e.title || e.subject),
       e.allDay ? null : el('div', { class: 't' }, `${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`));
+    onLongPress(n, (x, y) => openEventMenu(e, x, y));
     return n;
   };
   const canAdd = dsMeta.canCreate;
@@ -4498,7 +4500,36 @@ const editPencil = (name, onclick) => el('td', { class: 'edit-cell' }, el('butto
 const evEdit = { editing: null };
 const editFromEvent = (r) => editDealSupport(r.Id, evEdit, renderEventPanel, loadCalendar);
 
-// Right-click an event: create a Deal Support or mark that none is needed (while it still needs time), or remove it.
+// On touch screens (the iPad, where a long press doesn't make a contextmenu event), holding a finger on n for
+// half a second runs fn(x, y) instead of a tap; a move or scroll cancels it. pressedLong() tells the click that
+// follows the press to do nothing (fn may have redrawn the calendar, so the click can land on a new element).
+const LONG_PRESS_MS = 500;
+let longPressAt = 0;
+function onLongPress(n, fn) {
+  let timer = null, x0 = 0, y0 = 0;
+  const stop = () => { clearTimeout(timer); timer = null; };
+  n.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'mouse') return;
+    x0 = ev.clientX; y0 = ev.clientY;
+    stop();
+    timer = setTimeout(() => {
+      timer = null;
+      longPressHeld = true;
+      fn(x0, y0);
+    }, LONG_PRESS_MS);
+  });
+  n.addEventListener('pointermove', (ev) => { if (timer && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) stop(); });
+  for (const t of ['pointerup', 'pointercancel', 'pointerleave']) n.addEventListener(t, stop);
+}
+// The click that comes with lifting the finger, however long it was held, lands just after its pointerup. The
+// menu opens under the finger, so its items ignore that click too.
+let longPressHeld = false;
+document.addEventListener('pointerup', () => { if (longPressHeld) { longPressHeld = false; longPressAt = Date.now(); } }, true);
+document.addEventListener('pointercancel', () => { if (longPressHeld) { longPressHeld = false; longPressAt = Date.now(); } }, true);
+const pressedLong = () => longPressHeld || Date.now() - longPressAt < 600;
+
+// Right-click an event (or long-press it on a touch screen): create a Deal Support or mark that none is needed
+// (while it still needs time), or remove it.
 function closeEventMenu() { document.getElementById('evMenu')?.remove(); }
 function openEventMenu(e, x, y) {
   closeEventMenu();
@@ -4525,6 +4556,7 @@ function openEventMenu(e, x, y) {
   }
   const menu = el('div', { id: 'evMenu', class: 'ctx-menu', role: 'menu', style: `left:${x}px;top:${y}px` },
     items.map((it) => el('button', { type: 'button', role: 'menuitem', onclick: async () => {
+      if (pressedLong()) return;
       closeEventMenu();
       try { await it.run(); } catch (err) { toast(err.message, 'err'); }
     } }, it.label)));
@@ -4535,7 +4567,7 @@ function openEventMenu(e, x, y) {
   return true;
 }
 // Removes the event from its calendar after saying what that does: a meeting you organized is cancelled for its
-// attendees, one you were invited to just leaves your calendar. Its Deal Supports stay in Salesforce.
+// attendees, one you were invited to just leaves your calendar. The Deal Supports shown on it are deleted too.
 async function removeEvent(e) {
   const name = `"${e.title || e.subject}"`;
   const what = e.sfEvent
@@ -4543,10 +4575,16 @@ async function removeEvent(e) {
     : `Remove ${name}${e.recurring ? ' (this occurrence only)' : ''} from your Microsoft 365 calendar?` +
       (e.attendeeCount && e.isOrganizer ? ` You organized it, so Microsoft sends ${plural(e.attendeeCount, 'attendee')} a cancellation.`
         : e.attendeeCount ? ' The organizer isn\'t told.' : '');
-  const kept = e.supports.length ? ` Its ${e.supports.length > 1 ? dsMeta.labelPlural : dsMeta.label} stay${e.supports.length > 1 ? '' : 's'} in Salesforce.` : '';
-  if (!confirm(what + kept)) return;
-  await api(`/calendar/events/${e.id}/remove`, { method: 'POST', body: { graphId: e.graphId || '' } });
-  toast(`Removed ${name}`, 'ok');
+  const ds = e.supports || [];
+  if (ds.length && !dsMeta.canDelete) {
+    return toast(`Your Salesforce user can't delete ${dsMeta.labelPlural}, so ${name} can't be removed with its ${ds.length > 1 ? dsMeta.labelPlural : dsMeta.label} here.`, 'err');
+  }
+  const names = ds.map((r) => dsNum(r.Name) || r.Id).join(', ');
+  const also = ds.length ? `\n\nThis also deletes its ${ds.length > 1 ? `${ds.length} ${dsMeta.labelPlural}` : dsMeta.label} in Salesforce (${names}).` : '';
+  if (!confirm(what + also)) return;
+  const r = await api(`/calendar/events/${e.id}/remove`, { method: 'POST', body: { graphId: e.graphId || '', dealSupportIds: ds.map((x) => x.Id) } });
+  if (r.failed?.length) toast(`Removed ${name}, but ${plural(r.failed.length, dsMeta.label, dsMeta.labelPlural)} couldn't be deleted: ${r.failed[0].error}`, 'err');
+  else toast(`Removed ${name}${r.deleted ? ` and ${plural(r.deleted, dsMeta.label, dsMeta.labelPlural)}` : ''}`, 'ok');
   if (cal.sel === e.id) cal.sel = null;
   await loadCalendar();
 }
