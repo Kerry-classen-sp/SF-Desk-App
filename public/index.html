@@ -4497,7 +4497,7 @@ const editPencil = (name, onclick) => el('td', { class: 'edit-cell' }, el('butto
 const evEdit = { editing: null };
 const editFromEvent = (r) => editDealSupport(r.Id, evEdit, renderEventPanel, loadCalendar);
 
-// Right-click an event that still needs time: create a Deal Support, or mark that none is needed.
+// Right-click an event: create a Deal Support or mark that none is needed (while it still needs time), or remove it.
 function closeEventMenu() { document.getElementById('evMenu')?.remove(); }
 function openEventMenu(e, x, y) {
   closeEventMenu();
@@ -4514,6 +4514,7 @@ function openEventMenu(e, x, y) {
       renderCalendar();
     },
   });
+  if (e.graphId || e.sfEvent) items.push({ label: 'Remove this event', run: () => removeEvent(e) });
   if (!items.length) return false;
   if (cal.sel !== e.id) {
     cal.sel = e.id;
@@ -4531,6 +4532,22 @@ function openEventMenu(e, x, y) {
   if (r.right > window.innerWidth - 8) menu.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
   if (r.bottom > window.innerHeight - 8) menu.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
   return true;
+}
+// Removes the event from its calendar after saying what that does: a meeting you organized is cancelled for its
+// attendees, one you were invited to just leaves your calendar. Its Deal Supports stay in Salesforce.
+async function removeEvent(e) {
+  const name = `"${e.title || e.subject}"`;
+  const what = e.sfEvent
+    ? `Delete the Salesforce event ${name}? It goes to Salesforce's Recycle Bin.`
+    : `Remove ${name}${e.recurring ? ' (this occurrence only)' : ''} from your Microsoft 365 calendar?` +
+      (e.attendeeCount && e.isOrganizer ? ` You organized it, so Microsoft sends ${plural(e.attendeeCount, 'attendee')} a cancellation.`
+        : e.attendeeCount ? ' The organizer isn\'t told.' : '');
+  const kept = e.supports.length ? ` Its ${e.supports.length > 1 ? dsMeta.labelPlural : dsMeta.label} stay${e.supports.length > 1 ? '' : 's'} in Salesforce.` : '';
+  if (!confirm(what + kept)) return;
+  await api(`/calendar/events/${e.id}/remove`, { method: 'POST', body: { graphId: e.graphId || '' } });
+  toast(`Removed ${name}`, 'ok');
+  if (cal.sel === e.id) cal.sel = null;
+  await loadCalendar();
 }
 document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('#evMenu')) closeEventMenu(); });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeEventMenu(); });

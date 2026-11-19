@@ -141,6 +141,13 @@ Build 17 (November 18, 2026):
   added to the calendar shown: in Microsoft 365 with no attendees, so no invitations are sent, or as a
   Salesforce event on the opportunity. It then shows on the calendar as covered by its Deal Support.
 
+Build 18 (November 18, 2026):
+
+- **Remove this event:** right-click an event on Time Entry to remove it from its calendar. SF Desk first says
+  what that does: a Microsoft 365 meeting you organized is cancelled for its attendees, one you were invited to
+  just leaves your calendar, only the occurrence clicked of a recurring meeting goes, and a Salesforce event
+  goes to the Recycle Bin. Deal Supports for it stay in Salesforce.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
