@@ -5,8 +5,9 @@
 //   native.fetch(requestJson, callback(responseJson))                          (URLSession)
 //   native.refresh(callback(resultJson))      renews the Salesforce access token (SalesforceAuth.swift)
 //   native.signOut()                          forgets the saved login
-//   native.calendars(callback(json)), native.events(fromIso, toIso, idsJson, callback(json))   (EventKit)
-//   native.version, native.hasCalendar
+//   native.sleep(ms, callback())
+//   native.graphLoad() -> json or null, native.graphSave(json or null)   the Microsoft 365 sign-in (Keychain)
+//   native.version
 
 globalThis.console = {
   log: (...a) => native.log('info', a.map(String).join(' ')),
@@ -79,24 +80,18 @@ async function refreshAccess(req) {
   if (r.instanceUrl) req.session.sf.instance_url = r.instanceUrl;
 }
 
-// The phone's calendars (EventKit), with Ids like the Mac's: a hash of the event and its start.
-const iosCalendar = {
-  async calendars() {
-    const r = await viaNative(native.calendars);
-    if (r.error) throw Object.assign(new Error(r.message), { status: r.error === 'denied' ? 403 : 502 });
-    return r;
-  },
-  async events(fromIso, toIso, ids) {
-    const r = await viaNative(native.events, fromIso, toIso, JSON.stringify(ids));
-    if (r.error) throw Object.assign(new Error(r.message), { status: r.error === 'denied' ? 403 : 502 });
-    return r.filter((e) => !e.canceled).map((e) => ({ ...e, id: 'ios_' + sha1Hex(`${e.uid}|${e.start}`).slice(0, 24) }));
-  },
-};
+// Microsoft 365, with SailPoint's SF Desk app registration (as the desktop's .env.example).
+const graphCal = graphCalendar({
+  clientId: '7fa312ab-5012-408c-9ab8-f6ca82489fbb', tenant: '9c848b2a-49ba-4c39-9749-118d06717a84', markEnabled: true,
+  fetch: nativeFetch,
+  sleep: (ms) => new Promise((resolve) => native.sleep(ms, resolve)),
+  load: () => { const json = native.graphLoad(); return json ? JSON.parse(json) : null; },
+  save: (saved) => native.graphSave(saved ? JSON.stringify(saved) : null),
+});
 
 const router = createApi({
   router: miniRouter(), store: createStore(nativeDb()), refreshAccess, fetch: nativeFetch,
-  version: native.version, platform: 'ios', isMac: false, useCli: false,
-  localCal: native.hasCalendar ? iosCalendar : null, localCalName: 'iPhone calendar',
+  version: native.version, platform: 'ios', isMac: false, useCli: false, graphCal,
   signOut: () => native.signOut(),
 });
 

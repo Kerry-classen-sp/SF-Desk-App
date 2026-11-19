@@ -9,15 +9,15 @@ final class CoreRuntime {
   private let db: SQLiteStore
   private let refresher: (@escaping (Result<SalesforceAuth.Token, Error>) -> Void) -> Void
   private let signOutHandler: () -> Void
-  private let calendar: CalendarReader?
   private let session = URLSession(configuration: .ephemeral)
+  // The Microsoft 365 sign-in (graphCalendar.js's saved refresh token and account), in the Keychain.
+  private static let graphLogin = "Microsoft 365 sign-in"
 
-  init(bundle: URL, db: SQLiteStore, calendar: CalendarReader?, version: String,
+  init(bundle: URL, db: SQLiteStore, version: String,
        refresh: @escaping (@escaping (Result<SalesforceAuth.Token, Error>) -> Void) -> Void, signOut: @escaping () -> Void) throws {
     self.db = db
     self.refresher = refresh
     self.signOutHandler = signOut
-    self.calendar = calendar
     let source = try String(contentsOf: bundle, encoding: .utf8)
     var failure: String?
     queue.sync {
@@ -44,7 +44,6 @@ final class CoreRuntime {
   private func makeNative(version: String) -> JSValue {
     let native = JSValue(newObjectIn: context)!
     native.setObject(version, forKeyedSubscript: "version" as NSString)
-    native.setObject(calendar != nil, forKeyedSubscript: "hasCalendar" as NSString)
 
     let log: @convention(block) (String, String) -> Void = { level, text in
       #if !DEBUG
@@ -101,16 +100,21 @@ final class CoreRuntime {
     let signOut: @convention(block) () -> Void = { [weak self] in DispatchQueue.main.async { self?.signOutHandler() } }
     native.setObject(signOut, forKeyedSubscript: "signOut" as NSString)
 
-    let calendars: @convention(block) (JSValue) -> Void = { [weak self] callback in
-      DispatchQueue.main.async { self?.calendar?.calendars { self?.reply(callback, $0) } }
+    let sleep: @convention(block) (Double, JSValue) -> Void = { [weak self] ms, callback in
+      self?.queue.asyncAfter(deadline: .now() + ms / 1000) { callback.call(withArguments: []) }
     }
-    native.setObject(calendars, forKeyedSubscript: "calendars" as NSString)
+    native.setObject(sleep, forKeyedSubscript: "sleep" as NSString)
 
-    let events: @convention(block) (String, String, String, JSValue) -> Void = { [weak self] from, to, idsJson, callback in
-      let ids = (try? JSONSerialization.jsonObject(with: Data(idsJson.utf8))) as? [String] ?? []
-      DispatchQueue.main.async { self?.calendar?.events(from: from, to: to, ids: ids) { self?.reply(callback, $0) } }
+    let graphLoad: @convention(block) () -> String? = {
+      Keychain.load(Self.graphLogin).flatMap { String(data: $0, encoding: .utf8) }
     }
-    native.setObject(events, forKeyedSubscript: "events" as NSString)
+    native.setObject(graphLoad, forKeyedSubscript: "graphLoad" as NSString)
+
+    let graphSave: @convention(block) (JSValue) -> Void = { value in
+      if value.isString, let text = value.toString() { Keychain.save(Data(text.utf8), for: Self.graphLogin) }
+      else { Keychain.delete(Self.graphLogin) }
+    }
+    native.setObject(graphSave, forKeyedSubscript: "graphSave" as NSString)
     return native
   }
 

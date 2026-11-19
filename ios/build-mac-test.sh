@@ -27,8 +27,6 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>SFDeskLoginURL</key><string>https://sailpoint.my.salesforce.com</string>
-  <key>NSCalendarsFullAccessUsageDescription</key><string>SF Desk shows your meetings in Time Entry so you can log them as Deal Supports.</string>
-  <key>NSCalendarsUsageDescription</key><string>SF Desk shows your meetings in Time Entry so you can log them as Deal Supports.</string>
 </dict></plist>
 EOF
 

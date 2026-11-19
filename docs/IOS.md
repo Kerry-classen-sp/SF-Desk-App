@@ -16,16 +16,18 @@ The same app as the Mac's, without the Outlook add-in. It's for iPad only (`TARG
   | File | What it does |
   | --- | --- |
   | `SalesforceAuth.swift` | Sign-in and token refresh |
-  | `Keychain.swift` | Keeps the saved login |
+  | `Keychain.swift` | Keeps the saved Salesforce and Microsoft 365 sign-ins |
   | `SQLiteStore.swift` | The local database (offline copies, hidden records, event marks, filters) |
-  | `CoreRuntime.swift` | Salesforce calls through URLSession, which a page can't make itself |
-  | `CalendarReader.swift` | The phone's calendars, through EventKit |
+  | `CoreRuntime.swift` | Salesforce and Microsoft Graph calls through URLSession, which a page can't make itself |
 
 - **Salesforce sign-in:** uses the Salesforce CLI's connected app (`PlatformCLI`, which every org has), with
   PKCE. The org's login page (`SFDeskLoginURL` in `ios/SFDesk/Info.plist`, the My Domain) opens in the app and
   continues to SSO. The refresh token stays in the Keychain. **Disconnect** revokes it.
-- **Calendar:** Time Entry reads the Exchange account added under Settings > Calendar > Accounts on the
-  device. Other calendars (iCloud, Google...) aren't listed or read.
+- **Calendar:** Time Entry reads your Microsoft 365 calendar through Microsoft Graph (`src/graphCalendar.js`,
+  bundled into the core), as on the Mac, with SailPoint's SF Desk app registration (set in `Host/host.js`).
+  **Sign in to Microsoft 365...** opens Microsoft's page in a sheet with a fresh session, and `WebHost.swift`
+  enters the code; the sign-in is kept in the Keychain. Calendars on the device itself aren't read, so the
+  app doesn't ask for calendar access.
 
 ## Build for an iPad
 

@@ -24,7 +24,7 @@ const token = () => {
 const db = new DatabaseSync(path.join(out, 'sandbox.db'));
 const stmts = new Map();
 const native = {
-  version: 'sandbox', hasCalendar: false,
+  version: 'sandbox',
   log: (level, text) => console.log(`[core ${level}]`, text),
   sql(op, sql, paramsJson) {
     try {
@@ -45,8 +45,9 @@ const native = {
   },
   refresh(cb) { cb(JSON.stringify(token())); },
   signOut() {},
-  calendars(cb) { cb('[]'); },
-  events(a, b, c, cb) { cb('[]'); },
+  sleep(ms, cb) { setTimeout(cb, ms); },
+  graphLoad: () => null,
+  graphSave() {},
 };
 
 const sandbox = vm.createContext({ native });

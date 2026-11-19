@@ -5,28 +5,25 @@ only sees and changes what your own Salesforce user can. Nothing is hosted anywh
 
 ## The SF Desk app (recommended)
 
-**SF Desk.app** has everything inside it: the SF Desk server, Node.js, its dependencies and the calendar
-reader. There's nothing else to install, no Terminal window to keep open, and macOS asks SF Desk itself
-for calendar access.
+**SF Desk.app** has everything inside it: the SF Desk server, Node.js and its dependencies. There's
+nothing else to install and no Terminal window to keep open.
 
-1. **Set up your calendar first.** In **System Settings > Internet Accounts**, add your SailPoint
-   Exchange account if it isn't there (**Add Account... > Microsoft Exchange**, sign in with your
-   SailPoint email) and turn on **Calendars**. Check that this week's meetings show in Calendar.app.
-2. **Get `SF-Desk.dmg`** from Kerry Classen and double-click it. In the window that opens, drag **SF Desk**
+1. **Get `SF-Desk.dmg`** from Kerry Classen and double-click it. In the window that opens, drag **SF Desk**
    onto the **Applications** folder. The window also has short install instructions ("Read Me First"), the
    Outlook add-in guide and the full SF Desk guide. Then eject the disk image. (`SF-Desk-app.zip` has just the app:
    double-click it and drag **SF Desk** into Applications.)
-3. **Open it once with Open Anyway.** The app isn't signed by Apple, so the first time macOS says it
+2. **Open it once with Open Anyway.** The app isn't signed by Apple, so the first time macOS says it
    can't verify the developer. Click **Done**, open **System Settings > Privacy & Security**, scroll
    down, click **Open Anyway** next to "SF Desk" and confirm with your password. (On some macOS versions
    right-click > **Open** > **Open** works too.) You only do this once per new version.
-4. **Follow its prompts.** The first time, SF Desk:
+3. **Follow its prompts.** The first time, SF Desk:
    - copies your settings and data from an earlier install (`~/SF-Desk`) or Git checkout, if you have one;
    - offers to install the Salesforce CLI if it can't find one: with Homebrew (`brew install sf`) if you
      have it, else Salesforce's own download (no admin rights needed);
    - opens your browser to sign in to `sailpoint.my.salesforce.com` with SSO, if the CLI isn't signed in.
-5. **Click Connect**, then open **Time Entry**. When macOS asks whether **SF Desk** may access your
-   calendars, choose **Allow Full Access**.
+4. **Click Connect**, then open **Time Entry** and choose **Sign in to Microsoft 365...** in the list at
+   the top. Microsoft's sign-in opens in a sheet on the SF Desk window with the code already entered;
+   pick or type your SailPoint account. See [Your Microsoft 365 calendar](#your-microsoft-365-calendar).
 
 Keep SF Desk in the Dock (right-click its icon > **Options > Keep in Dock**). Closing the window keeps it
 running in the background, so the Outlook add-in keeps working; click the Dock icon to bring it back, and
@@ -47,10 +44,6 @@ add-in > Add from File...** and pick `sf-desk-outlook.xml`. See [OUTLOOK.md](OUT
 **Uninstalling:** quit SF Desk, delete it from Applications, and delete
 `~/Library/Application Support/SF Desk` and `~/Library/Logs/SF Desk`.
 
-If calendar access goes missing after updating to a new build, open **System Settings > Privacy &
-Security > Calendars**, remove SF Desk with the minus button (or turn it off and on), and open Time Entry
-again. macOS ties the permission to each unsigned build.
-
 ### Building the app
 
 To build everything that's handed out (the Mac app and disk image, the Mac Terminal installer and both
@@ -68,7 +61,7 @@ built anywhere npm and nodejs.org are reachable. So:
 1. Anywhere (e.g. in the cloud): `scripts/build-mac-package.sh` writes `dist/SF-Desk-mac.zip`. Only
    redo this when `package-lock.json` changes.
 2. On a Mac: `scripts/build-mac-app.sh --from path/to/SF-Desk-mac.zip`. It takes SF Desk itself from the
-   checkout's current commit, compiles the app and the calendar reader for Apple Silicon and Intel, puts the server, its
+   checkout's current commit, compiles the app for Apple Silicon and Intel, puts the server, its
    `node_modules` and Node.js inside, signs it ad hoc, and writes `dist/SF Desk.app`, `dist/SF-Desk-app.zip`
    and `dist/SF-Desk.dmg`. The disk image, the file to hand out, holds the app, a shortcut to Applications
    and, as web pages made by `scripts/md-to-html.mjs`, a short install guide (`docs/MAC-READ-ME-FIRST.md`),
@@ -84,23 +77,18 @@ Get `SF-Desk-mac.zip` from Kerry Classen. It bundles everything SF Desk needs on
 (Node.js and all dependencies), so there's no npm, Git or Node install, and Cisco Umbrella's npm
 block doesn't matter.
 
-1. **Set up your calendar first.** In **System Settings > Internet Accounts**, add your SailPoint
-   Exchange account if it isn't there (**Add Account... > Microsoft Exchange**, sign in with your
-   SailPoint email) and turn on **Calendars**. Check that this week's meetings show in Calendar.app.
-2. **Unzip the download** and double-click **Install SF Desk.command**. If macOS says it can't verify
+1. **Unzip the download** and double-click **Install SF Desk.command**. If macOS says it can't verify
    the developer, click **Done**, then go to **System Settings > Privacy & Security**, scroll down,
    click **Open Anyway** next to the file and confirm. (Right-click > **Open** also works on some
    macOS versions.)
-3. **Follow the Terminal window.** The installer:
+2. **Follow the Terminal window.** The installer:
    - copies SF Desk into `~/SF-Desk`;
-   - asks to install the Xcode Command Line Tools if they're missing (click **Install**);
    - installs the Salesforce CLI if you don't have it: with Homebrew (`brew install sf`) if you have it,
      else downloaded from Salesforce into `~/SF-Desk/sf-cli` (no admin rights needed);
    - opens your browser to sign in to `sailpoint.my.salesforce.com` with SSO, once;
-   - offers to open Internet Accounts so you can check the calendar;
    - puts **Start SF Desk** on your Desktop and starts SF Desk.
-4. **Allow calendar access.** When macOS asks whether Terminal may access your calendars, choose
-   **Allow Full Access**. SF Desk opens at http://localhost:3000; click **Connect**.
+3. **Click Connect.** SF Desk opens at http://localhost:3000. Then sign in to Microsoft 365 in **Time
+   Entry** (see [Your Microsoft 365 calendar](#your-microsoft-365-calendar)).
 
 From then on, double-click **Start SF Desk** on your Desktop. Keep its Terminal window open while you
 use SF Desk, and close it to stop SF Desk. To update, unzip a newer download and run the installer
@@ -137,11 +125,9 @@ Use this if you'd rather work from a Git checkout, for example to change the cod
 | Git (or GitHub Desktop) and read access to `Kerry-classen-sp/SF-Desk-App` | To get the code; ask Kerry Classen for access | `git --version` |
 | Salesforce CLI (`sf`) | SF Desk borrows its login, because we can't create our own Salesforce app | `sf --version` |
 | A Salesforce login to `sailpoint.my.salesforce.com` with API access | Your normal SSO login is fine | |
-| Your SailPoint Exchange account added to the Mac and syncing in Calendar.app | The **Time Entry** tab reads your meetings from it | Your meetings show in Calendar.app |
-| Xcode Command Line Tools | Builds the small calendar reader; without them Time Entry can't read the calendar | `xcode-select -p` |
+| Your SailPoint Microsoft 365 account | The **Time Entry** tab reads your meetings from it | You can sign in to Outlook on the web |
 
-Run every command below in **Terminal.app** (Applications > Utilities > Terminal). Calendar
-permission is granted to the app that starts SF Desk, and Terminal is the one that's known to work.
+Run every command below in **Terminal.app** (Applications > Utilities > Terminal).
 
 ### 1. Install the tools
 
@@ -166,30 +152,7 @@ Don't use `npm install -g @salesforce/cli`. Cisco Umbrella on SailPoint Macs blo
 sf --version
 ```
 
-#### Xcode Command Line Tools
-
-```bash
-xcode-select --install
-```
-
-Accept the dialog and wait for it to finish. If it says they're already installed, you're set.
-
-### 2. Make sure your SailPoint calendar is on the Mac
-
-SF Desk doesn't talk to Outlook or Microsoft 365 directly. It reads the calendars macOS already
-syncs, so your SailPoint Exchange account has to be set up in macOS, not just in the Outlook app.
-
-1. Open **System Settings > Internet Accounts**.
-2. If there's no **Exchange** account for your `@sailpoint.com` address, click **Add Account... >
-   Microsoft Exchange**, enter your SailPoint email, choose **Sign In**, and finish the Microsoft SSO
-   and MFA prompts.
-3. Open the Exchange account and make sure **Calendars** is turned on.
-4. Open **Calendar.app** and check that this week's meetings appear under the Exchange account in
-   the sidebar. Give a new account a few minutes to sync the first time.
-
-If your meetings aren't in Calendar.app, SF Desk can't see them either. Fix this step before going on.
-
-### 3. Sign in to Salesforce with the CLI
+### 2. Sign in to Salesforce with the CLI
 
 ```bash
 sf org login web --instance-url https://sailpoint.my.salesforce.com --set-default
@@ -205,9 +168,9 @@ sf org display
 ```
 
 It should show `sailpoint.my.salesforce.com` as the Instance Url and your username. If you named the
-login with `--alias`, you'll set that alias in `.env` in step 5.
+login with `--alias`, you'll set that alias in `.env` in step 4.
 
-### 4. Get the code and its dependencies
+### 3. Get the code and its dependencies
 
 ```bash
 cd ~/Documents
@@ -246,7 +209,7 @@ node -e "require('better-sqlite3'); console.log('ok')"
 That branch matches the current `package-lock.json`. If a future update changes `package-lock.json`,
 the branch needs rebuilding before this step will work again; ask in the SF-Desk project.
 
-### 5. Configure
+### 4. Configure
 
 ```bash
 cp .env.example .env
@@ -255,12 +218,12 @@ cp .env.example .env
 For a SailPoint install you normally don't change anything. Leave `SF_CLIENT_ID` empty so SF Desk uses
 your CLI login. Only set these if they apply:
 
-- `SF_TARGET_ORG=` the alias or username, if you used `--alias` in step 3 or have more than one org
+- `SF_TARGET_ORG=` the alias or username, if you used `--alias` in step 2 or have more than one org
   logged in to the CLI.
 - `SF_CLI_PATH=` the full path from `which sf`, if SF Desk says it can't find the Salesforce CLI.
 - `PORT=` another port, if something else already uses 3000.
 
-### 6. Start SF Desk
+### 5. Start SF Desk
 
 From Terminal.app, in the project folder:
 
@@ -271,52 +234,48 @@ npm start
 You'll see `SF Desk running at http://localhost:3000`. Open that address in your browser and click
 **Connect**. Keep the Terminal window open while you use the app; press **Ctrl+C** in it to stop SF Desk.
 
-#### Allow calendar access
+## Your Microsoft 365 calendar
 
-The first time you open **Time Entry**, SF Desk builds its calendar reader (`mac/calendar.swift`,
-about a minute) and macOS asks whether **Terminal** may access your calendars. Choose **Allow Full
-Access**. Then pick your Exchange calendar from the list at the top of the tab if it isn't already
-selected.
+**Time Entry** reads your meetings from Microsoft 365 through Microsoft Graph, the same on the Mac app, a
+Terminal or manual install, Windows and the iPad. It works with any Outlook (new, classic, on the web) and
+doesn't need the calendar set up on the computer. The other choice in its list is **Salesforce events**.
 
-If you dismissed the prompt or clicked Don't Allow: open **System Settings > Privacy & Security >
-Calendars**, turn on **Terminal**, then stop SF Desk with Ctrl+C, run `npm start` again and reload the page.
+1. Open **Time Entry** and choose **Sign in to Microsoft 365...** in the list at the top.
+2. SF Desk shows a code. In the Mac and iPad apps, Microsoft's sign-in page opens in a sheet with the code
+   already entered; in a browser it opens in a new tab with the code copied, so paste it.
+3. Pick or type your `@sailpoint.com` account and finish SSO and MFA. The sheet starts with no saved
+   sign-ins, so a personal Microsoft account signed in elsewhere isn't picked by mistake.
+4. Accept reading and updating your calendar. SF Desk only adds the Deal Support and No DS Required
+   categories to meetings (see [OUTLOOK.md](OUTLOOK.md)).
+
+SF Desk then shows your main calendar. The sign-in is kept (`data/graph-token.json` on a computer, the
+Keychain on the iPad) until you choose **Sign out of Microsoft 365** in the same list.
 
 ## Windows
 
 SF Desk for Windows comes as `SF-Desk-windows.zip`, one download for Intel, AMD and ARM (Snapdragon) PCs: the
 installer puts in the Node.js built for the PC. You need Windows 10 or 11 (64-bit), Microsoft Edge (built
-in) and **classic Outlook** signed in to your SailPoint mailbox; the new Outlook doesn't let other apps read its
-calendar, so turn off the **New Outlook** toggle if it's on.
+in) and your SailPoint Microsoft 365 account for the calendar.
 
 1. Right-click the zip > **Extract All...**, open the extracted folder and double-click **Install SF Desk**.
    If SmartScreen warns, click **More info > Run anyway**. It installs into `%LOCALAPPDATA%\Programs\SF Desk`
    (no admin rights) and adds SF Desk to the Start menu and the Desktop.
 2. SF Desk starts. The first time it offers to download the Salesforce CLI (unless one is installed) and opens
    your browser to sign in to `sailpoint.my.salesforce.com`.
-3. Click **Connect**, open **Time Entry** and pick a calendar at the top. With the **new Outlook**, choose
-   **Sign in to read your Microsoft 365 calendar**: SF Desk shows a code and opens microsoft.com/devicelogin,
-   where you enter it and sign in with your work account. It reads your calendar through Microsoft Graph with
-   Microsoft's own "Microsoft Graph Command Line Tools" sign-in (Calendars.Read), keeps the sign-in in
-   `%LOCALAPPDATA%\SF Desk\data\graph-token.json`, and the same list has **Sign out of Microsoft 365**. If your
-   organization requires an administrator to approve that sign-in, SF Desk says so. With classic Outlook, pick
-   your mailbox's **Calendar**. If Outlook asks
-   whether to allow a program to access its data, choose **Allow** (this happens when Windows doesn't report
-   an up-to-date antivirus).
+3. Click **Connect**, open **Time Entry** and sign in to Microsoft 365 (see
+   [Your Microsoft 365 calendar](#your-microsoft-365-calendar)). The sign-in is kept in
+   `%LOCALAPPDATA%\SF Desk\data\graph-token.json`.
 
 Closing the window keeps SF Desk running; the SF Desk icon by the clock reopens it and has **Settings...**
 (Display Mode: Light, Dark or System Auto), **Restart Server**, **Show Server Log**, **Show Data Folder** and
 **Quit SF Desk**. The `.env` settings file and data are in `%LOCALAPPDATA%\SF Desk`; running **Install SF Desk**
 from a newer zip updates the app and keeps them.
 
-If Time Entry says PowerShell's policy stops SF Desk from reading Outlook, your PC only allows signed scripts;
-ask IT, or use Salesforce events. If it says Outlook and SF Desk run with different permissions, start Outlook
-normally (not as administrator).
-
 ### Building the Windows download
 
 Anywhere npm and nodejs.org are reachable (e.g. in the cloud), `scripts/build-windows-package.sh` writes
-`dist/SF-Desk-windows.zip`, with Node.js for both x64 and arm64. Running from a Git checkout on Windows also works: `npm start` uses Outlook the
-same way, with `sf` from your PATH.
+`dist/SF-Desk-windows.zip`, with Node.js for both x64 and arm64. Running from a Git checkout on Windows also works: `npm start`, with `sf` from
+your PATH.
 
 ## Optional: the Outlook add-in
 
@@ -333,8 +292,8 @@ installer, or your checkout for a manual one.
 - `data/sf-desk.db` holds a local copy of the accounts and opportunities you've loaded, your hidden
   records, and which meetings you've logged or marked as not needing a Deal Support. Deleting the
   `data` folder resets all of that; it's rebuilt as you use the app.
-- `data/bin/sfdesk-calendar` is the compiled calendar reader (not used by the Mac app, which has its own).
-  Delete it to force a rebuild.
+- `data/graph-token.json` keeps your Microsoft 365 sign-in (a refresh token, readable only by you).
+  **Sign out of Microsoft 365** in Time Entry deletes it.
 - Your Salesforce token is only held in memory and never written to disk. Every edit goes straight to
   Salesforce when you click **Save** or **Add**.
 - The server only listens on `localhost`, so nobody else on the network can reach it.
@@ -347,34 +306,24 @@ git pull
 ```
 
 Then stop SF Desk with Ctrl+C and run `npm start` again. If the pull changed `package-lock.json`,
-redo step 4's dependency step first.
+redo step 3's dependency step first.
 
 ## Troubleshooting
 
-### Time Entry lists no calendars, or only "Salesforce events"
+### Time Entry shows only "Salesforce events"
 
-With the SF Desk app, check step 1, then that **SF Desk** is on in **System Settings > Privacy &
-Security > Calendars** (quit and reopen the app after turning it on). Steps 2 to 4 are for starting SF
-Desk from Terminal or a checkout.
-
-Work through these in order:
-
-1. **Is the Exchange account in Calendar.app?** If your meetings don't show there, go back to step 2.
-   Check that **Calendars** is on for the account in Internet Accounts.
-2. **Did you start SF Desk from Terminal.app?** (The **Start SF Desk** launcher does.) macOS gives calendar permission to whichever app ran
-   `npm start`. Started from VS Code, iTerm, the Claude app or another tool, the permission prompt may
-   never appear, or may apply to that app instead. Stop SF Desk, start it from Terminal.app, and reload.
-3. **Is Terminal allowed?** In **System Settings > Privacy & Security > Calendars**, Terminal should be
-   on. If it's off, turn it on and restart SF Desk. If Terminal isn't listed at all, starting SF Desk
-   from Terminal.app and opening Time Entry makes macOS ask.
-4. **Did the calendar reader build?** Look in the Terminal window running SF Desk for
-   `Couldn't build the calendar helper`. That means the Xcode Command Line Tools are missing or
-   broken: run `xcode-select --install`, delete `data/bin`, restart SF Desk.
+1. **Signed in to Microsoft 365?** The list at the top says **Sign in to Microsoft 365...** until you are;
+   see [Your Microsoft 365 calendar](#your-microsoft-365-calendar).
+2. **Signed in as the wrong account?** Choose **Sign out of Microsoft 365** and sign in again with your
+   `@sailpoint.com` account. In a browser, a private window keeps other Microsoft sign-ins out of the way.
+3. **An error above the calendar?** "needs renewing" means Microsoft ended the sign-in (a password change,
+   for example): sign in again. "needs an administrator to approve" means IT has to approve SF Desk's
+   access to calendars first.
 
 ### macOS says the installer, `node` or `better_sqlite3.node` can't be opened
 
 Files from a browser download are quarantined by macOS. Open the installer with **Open Anyway** as in
-the Terminal installer's step 2; it then clears the quarantine on everything it installs. If a dialog still
+the Terminal installer's step 1; it then clears the quarantine on everything it installs. If a dialog still
 names a file in `~/SF-Desk`, run `xattr -dr com.apple.quarantine ~/SF-Desk` in Terminal and start
 SF Desk again.
 
@@ -386,13 +335,13 @@ Recent versions of the Salesforce CLI hide the access token in `sf org display` 
 - Update the CLI if it's old: `sf update`, or install the latest `.pkg` again.
 - Check the CLI can hand out a token: `sf org auth show-access-token` should print one for your
   SailPoint org (add `--target-org <alias>` if you use an alias).
-- If the CLI login has expired, sign in again with the `sf org login web` command in step 3.
+- If the CLI login has expired, sign in again with the `sf org login web` command in step 2.
 - If you have several orgs in the CLI, set `SF_TARGET_ORG` in `.env` to the right one.
 
 ### `npm install` fails or hangs
 
 Errors such as `ETIMEDOUT`, `ECONNRESET`, `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` or a Cisco Umbrella block
-page mean the npm registry is blocked. Don't fight it: use the `git archive` commands in step 4 to
+page mean the npm registry is blocked. Don't fight it: use the `git archive` commands in step 3 to
 take `node_modules` from GitHub instead. The same applies to the Salesforce CLI; install it from the
 `.pkg`, not npm.
 
@@ -403,7 +352,7 @@ The app couldn't find `sf` on its PATH. Run `which sf` in Terminal and put that 
 
 ### `Cannot find module 'better-sqlite3'` or another missing module
 
-`node_modules` is missing or incomplete. Redo the dependency step in step 4 from the project folder.
+`node_modules` is missing or incomplete. Redo the dependency step in step 3 from the project folder.
 
 ### `EADDRINUSE` on port 3000
 

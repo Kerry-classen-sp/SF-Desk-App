@@ -1,6 +1,6 @@
 #!/bin/bash
-# Builds "SF Desk.app": a Mac app (mac/app) that carries the SF Desk server, its node_modules, Node.js and
-# the calendar reader inside, and shows SF Desk in its own window. Run it on a Mac with the Xcode Command
+# Builds "SF Desk.app": a Mac app (mac/app) that carries the SF Desk server, its node_modules and Node.js
+# inside, and shows SF Desk in its own window. Run it on a Mac with the Xcode Command
 # Line Tools (for swiftc); it downloads nothing.
 #
 #   scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip     # recommended
@@ -70,7 +70,7 @@ VERSION="$("$NODE" -p "require(process.argv[1]).version" "$PAYLOAD/package.json"
   sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$PAYLOAD/package.json" | head -1)"
 BUILD_INFO="SF Desk $VERSION build $BUILD_NO $BUILD_INFO, Node.js $("$NODE" -v)"
 
-# 2. The app and the calendar reader, for Apple Silicon and Intel.
+# 2. The app, for Apple Silicon and Intel.
 compile() { # compile OUTPUT SWIFTC-ARGS...
   local out="$1"; shift
   local slices=()
@@ -89,9 +89,6 @@ mkdir -p "$C/MacOS" "$C/Resources/node/bin"
 
 echo "Compiling the app..."
 compile "$C/MacOS/SF Desk" -parse-as-library "$ROOT/mac/app/SFDesk.swift"
-echo "Compiling the calendar reader..."
-compile "$C/MacOS/sfdesk-calendar" "$PAYLOAD/mac/calendar.swift" \
-  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PAYLOAD/mac/Info.plist"
 
 sed -e "s|__VERSION__|$VERSION|" -e "s|__BUILD__|$BUILD_NO|" -e "s|__BUILD_INFO__|$BUILD_INFO|" \
   "$ROOT/mac/app/Info.plist" > "$C/Info.plist"
@@ -120,7 +117,6 @@ xattr -cr "$APP"
 while IFS= read -r -d '' f; do
   if file -b "$f" | grep -q Mach-O && ! codesign -v "$f" 2>/dev/null; then codesign -f -s - "$f"; fi
 done < <(find "$C/Resources" -type f -print0)
-codesign -f -s - "$C/MacOS/sfdesk-calendar"
 codesign -f -s - "$APP"
 codesign --verify --strict "$APP" || echo "Warning: codesign --verify reported a problem (above)." >&2
 

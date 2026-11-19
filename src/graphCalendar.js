@@ -1,64 +1,64 @@
-// Reads your Microsoft 365 calendars through Microsoft Graph for Time Entry. Unlike Outlook's COM API it
-// works with the new Outlook (and without Outlook at all). Sign-in uses the device code flow with
-// Microsoft's own "Microsoft Graph Command Line Tools" public client, so no app has to be registered:
-// SF Desk shows a code, you enter it at microsoft.com/devicelogin, and it keeps the refresh token in
-// the data folder (graph-token.json). Your organization may require an admin to approve that client
-// for Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
-// Events come back in the same shape as the Mac's and Outlook's readers (see macCalendar.js).
+// Reads your Microsoft 365 calendars through Microsoft Graph, the calendar SF Desk uses besides Salesforce's.
+// Sign-in uses the device code flow with a public client (SailPoint's SF Desk app registration, or Microsoft's own
+// "Microsoft Graph Command Line Tools" when none is set): SF Desk gets a code, Microsoft's page takes it (the Mac
+// and iPad apps enter it themselves), and the host keeps the refresh token (the data folder's graph-token.json on
+// the desktop, the Keychain on the iPad). Your organization may require an admin to approve the client for
+// Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
 // The one write is tagging meetings: the Deal Support category on meetings that have one, and No DS Required on
 // meetings marked as needing none (markCategory).
 // Sign-ins from before that only granted Calendars.Read; they keep reading until signed in again.
+// Plain JavaScript with no Node modules, as it also runs in JavaScriptCore on the iPad (see ios/build-core.sh).
 
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
+import { sha1Hex } from './sha1.js';
 
-const CLIENT_ID = process.env.SF_DESK_GRAPH_CLIENT_ID || '14d82eec-204b-4c2f-b7e8-296a70dab67e';
-const TENANT = process.env.SF_DESK_GRAPH_TENANT || 'organizations';
-const LOGIN = `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0`;
 const GRAPH = 'https://graph.microsoft.com/v1.0';
-// Marking meetings in Outlook (and so Calendars.ReadWrite) is off until SF_DESK_OUTLOOK_MARK=1: the tenant has
-// to approve that permission first, and asking for it would block plain calendar reading until then.
-export const MARK_ENABLED = /^(1|true|yes)$/i.test(process.env.SF_DESK_OUTLOOK_MARK || '');
+const DEFAULT_CLIENT_ID = '14d82eec-204b-4c2f-b7e8-296a70dab67e';
 const READ_SCOPE = 'offline_access User.Read Calendars.Read';
-const SCOPE = MARK_ENABLED ? 'offline_access User.Read Calendars.ReadWrite' : READ_SCOPE;
+const WRITE_SCOPE = 'offline_access User.Read Calendars.ReadWrite';
 const canWrite = (scope) => /(^|\s|\/)Calendars\.ReadWrite(\s|$)/i.test(String(scope || ''));
+// URLSearchParams, which JavaScriptCore doesn't have.
+const formBody = (params) => Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
 
 class CalendarError extends Error {
   constructor(message, status = 502) { super(message); this.status = status; }
 }
 
-// Microsoft's errors, in words. AADSTS65001/90094/90099 and friends mean the tenant wants an admin to
-// approve the client first.
-function explain(data, fallback) {
-  const desc = String(data?.error_description || data?.error?.message || fallback || '').split('\r\n')[0];
-  if (/AADSTS(65001|90094|90099|900941|50105|53003)/.test(desc) || /admin(istrator)? (approval|consent)/i.test(desc)) {
-    return `Your organization needs an administrator to approve "Microsoft Graph Command Line Tools" ${MARK_ENABLED ? 'reading and updating' : 'reading'} ` +
-      `your calendar (${MARK_ENABLED ? 'Calendars.ReadWrite' : 'Calendars.Read'}) before SF Desk can use Microsoft 365. Ask IT, or use your Mac, Outlook (classic) or Salesforce events. (${desc})`;
+// opts: { clientId, tenant, markEnabled (Calendars.ReadWrite, for tagging meetings; off until the tenant approves it,
+// as asking for it would block plain reading until then), fetch, sleep(ms) -> Promise, load() -> saved sign-in or
+// null, save(saved or null) }.
+export function graphCalendar(opts) {
+  const { fetch, sleep } = opts;
+  const CLIENT_ID = opts.clientId || DEFAULT_CLIENT_ID;
+  const LOGIN = `https://login.microsoftonline.com/${opts.tenant || 'organizations'}/oauth2/v2.0`;
+  const MARK_ENABLED = !!opts.markEnabled;
+  const SCOPE = MARK_ENABLED ? WRITE_SCOPE : READ_SCOPE;
+  const appName = opts.clientId ? 'SF Desk' : 'Microsoft Graph Command Line Tools';
+
+  // Microsoft's errors, in words. AADSTS65001/90094/90099 and friends mean the tenant wants an admin to
+  // approve the client first.
+  function explain(data, fallback) {
+    const desc = String(data?.error_description || data?.error?.message || fallback || '').split('\r\n')[0];
+    if (/AADSTS(65001|90094|90099|900941|50105|53003)/.test(desc) || /admin(istrator)? (approval|consent)/i.test(desc)) {
+      return `Your organization needs an administrator to approve "${appName}" ${MARK_ENABLED ? 'reading and updating' : 'reading'} ` +
+        `your calendar (${MARK_ENABLED ? 'Calendars.ReadWrite' : 'Calendars.Read'}) before SF Desk can use Microsoft 365. Ask IT, or use Salesforce events. (${desc})`;
+    }
+    return desc || 'Microsoft 365 sign-in failed.';
   }
-  return desc || 'Microsoft 365 sign-in failed.';
-}
 
-async function form(url, params) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params) });
-  return { ok: r.ok, data: await r.json().catch(() => ({})) };
-}
+  async function form(url, params) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody(params) });
+    return { ok: r.ok, data: await r.json().catch(() => ({})) };
+  }
 
-export function graphCalendar(dataDir) {
-  const file = path.join(dataDir, 'graph-token.json');
-  let saved = null; // { refresh_token, account }
-  try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* not signed in */ }
+  let saved = null; // { refresh_token, scope, account }
+  try { saved = opts.load() || null; } catch { /* not signed in */ }
   let access = null; // { token, expires }
   let pending = null; // the device code sign-in in progress
   let lastError = '';
   const names = new Map(); // calendar id -> name, from calendars()
 
   const save = () => {
-    try {
-      fs.mkdirSync(dataDir, { recursive: true });
-      if (saved) fs.writeFileSync(file, JSON.stringify(saved), { mode: 0o600 });
-      else fs.rmSync(file, { force: true });
-    } catch (err) { console.warn(`Couldn't save the Microsoft 365 sign-in: ${err.message}`); }
+    try { opts.save(saved); } catch (err) { console.warn(`Couldn't save the Microsoft 365 sign-in: ${err.message}`); }
   };
 
   async function useTokens(data) {
@@ -105,7 +105,7 @@ export function graphCalendar(dataDir) {
     (async () => {
       let wait = (Number(data.interval) || 5) * 1000;
       while (pending === me && Date.now() < me.expires) {
-        await new Promise((r) => setTimeout(r, wait));
+        await sleep(wait);
         if (pending !== me) return;
         const res = await form(`${LOGIN}/token`, { client_id: CLIENT_ID, grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: data.device_code })
           .catch((err) => ({ ok: false, data: { error: 'network', error_description: err.message } }));
@@ -158,7 +158,7 @@ export function graphCalendar(dataDir) {
     for (const id of ids) {
       const calId = id.replace(/^graph:/, '');
       let url = `/me/calendars/${encodeURIComponent(calId)}/calendarView?` +
-        new URLSearchParams({ startDateTime: fromIso, endDateTime: toIso, $select: select, $top: '200', $orderby: 'start/dateTime' });
+        formBody({ startDateTime: fromIso, endDateTime: toIso, $select: select, $top: '200', $orderby: 'start/dateTime' });
       const title = names.get(id) || 'Microsoft 365';
       while (url) {
         // Times in UTC, body as plain text (the description prefill strips invites from text).
@@ -184,7 +184,7 @@ export function graphCalendar(dataDir) {
     }
     return out.filter((e) => !e.canceled).map((e) => ({
       ...e,
-      id: 'gr_' + crypto.createHash('sha1').update(`${e.uid}|${e.start}`).digest('hex').slice(0, 24),
+      id: 'gr_' + sha1Hex(`${e.uid}|${e.start}`).slice(0, 24),
     }));
   }
 
@@ -211,7 +211,7 @@ export function graphCalendar(dataDir) {
     }
     const simple = (s) => String(s || '').replace(/^\s*\[backstory\b[^\]]*\]\s*/i, '').toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
     const mine = [];
-    let url = '/me/calendarView?' + new URLSearchParams({ startDateTime: fromIso, endDateTime: toIso,
+    let url = '/me/calendarView?' + formBody({ startDateTime: fromIso, endDateTime: toIso,
       $select: 'id,subject,start,isAllDay,categories,isCancelled,type,seriesMasterId', $top: '200' });
     while (url) {
       const page = await graph(url, { Prefer: 'outlook.timezone="UTC"' });
@@ -271,5 +271,5 @@ export function graphCalendar(dataDir) {
     return out;
   }
 
-  return { calendars, events, startSignIn, status, signOut, markCategory };
+  return { calendars, events, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
 }

@@ -3967,26 +3967,23 @@ function showCalendar() {
   loadSources().then(loadCalendar);
 }
 
-// Calendars to show: your Salesforce events, or your Exchange calendar: the Mac's Exchange account
-// when SF Desk runs on a Mac, or classic Outlook's Exchange mailbox when it runs on Windows; on Windows also your Microsoft 365
-// calendars through Microsoft Graph (for the new Outlook), after a one-time sign-in. The choice is remembered
-// on this machine; the first time, the Microsoft 365 or Exchange main calendar is picked if there is one.
+// Calendars to show: your Salesforce events, or your Microsoft 365 calendars through Microsoft Graph, after a
+// one-time sign-in. The choice is remembered on this device; the first time, the Microsoft 365 main calendar is
+// picked if signed in.
 async function loadSources() {
-  // Asked again after a refusal, so allowing access in System Settings and clicking Reload picks it up.
-  const wasRefused = !!cal.sources?.error || !!cal.sources?.graph?.error;
+  // Asked again after an error, so clicking Reload picks up a fix.
+  const wasRefused = !!cal.sources?.graph?.error;
   if (!cal.sources || wasRefused) {
-    try { cal.sources = await api('/calendar/sources'); } catch { cal.sources = { local: false, calendars: [] }; }
+    try { cal.sources = await api('/calendar/sources'); } catch { cal.sources = {}; }
   }
-  const { error, graph } = cal.sources;
-  const calendars = [...(graph?.calendars || []), ...cal.sources.calendars];
+  const { graph } = cal.sources;
+  const calendars = graph?.calendars || [];
   let saved = null;
   try { saved = localStorage.getItem(CAL_SOURCE); } catch {}
-  const exchange = calendars.filter((c) => c.type === 'exchange');
   const pick = (saved === 'salesforce' || calendars.some((c) => c.id === saved)) ? saved
-    : (graph?.calendars || []).find((c) => c.isDefault)?.id ||
-      (exchange.find((c) => /^calendar$/i.test(c.title)) || exchange[0])?.id || 'salesforce';
-  if (!cal.source || !calendars.some((c) => c.id === cal.source) && cal.source !== 'salesforce' || (wasRefused && !error)) cal.source = pick;
-  cal.sourceNote = [error, graph?.error].filter(Boolean).join(' ');
+    : calendars.find((c) => c.isDefault)?.id || 'salesforce';
+  if (!cal.source || !calendars.some((c) => c.id === cal.source) && cal.source !== 'salesforce' || (wasRefused && !graph?.error)) cal.source = pick;
+  cal.sourceNote = graph?.error || '';
   const mark = document.getElementById('calMark');
   if (mark) mark.hidden = !graph?.canMark;
   const select = document.getElementById('calSource');
@@ -3996,18 +3993,14 @@ async function loadSources() {
     if (!groups.has(c.account)) groups.set(c.account, []);
     groups.get(c.account).push(c);
   }
-  const kind = (c) => c.source === 'graph' ? '' : cal.sources.platform === 'win32' ? ' (Outlook classic)' : c.type === 'exchange' ? ' (Exchange)' : '';
   select.replaceChildren(el('option', { value: 'salesforce' }, 'Salesforce events'),
-    ...[...groups].map(([account, list]) => el('optgroup', { label: `${account}${kind(list[0])}` },
+    ...[...groups].map(([account, list]) => el('optgroup', { label: account },
       list.map((c) => el('option', { value: c.id }, c.title)))),
-    // On Windows, say why there are no classic Outlook calendars rather than leaving the group out.
-    cal.sources.platform === 'win32' && !cal.sources.calendars.length ? el('optgroup', { label: 'Outlook (classic)' },
-      el('option', { disabled: true, title: error || '' }, error ? `Not available: ${error.length > 90 ? error.slice(0, 90) + '…' : error}` : 'No Exchange calendars found in classic Outlook')) : null,
     graph ? el('optgroup', { label: 'Microsoft 365' },
       graph.signedIn ? el('option', { value: 'graph:signout' }, `Sign out of Microsoft 365${graph.account ? ` (${graph.account})` : ''}`)
         : el('option', { value: 'graph:signin' }, 'Sign in to Microsoft 365…')) : null);
   select.value = cal.source;
-  select.hidden = !(cal.sources.local ?? cal.sources.mac);
+  select.hidden = !graph;
   select.onchange = async () => {
     const value = select.value;
     if (value === 'graph:signin' || value === 'graph:signout') {
@@ -4025,7 +4018,7 @@ async function loadSources() {
   };
 }
 
-// The Mac app shows Microsoft's sign-in page in a sheet on its window; this closes it.
+// The Mac and iPad apps show Microsoft's sign-in page in a sheet on their window; this closes it.
 const signInDone = () => window.webkit?.messageHandlers?.sfdesk?.postMessage('signInDone');
 
 // Microsoft 365 sign-in with a device code: show the code and Microsoft's page, then wait for it to finish.
@@ -4045,7 +4038,7 @@ async function graphSignIn({ keepSource = false } = {}) {
       ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
       : 'Sign in with your work account and accept reading your calendar.', status));
   navigator.clipboard?.writeText(info.userCode).catch(() => {});
-  // otc: the Mac app enters the code on Microsoft's page itself.
+  // otc: the Mac and iPad apps enter the code on Microsoft's page themselves.
   window.open(`${info.verificationUri}?otc=${encodeURIComponent(info.userCode)}`, '_blank', 'noopener');
   while (cal.graphTicket === ticket) {
     await new Promise((r) => setTimeout(r, 3000));
@@ -4161,7 +4154,7 @@ async function loadCalendar() {
     markOutlook(true);
   } catch (e) {
     if (ticket !== cal.loading) return;
-    // This computer's calendar refused (no permission yet) or failed: say why and show Salesforce events instead.
+    // Microsoft 365 refused (sign-in expired, no permission) or failed: say why and show Salesforce events instead.
     if (cal.source !== 'salesforce' && e.status !== 401) {
       cal.sourceNote = e.message;
       cal.source = 'salesforce';
@@ -4179,12 +4172,12 @@ function renderCalendar() {
   const { events } = cal.data;
   const by = { covered: 0, open: 0, skipped: 0 };
   for (const e of events) by[evStatus(e)]++;
-  const fromMac = cal.data.source && cal.data.source !== 'salesforce';
-  document.getElementById('calSub').textContent = (cal.sourceNote && !fromMac ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
+  const fromGraph = cal.data.source && cal.data.source !== 'salesforce';
+  document.getElementById('calSub').textContent = (cal.sourceNote && !fromGraph ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
       (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed'
-    : fromMac ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
-      'those meetings may not be stored as Salesforce events, so they can\'t be shown here.');
+    : fromGraph ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
+      'those meetings may not be stored as Salesforce events, so they can\'t be shown here: pick Microsoft 365 in the calendar list to see them.');
 
   // Monday to Friday, plus the weekend days that have something on them; on phones, the one day picked.
   calNav();
@@ -4547,7 +4540,7 @@ CAL_WIDE.addEventListener('change', () => { if (cal.data && document.getElementB
 const CAL_NARROW = window.matchMedia('(max-width: 640px)');
 CAL_NARROW.addEventListener('change', () => { if (cal.data && document.getElementById('calBody')) renderCalendar(); });
 
-// Values for the new Deal Support form, taken from the event. When a Mac or Outlook event has a
+// Values for the new Deal Support form, taken from the event. When a Microsoft 365 or Outlook event has a
 // Salesforce copy (e.g. synced by Outreach), the name and description come from that copy.
 // The meeting's time goes to customer-facing time when anyone outside the company attends; when only
 // colleagues do, it goes to internal time and customer-facing time is 0 (Salesforce needs a value).
@@ -4662,7 +4655,7 @@ function renderEventPanel() {
         e.what ? [el('dt', {}, 'Related to'), el('dd', {}, sfLink(e.what.id, e.what.name || e.what.id), e.what.type ? ` (${e.what.type})` : '')] : null,
         e.supports.length ? [el('dt', {}, dsMeta.labelPlural), el('dd', {}, e.supports.map((r) => el('div', {},
           el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
-          r.how === 'matched' ? el('span', { class: 'tag', title: 'Yours, on the same date, on the same opportunity or account (from the title or attendees for Mac and Outlook calendar events), or with the same name' }, 'matched') : null,
+          r.how === 'matched' ? el('span', { class: 'tag', title: 'Yours, on the same date, on the same opportunity or account (from the title or attendees for Microsoft 365 and Outlook events), or with the same name' }, 'matched') : null,
           dsMeta.canUpdate && editing?.id !== r.Id ? el('button', { class: 'linkish', style: 'display:inline;margin-left:8px', onclick: () => editFromEvent(r) }, 'Edit') : null)))] : null,
       ),
       // Meeting invitations (Teams, Zoom...) are never shown, only what was written about the meeting.
@@ -4689,7 +4682,7 @@ const dsNotes = (e) => meetingNotes(e.sf?.description) || meetingNotes(e.descrip
 
 // onCreated(rec, opp) runs after the save; by default the Time Entry calendar reloads.
 function createFromEvent(e, close, onCreated = () => loadCalendar(), cancel = null) {
-  // The event's opportunity (its own, or borrowed from the Salesforce copy of a Mac or Outlook event) is preselected.
+  // The event's opportunity (its own, or borrowed from the Salesforce copy of a Microsoft 365 or Outlook event) is preselected.
   const oppId = e.oppId || (e.what?.type === 'Opportunity' || String(e.what?.id || '').startsWith('006') ? e.what.id : null);
   const picked = oppId ? { Id: oppId, Name: e.what?.id === oppId ? e.what.name || oppId : oppId } : null;
   return newDsForm({

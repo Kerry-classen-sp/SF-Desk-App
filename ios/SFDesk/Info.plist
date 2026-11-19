@@ -14,8 +14,6 @@
   <key>LSRequiresIPhoneOS</key><true/>
   <!-- The org's My Domain: its login page sends you on to SSO. -->
   <key>SFDeskLoginURL</key><string>https://sailpoint.my.salesforce.com</string>
-  <key>NSCalendarsFullAccessUsageDescription</key>
-  <string>SF Desk shows your meetings in Time Entry so you can log them as Deal Supports.</string>
   <key>UIApplicationSceneManifest</key>
   <dict>
     <key>UIApplicationSupportsMultipleScenes</key><false/>

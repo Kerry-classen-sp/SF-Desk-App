@@ -18,12 +18,10 @@ meeting synced into Salesforce the mark shows on Time Entry too. Everything runs
 button to work. It only reads the meeting you click it on, and nothing is saved to Salesforce until you click
 **Create Deal Support**; in Outlook it only ever adds that category.
 
-The add-in can only mark the meeting it's open on. SF Desk can also mark every meeting that has a Deal Support
-without opening each one, but that's off for now: it needs IT to approve "Microsoft Graph Command Line Tools"
-for Calendars.ReadWrite. Once they have, add `SF_DESK_OUTLOOK_MARK=1` to `.env` (for the Mac app,
-`~/Library/Application Support/SF Desk/.env`) and restart SF Desk. Then click
-**Mark in Outlook** on the **Time Entry** tab and sign in to Microsoft 365 once (allow SF Desk to read and update
-your calendar). After that, each week you open in Time Entry has its covered meetings marked.
+The add-in can only mark the meeting it's open on. SF Desk also marks every meeting without opening each one,
+once you've signed in to Microsoft 365 in **Time Entry** (where it reads your calendar): each week you open
+there has its meetings with a Deal Support marked green and those needing none gray, and loses a category
+that no longer applies. **Mark in Outlook** on that tab does the same on demand, signing in first if needed.
 
 The add-in signs in with your Salesforce CLI login (Option A in the README); with that, it connects by itself
 the first time you open it. It doesn't work with the OAuth app login (Option B).

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- SF Desk's privacy manifest: no tracking, no data collected by the developer (records go only to the
-     user's own Salesforce org, and the calendar is read on the device), and no required-reason APIs. -->
+     user's own Salesforce org, and meetings come from the user's own Microsoft 365 straight to the device),
+     and no required-reason APIs. -->
 <plist version="1.0">
 <dict>
   <key>NSPrivacyTracking</key><false/>

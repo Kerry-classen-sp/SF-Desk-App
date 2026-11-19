@@ -18,9 +18,6 @@
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticTermination</key><false/>
   <key>NSSupportsSuddenTermination</key><false/>
-  <key>NSCalendarsUsageDescription</key><string>SF Desk shows your meetings so you can log Deal Supports for them.</string>
-  <key>NSCalendarsFullAccessUsageDescription</key><string>SF Desk shows your meetings so you can log Deal Supports for them.</string>
-  <key>NSAppleEventsUsageDescription</key><string>Without the calendar reader, SF Desk asks Calendar for your meetings.</string>
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>

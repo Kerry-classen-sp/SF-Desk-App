@@ -88,8 +88,8 @@ final class MainViewController: UIViewController, HostUI {
     }
   }
 
-  func show(signIn web: WKWebView, cancel: @escaping () -> Void) {
-    let vc = SignInViewController(web: web, cancel: { [weak self] in
+  func show(signIn web: WKWebView, title: String, cancel: @escaping () -> Void) {
+    let vc = SignInViewController(web: web, title: title, cancel: { [weak self] in
       self?.signInSheet = nil
       cancel()
     })
@@ -141,10 +141,11 @@ private final class SignInViewController: UIViewController, UIAdaptivePresentati
   private let web: WKWebView
   private let cancel: () -> Void
 
-  init(web: WKWebView, cancel: @escaping () -> Void) {
+  init(web: WKWebView, title: String, cancel: @escaping () -> Void) {
     self.web = web
     self.cancel = cancel
     super.init(nibName: nil, bundle: nil)
+    self.title = title
   }
   required init?(coder: NSCoder) { fatalError() }
 
@@ -152,7 +153,6 @@ private final class SignInViewController: UIViewController, UIAdaptivePresentati
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    title = "Sign in to Salesforce"
     navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
       self?.dismiss(animated: true)
       self?.cancel()

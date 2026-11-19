@@ -11,9 +11,11 @@ const API = env.SF_API_VERSION || 'v62.0';
 const LOGIN_URL = (env.SF_LOGIN_URL || 'https://login.salesforce.com').replace(/\/$/, '');
 
 // From the host (see createApi).
-let store, localCal = null, graphCal = null, MARK_ENABLED = false, LOCAL_CAL_NAME = '', host = {};
+let store, graphCal = null, MARK_ENABLED = false, host = {};
 let doFetch = (...args) => globalThis.fetch(...args);
-const readerFor = (source) => (source.startsWith('graph:') ? graphCal : localCal);
+// A calendar source: 'salesforce', or 'graph:' and a Microsoft 365 calendar Id. Anything else (a Mac or Outlook
+// calendar from before only these two) reads as Salesforce.
+const isGraphSource = (source) => !!graphCal && String(source || '').startsWith('graph:');
 
 // Routes are recorded as this module loads, then put on the host's router by createApi.
 const routes = [];
@@ -2218,7 +2220,7 @@ const isoDate = (v) => {
 };
 
 // My Deal Supports dated within [d0, d1], for matching events to them, with their accounts' Ids,
-// names and websites (events from the Mac's calendar only have a title and attendees to go on).
+// names and websites (Microsoft 365 events only have a title and attendees to go on).
 async function myDealSupportsBetween(req, ds, cm, d0, d1) {
   if (!cm.matchDate) return [];
   const me = sfId(req.session.sf.user.id);
@@ -2408,11 +2410,10 @@ async function salesforceEvents(req, { from, to, d0, d1, tz }) {
   return list;
 }
 
-// Events from one of this computer's calendars (the Mac's, or Outlook's on Windows). Attendee domains
-// other than my own help find the account.
-async function localEvents(req, calendarId, { from, to }) {
+// Events from a Microsoft 365 calendar. Attendee domains other than my own help find the account.
+async function graphEvents(req, calendarId, { from, to }) {
   const myDomain = String(req.session.sf.user.username || '').split('@')[1]?.toLowerCase();
-  const events = await readerFor(calendarId).events(from, to, [calendarId]);
+  const events = await graphCal.events(from, to, [calendarId]);
   const list = events.map((e) => {
     const others = (e.attendees || []).filter((a) => !a.me && a.email && !a.email.toLowerCase().endsWith('@' + myDomain));
     return {
@@ -2429,7 +2430,7 @@ async function localEvents(req, calendarId, { from, to }) {
   return list;
 }
 
-// Meetings synced into Salesforce (e.g. by Outreach) carry the account and opportunity. For each Mac
+// Meetings synced into Salesforce (e.g. by Outreach) carry the account and opportunity. For each Microsoft 365
 // event, find the Salesforce event at the same start with the same or a similar subject (or the only one
 // at that start) and use its links for matching and to preselect the opportunity.
 const simpleSubject = (s) => cleanSubject(s).toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
@@ -2454,8 +2455,8 @@ const CAL_SOURCE_SETTING = 'calendarSource';
 async function calendarEvents(req, range) {
   const source = store.getSetting(orgOf(req), CAL_SOURCE_SETTING)?.source;
   let events = null;
-  if (source && source !== 'salesforce' && readerFor(source)) {
-    events = await localEvents(req, source, range).catch(() => null);
+  if (isGraphSource(source)) {
+    events = await graphEvents(req, source, range).catch(() => null);
     if (events) await borrowSalesforceLinks(req, events, range);
   }
   events ||= await salesforceEvents(req, range).catch(() => []);
@@ -2487,21 +2488,16 @@ async function borrowSalesforceLinks(req, events, range) {
   }
 }
 
-// This computer's calendars, for the source picker. Empty when there's no calendar reader for this OS;
-// an error message when access was refused, so the page can say so and stay on Salesforce events.
-// "mac" is kept for pages from before Windows support.
-// "graph" is the Microsoft 365 sign-in state and its calendars, when that source is offered.
+// The calendars besides Salesforce's, for the source picker: "graph" is the Microsoft 365 sign-in state and its
+// calendars, with an error message when they couldn't be listed.
 api.get('/calendar/sources', wrap(async (req, res) => {
-  const info = { local: !!localCal || !!graphCal, mac: !!host.isMac, platform: host.platform, name: LOCAL_CAL_NAME, calendars: [] };
+  const info = { platform: host.platform };
   if (graphCal) {
     const st = graphCal.status();
     info.graph = { ...st, canMark: MARK_ENABLED, calendars: [] };
     if (st.signedIn) {
       try { info.graph.calendars = await graphCal.calendars(); } catch (err) { info.graph.error = err.message; }
     }
-  }
-  if (localCal) {
-    try { info.calendars = await localCal.calendars(); } catch (err) { info.error = err.message; }
   }
   res.json(info);
 }));
@@ -2532,22 +2528,22 @@ api.post('/graph/mark', wrap(async (req, res) => {
 }));
 
 // Calendar events for a range, each marked as covered by a Deal Support or not. source is
-// "salesforce" (default) or a calendar Id from this computer (Mac or Outlook). from/to: the range's start and end as UTC instants;
-// d0/d1: its first and last local dates.
+// "salesforce" (default) or a Microsoft 365 calendar ("graph:" and its Id). from/to: the range's start and end as UTC
+// instants; d0/d1: its first and last local dates.
 api.get('/calendar', wrap(async (req, res) => {
   const range = {
     from: isoDateTime(req.query.from), to: isoDateTime(req.query.to),
     d0: isoDate(req.query.d0), d1: isoDate(req.query.d1),
     tz: Math.max(-840, Math.min(840, Number(req.query.tz) || 0)),
   };
-  const source = String(req.query.source || 'salesforce').slice(0, 300);
-  if (source !== 'salesforce' && !readerFor(source)) throw new HttpError(400, 'Calendars from this computer are only available when SF Desk runs on a Mac or on Windows.');
+  const asked = String(req.query.source || 'salesforce').slice(0, 300);
+  const source = isGraphSource(asked) ? asked : 'salesforce';
   const kind = `calendar:${source}:${range.d0}:${range.d1}`;
   store.saveSetting(orgOf(req), CAL_SOURCE_SETTING, { source });
   res.json(await withCacheFallback(req, res, async () => {
     const ds = await dealSupportMeta(req);
     const cm = await calendarMeta(req);
-    const events = source === 'salesforce' ? await salesforceEvents(req, range) : await localEvents(req, source, range);
+    const events = source === 'salesforce' ? await salesforceEvents(req, range) : await graphEvents(req, source, range);
     if (source !== 'salesforce') await borrowSalesforceLinks(req, events, range);
     addMeetingKeys(events);
 
@@ -2557,7 +2553,7 @@ api.get('/calendar', wrap(async (req, res) => {
     const linkedById = new Map(linked.map((r) => [r.Id, r]));
 
     // Covered: a Deal Support created from the event (or a copy of it), or one of mine on the same date
-    // with the event's opportunity, the event's account, or the event's title as its name. Mac events
+    // with the event's opportunity, the event's account, or the event's title as its name. Microsoft 365 events
     // have no Salesforce links, so for those the account is found from the title and attendee domains.
     // Marks saved before meetings had keys are copied to the key, so the Outlook add-in sees them too.
     for (const e of events) {
@@ -2608,7 +2604,7 @@ function coverEvents(req, events, marks, linkedById, mine) {
   // One Deal Support per meeting: of several created from it, the first (from the event itself, then its copies).
   const created = createdAll.map((list) => list.slice(0, 1));
   // Taken: created from one of these events (even the ones not shown), or from another meeting outside them,
-  // known by its key. Calendar Ids alone don't say that: a Mac or Outlook event's Id can change when the
+  // known by its key. Calendar Ids alone don't say that: a Microsoft 365 or Outlook event's Id can change when the
   // meeting is updated, which would leave its Deal Support matching nothing.
   const taken = new Set(createdAll.flat().map((r) => r.Id));
   const shown = new Set(events.flatMap((e) => [e.id, ...e.copies]));
@@ -2641,8 +2637,9 @@ function coverEvents(req, events, marks, linkedById, mine) {
   return events.map((e, i) => created[i].length ? created[i] : matched[i] ? [matched[i]] : []);
 }
 
-// Event Ids: Salesforce Ids, or "mac_" (Mac calendar), "ios_" (iPhone calendar), "win_" (Outlook on Windows), "gr_" (Microsoft 365),
-// "ol_" (Outlook add-in) or "mt_" (a meeting's key, see meetingKey) plus a hash.
+// Event Ids: Salesforce Ids, or "gr_" (Microsoft 365), "ol_" (Outlook add-in) or "mt_" (a meeting's key, see
+// meetingKey) plus a hash. "mac_", "ios_" and "win_" are from the device calendars SF Desk used to read, and
+// stay valid for the marks saved under them.
 function eventId(value) {
   const id = String(value || '');
   if (/^(mac|ios|win|gr|ol|mt)_[0-9a-f]{24}$/.test(id)) return id;
@@ -2902,14 +2899,12 @@ api.post('/hidden/remove', (req, res) => {
 //   refreshAccess  (req) renews req.session.sf's access token, or throws an HttpError(401)
 //   version, platform, isMac, useCli (signing in with the Salesforce CLI's login)
 //   fetch          for Salesforce calls (default: the global fetch)
-//   localCal, localCalName, graphCal, markEnabled   calendars this device can read (see /calendar/sources)
+//   graphCal       the Microsoft 365 calendar (src/graphCalendar.js), the one besides Salesforce's
 //   cliLogin       () runs the Salesforce CLI's browser sign-in; signOut () forgets a login kept by the host
 export function createApi(deps) {
   store = deps.store;
-  localCal = deps.localCal || null;
   graphCal = deps.graphCal || null;
-  MARK_ENABLED = !!deps.markEnabled;
-  LOCAL_CAL_NAME = deps.localCalName || '';
+  MARK_ENABLED = !!graphCal?.markEnabled;
   if (deps.fetch) doFetch = deps.fetch;
   host = deps;
   const router = deps.router;
