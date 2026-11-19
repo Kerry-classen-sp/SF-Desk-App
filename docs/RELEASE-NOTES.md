@@ -15,6 +15,14 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 2
+
+- **Long press on the iPad:** press and hold an event on Time Entry to open its menu (Create Deal Support, No Deal
+  Support needed, Remove this event), as right-click does on the Mac and Windows.
+- **Removing an event deletes its Deal Supports:** the confirmation lists them by number. The event goes first,
+  so if that fails they're left alone. If your Salesforce user can't delete Deal Supports, the event isn't
+  removed either.
+
 ## 1.7.5 (November 10, 2026)
 
 - **TES and RFP Requests on the opportunity:** above its Deal Supports, an opportunity shows a **TES/RFP
