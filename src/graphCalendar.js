@@ -5,7 +5,8 @@
 // the desktop, the Keychain on the iPad). Your organization may require an admin to approve the client for
 // Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
 // The writes are tagging meetings (markCategory: the Deal Support category on meetings that have one, and No DS
-// Required on meetings marked as needing none) and adding a meeting you create with a Deal Support (createEvent).
+// Required on meetings marked as needing none), adding a meeting you create with a Deal Support (createEvent) and
+// removing a meeting you choose to (deleteEvent).
 // Sign-ins from before that only granted Calendars.Read; they keep reading until signed in again.
 // Plain JavaScript with no Node modules, as it also runs in JavaScriptCore on the iPad (see ios/build-core.sh).
 
@@ -153,7 +154,7 @@ export function graphCalendar(opts) {
   // Events between two instants in the given calendars, each with a stable id for its occurrence.
   async function events(fromIso, toIso, ids) {
     const me = String(saved?.account || '').toLowerCase();
-    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs';
+    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs,isOrganizer,type';
     const out = [];
     for (const id of ids) {
       const calId = id.replace(/^graph:/, '');
@@ -177,6 +178,7 @@ export function graphCalendar(opts) {
               me: !!me && String(a.emailAddress?.address || '').toLowerCase() === me,
             })),
             canceled: !!e.isCancelled, free: e.showAs === 'free',
+            graphId: e.id, isOrganizer: e.isOrganizer !== false, recurring: e.type === 'occurrence' || e.type === 'exception',
           });
         }
         url = page['@odata.nextLink'] || '';
@@ -199,6 +201,21 @@ export function graphCalendar(opts) {
       { method: 'POST', body: { subject, start: utc(start), end: utc(end), showAs: 'busy' } });
     const startIso = new Date(String(e.start?.dateTime || start).replace(/Z?$/, 'Z')).toISOString();
     return { id: 'gr_' + sha1Hex(`${e.iCalUId || e.id}|${startIso}`).slice(0, 24) };
+  }
+
+  // Removes one meeting (one occurrence of a series) from my calendar, after checking that graphId is the meeting
+  // SF Desk knows as `id`. For a meeting I organized, Microsoft sends the attendees a cancellation.
+  async function deleteEvent(id, graphId) {
+    if (!canWrite(saved?.scope)) {
+      throw new CalendarError('Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to remove meetings.', 403);
+    }
+    const path = `/me/events/${encodeURIComponent(String(graphId || ''))}`;
+    const e = await graph(`${path}?$select=iCalUId,start,isAllDay`, { Prefer: 'outlook.timezone="UTC"' });
+    const start = e.isAllDay ? new Date(e.start.dateTime.slice(0, 10) + 'T00:00:00') : new Date(e.start.dateTime + 'Z');
+    if ('gr_' + sha1Hex(`${e.iCalUId || graphId}|${start.toISOString()}`).slice(0, 24) !== id) {
+      throw new CalendarError('That meeting changed in Outlook. Reload and try again.', 409);
+    }
+    await graph(path, {}, { method: 'DELETE' });
   }
 
   // Outlook's category list, so SF Desk's categories get their colors (preset4 green, preset12 gray) where the add-in
@@ -284,5 +301,5 @@ export function graphCalendar(opts) {
     return out;
   }
 
-  return { calendars, events, createEvent, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
+  return { calendars, events, createEvent, deleteEvent, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
 }

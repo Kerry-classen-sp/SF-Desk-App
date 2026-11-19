@@ -2424,6 +2424,8 @@ async function graphEvents(req, calendarId, { from, to }) {
       what: null, oppId: null, accountIds: [], calendar: e.calendar,
       domains: customerDomains(others.map((a) => a.email), myDomain),
       audience: audienceOf((e.attendees || []).filter((a) => !a.me).map((a) => a.email), myDomain),
+      graphId: e.graphId, isOrganizer: e.isOrganizer, recurring: e.recurring,
+      attendeeCount: (e.attendees || []).filter((a) => !a.me).length,
     };
   }).sort((a, b) => String(a.start).localeCompare(String(b.start)));
   list.note = events.note; // why there are none, when the reader says
@@ -2752,6 +2754,24 @@ api.post('/calendar/new-event', wrap(async (req, res) => {
   }
   for (const id of [evId, meetingKey({ allDay: false, start, subject })].filter(Boolean)) store.linkEvent(orgOf(req), id, rec.Id);
   res.status(201).json({ dealSupport: rec, eventId: evId, warning });
+}));
+
+// Remove an event from its calendar: a Microsoft 365 meeting (graphId, as Time Entry has it; for a meeting I
+// organized, Microsoft cancels it for the attendees) or one of my Salesforce events. Deal Supports stay.
+api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
+  const evId = eventId(req.params.id);
+  if (evId.startsWith('gr_')) {
+    if (!graphCal) throw new HttpError(400, 'Microsoft 365 isn\'t set up.');
+    await graphCal.deleteEvent(evId, String(req.body?.graphId || '').slice(0, 1000));
+  } else if (/^(mac|ios|win|ol|mt)_/.test(evId)) {
+    throw new HttpError(400, 'Only Microsoft 365 meetings and Salesforce events can be removed here.');
+  } else {
+    const me = sfId(req.session.sf.user.id);
+    const [ev] = await query(req, `SELECT Id FROM Event WHERE Id = '${evId}' AND OwnerId = '${me}'`);
+    if (!ev) throw new HttpError(404, 'That event is not on your calendar.');
+    await sf(req, 'DELETE', `/services/data/${API}/sobjects/Event/${evId}`);
+  }
+  res.json({ ok: true });
 }));
 
 // Mark an event as needing no Deal Support (skip: true), or undo that.
