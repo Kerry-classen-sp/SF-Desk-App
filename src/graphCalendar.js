@@ -4,8 +4,8 @@
 // and iPad apps enter it themselves), and the host keeps the refresh token (the data folder's graph-token.json on
 // the desktop, the Keychain on the iPad). Your organization may require an admin to approve the client for
 // Calendars.ReadWrite; Microsoft's error then says so and the page shows it.
-// The one write is tagging meetings: the Deal Support category on meetings that have one, and No DS Required on
-// meetings marked as needing none (markCategory).
+// The writes are tagging meetings (markCategory: the Deal Support category on meetings that have one, and No DS
+// Required on meetings marked as needing none) and adding a meeting you create with a Deal Support (createEvent).
 // Sign-ins from before that only granted Calendars.Read; they keep reading until signed in again.
 // Plain JavaScript with no Node modules, as it also runs in JavaScriptCore on the iPad (see ios/build-core.sh).
 
@@ -188,6 +188,19 @@ export function graphCalendar(opts) {
     }));
   }
 
+  // A meeting with no attendees (so no invitations go out) in one of my calendars. Returns its id as events() gives it.
+  async function createEvent(calendarId, { subject, start, end }) {
+    if (!canWrite(saved?.scope)) {
+      throw new CalendarError('Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to add meetings to it.', 403);
+    }
+    const calId = String(calendarId).replace(/^graph:/, '');
+    const utc = (iso) => ({ dateTime: new Date(iso).toISOString().slice(0, 19), timeZone: 'UTC' });
+    const e = await graph(`/me/calendars/${encodeURIComponent(calId)}/events`, { Prefer: 'outlook.timezone="UTC"' },
+      { method: 'POST', body: { subject, start: utc(start), end: utc(end), showAs: 'busy' } });
+    const startIso = new Date(String(e.start?.dateTime || start).replace(/Z?$/, 'Z')).toISOString();
+    return { id: 'gr_' + sha1Hex(`${e.iCalUId || e.id}|${startIso}`).slice(0, 24) };
+  }
+
   // Outlook's category list, so SF Desk's categories get their colors (preset4 green, preset12 gray) where the add-in
   // hasn't made them yet. That needs MailboxSettings.ReadWrite, which SF Desk doesn't ask for: without it Microsoft
   // refuses and the categories are used without a color, as before. Tried once per category per run.
@@ -271,5 +284,5 @@ export function graphCalendar(opts) {
     return out;
   }
 
-  return { calendars, events, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
+  return { calendars, events, createEvent, startSignIn, status, signOut, markCategory, markEnabled: MARK_ENABLED };
 }

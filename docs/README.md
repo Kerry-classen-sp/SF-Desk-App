@@ -51,7 +51,10 @@ calendar permission and troubleshooting.
   title and the attendees' email domains. Salesforce events logged twice at the same time (e.g. by
   Outreach, on the account and on the opportunity) are shown once. The open opportunity list is kept in the
   local database and refreshed from Salesforce every 4 hours. Under the calendar is the list of your Deal
-  Supports dated that week; the pencil on a row opens it in the same form to edit (only changed fields are saved)
+  Supports dated that week; the pencil on a row opens it in the same form to edit (only changed fields are saved).
+  Click free time on the calendar to add a meeting with its Deal Support in one go: the meeting's title and time
+  (starting on the half hour clicked, an hour long) above the same form. The meeting goes in the calendar shown:
+  a Microsoft 365 meeting with no attendees (so no invitations go out), or a Salesforce event on the opportunity
 - **Outlook add-in** (optional): a **Create Deal Support** button on Outlook meetings opens the same prefilled
   form beside the meeting. See [OUTLOOK.md](OUTLOOK.md) to set it up
 - Works from phone width up to wide desktops: on phones the tabs fold into a ☰ menu, Accounts shows the list

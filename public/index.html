@@ -343,6 +343,8 @@ darkQuery.addEventListener('change', applyTheme);
   .allday { padding: 3px; border-bottom: 1px solid var(--line); min-height: 26px; display: grid; gap: 3px; align-content: start; }
   .gutter-label { font-size: 11px; color: var(--muted); padding: 4px 6px; text-align: right; }
   .hours-col { position: relative; }
+  .hours-col.can-add { cursor: cell; }
+  .hours-col.can-add .ev { cursor: pointer; }
   .hours-col .hl { position: absolute; left: 0; right: 0; border-top: 1px solid #f0f1f4; }
   .hours-col .now-line { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); z-index: 2; }
   .gutter .hl-label { position: absolute; right: 6px; font-size: 11px; color: var(--muted); transform: translateY(-50%); }
@@ -2258,7 +2260,7 @@ function dsValue(f, n) {
 // passes oppCombobox's suggestions; save(opp, fields) creates the record, then onCreated(rec, opp) runs.
 // Requested Activity starts as Demo when `subject` (a calendar event's) mentions a demo, else Discussion.
 // Role follows the picked opportunity, Lead SE when I'm its Lead SE and SME otherwise, until it's picked by hand.
-function newDsForm({ picked = null, find = {}, values, descAround, title, subject = '', save, onCreated, close, cancel }) {
+function newDsForm({ picked = null, find = {}, values, descAround, title, createLabel, subject = '', save, onCreated, close, cancel }) {
   let roleTicket = 0, roleTouched = false, settingRole = false, role = null;
   const setRole = async (o) => {
     const rd = dsMeta.roleDefault, my = ++roleTicket;
@@ -2280,6 +2282,7 @@ function newDsForm({ picked = null, find = {}, values, descAround, title, subjec
   const form = dealSupportForm(null, close, {
     cancel,
     title: title || `New ${dsMeta.label}`,
+    createLabel,
     values: { ...(activity && { [activityF.name]: activity }), ...values },
     descAround,
     submit: async (fields) => {
@@ -2507,7 +2510,7 @@ function dealSupportForm(o, close, opts = {}) {
     }
     requests.forEach(paintRequest);
   };
-  const create = el('button', { class: 'primary' }, opts.edit ? 'Save changes' : `Create ${dsMeta.label}`);
+  const create = el('button', { class: 'primary' }, opts.edit ? 'Save changes' : opts.createLabel || `Create ${dsMeta.label}`);
   // Why the last save failed, kept in the form (beside its buttons) until the next try.
   const formError = el('div', { class: 'form-error', role: 'alert', hidden: true });
   const fail = (msg) => {
@@ -4175,7 +4178,8 @@ function renderCalendar() {
   const fromGraph = cal.data.source && cal.data.source !== 'salesforce';
   document.getElementById('calSub').textContent = (cal.sourceNote && !fromGraph ? `${cal.sourceNote} Showing Salesforce events. · ` : '') + (events.length
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
-      (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed'
+      (by.skipped ? ` · ${by.skipped} marked not needed` : '') + ' · Click an event to see it, or right-click it to create a ' + dsMeta.label + ' or mark it not needed' +
+      (dsMeta.canCreate ? `. Click free time to add a meeting with a ${dsMeta.label}` : '')
     : fromGraph ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here: pick Microsoft 365 in the calendar list to see them.');
 
@@ -4203,8 +4207,17 @@ function renderCalendar() {
       e.allDay ? null : el('div', { class: 't' }, `${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`));
     return n;
   };
+  const canAdd = dsMeta.canCreate;
   const cols = days.map((d) => {
-    const col = el('div', { class: 'hours-col', style: `height:${height}px` });
+    const col = el('div', { class: 'hours-col' + (canAdd ? ' can-add' : ''), style: `height:${height}px`,
+      title: canAdd ? `Click free time to add a meeting with a ${dsMeta.label}` : null });
+    // Free time (not an event): a new meeting there, starting on the half hour clicked, for an hour.
+    if (canAdd) col.addEventListener('click', (ev) => {
+      if (ev.target.closest('.ev')) return;
+      const y = ev.clientY - col.getBoundingClientRect().top;
+      const mins = h0 * 60 + Math.max(0, Math.floor(y / hourPx * 2)) * 30;
+      newMeetingDialog(d, Math.min(mins, 23 * 60 + 30));
+    });
     for (let h = h0; h < h1; h++) col.append(el('div', { class: 'hl', style: `top:${(h - h0) * hourPx}px` }));
     if (d === today) {
       const now = new Date(), m = (now.getHours() - h0) * 60 + now.getMinutes();
@@ -4704,6 +4717,86 @@ function createFromEvent(e, close, onCreated = () => loadCalendar(), cancel = nu
     close,
     cancel,
   });
+}
+
+// A new meeting at the time clicked on Time Entry, with its Deal Support: the meeting's title and time above the
+// usual form, whose date and hours follow them. The meeting goes in the calendar shown (see /calendar/new-event).
+function newMeetingDialog(date, startMins) {
+  const source = cal.source || 'salesforce';
+  const graph = cal.sources?.graph;
+  if (source !== 'salesforce' && !graph?.canWrite) {
+    return toast('To add meetings to Microsoft 365, sign out of it and sign in again, accepting updates to your calendar.', 'err');
+  }
+  const calName = source === 'salesforce' ? 'your Salesforce events' : (graph.calendars || []).find((c) => c.id === source)?.title || 'Microsoft 365';
+  const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const subject = el('input', { type: 'text', maxlength: 255, placeholder: 'What the meeting is about', 'aria-label': 'Meeting title' });
+  const day = el('input', { type: 'date', value: date, 'aria-label': 'Date' });
+  const from = el('input', { type: 'time', step: 300, value: hm(startMins), 'aria-label': 'Starts' });
+  const to = el('input', { type: 'time', step: 300, value: hm(Math.min(startMins + 60, 24 * 60 - 1)), 'aria-label': 'Ends' });
+  const times = () => {
+    const s = new Date(`${day.value}T${from.value}`), e = new Date(`${day.value}T${to.value}`);
+    return { s, e, ok: !isNaN(s) && !isNaN(e) && e > s };
+  };
+  const prefill = () => {
+    const { s, e } = times();
+    return eventPrefill({ date: day.value, start: s.toISOString(), end: e.toISOString(), allDay: false });
+  };
+  let form, created = null;
+  // The form's date and hours follow the meeting's; its other fields are left as they are.
+  const sync = () => {
+    if (!times().ok || !form) return;
+    const p = cal.data.prefill;
+    for (const [name, v] of Object.entries(prefill())) {
+      if (name === p.userField?.name) continue;
+      const n = form.inputFor(name);
+      if (n) n.value = v;
+    }
+  };
+  const fromWas = { value: from.value };
+  from.addEventListener('change', () => {
+    // Moving the start keeps the meeting's length.
+    const a = new Date(`${day.value}T${fromWas.value}`), b = new Date(`${day.value}T${to.value}`), s = new Date(`${day.value}T${from.value}`);
+    if (!isNaN(a) && !isNaN(b) && !isNaN(s) && b > a) {
+      const end = new Date(+s + (b - a));
+      if (localDay(end) === day.value) to.value = hhmm24(end);
+    }
+    fromWas.value = from.value;
+    sync();
+  });
+  for (const n of [day, to]) n.addEventListener('change', sync);
+  const field = (label, input, required, grow = 1) => el('label', { style: `flex:${grow} 1 ${grow > 1 ? 240 : 120}px;min-width:0` },
+    el('span', {}, label, required ? el('span', { class: 'req' }, ' *') : null), input);
+
+  formDialog((close) => {
+    form = newDsForm({
+      title: `New meeting with a ${dsMeta.label}`,
+      createLabel: `Create meeting and ${dsMeta.label}`,
+      values: prefill(),
+      save: async (opp, fields) => {
+        const { s, e, ok } = times();
+        if (!subject.value.trim()) { subject.focus(); throw new Error('Give the meeting a title.'); }
+        if (!ok) throw new Error('The meeting has to end after it starts.');
+        created = await api('/calendar/new-event', { method: 'POST', body: {
+          source, subject: subject.value.trim(), start: s.toISOString(), end: e.toISOString(), opportunityId: opp.Id, fields } });
+        return created.dealSupport;
+      },
+      onCreated: async () => {
+        close();
+        if (created?.warning) toast(created.warning, 'err');
+        if (created?.eventId) { cal.sel = created.eventId; cal.editing = null; }
+        await loadCalendar();
+      },
+      close,
+    });
+    form.querySelector('h3').after(el('div', { style: 'margin-bottom:12px' },
+      el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px' },
+        field('Meeting title', subject, true, 3), field('Date', day), field('Starts', from), field('Ends', to)),
+      el('div', { class: 'sub', style: 'margin:6px 0 0' }, source === 'salesforce'
+        ? `Added to ${calName} on the opportunity you pick.`
+        : `Added to Microsoft 365 (${calName}) with no attendees, so no invitations are sent.`)));
+    return form;
+  });
+  subject.focus();
 }
 
 // Type to filter all open opportunities (searched on the server's local copy, sorted by name).
