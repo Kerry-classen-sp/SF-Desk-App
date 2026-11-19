@@ -58,6 +58,10 @@ final class AppController: NSObject, WKURLSchemeHandler, WKNavigationDelegate, W
     let wc = WKWebViewConfiguration()
     wc.setURLSchemeHandler(self, forURLScheme: Self.scheme)
     wc.userContentController.add(self, name: "sfdesk")
+    // The page opens Microsoft's sign-in with window.open once it has the code, after a tap rather than on it,
+    // which iOS blocks unless this is on (macOS allows it already). Opened windows still go through
+    // createWebViewWith: the Microsoft sheet or the browser, never a window over the page.
+    wc.preferences.javaScriptCanOpenWindowsAutomatically = true
     wc.websiteDataStore = .default()
     #if os(iOS)
     wc.allowsInlineMediaPlayback = true

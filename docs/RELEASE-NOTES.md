@@ -148,6 +148,12 @@ Build 18 (November 18, 2026):
   just leaves your calendar, only the occurrence clicked of a recurring meeting goes, and a Salesforce event
   goes to the Recycle Bin. Deal Supports for it stay in Salesforce.
 
+Build 19 (November 18, 2026):
+
+- **iPad: Microsoft 365 sign-in opens:** choosing **Sign in to Microsoft 365...** on the iPad now opens
+  Microsoft's sign-in sheet; before, iOS blocked it, so only the code showed. The link in the code box opens the
+  same sheet, with the code entered, everywhere.
+
 ## 1.7.1 (October 30, 2026)
 
 - **Starts even with a damaged Outlook certificate:** an unreadable certificate in SF Desk's `certs` folder
