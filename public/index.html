@@ -4032,8 +4032,10 @@ async function graphSignIn({ keepSource = false } = {}) {
   try { info = await api('/graph/signin', { method: 'POST' }); } catch (e) { toast(e.message, 'err'); return; }
   const ticket = cal.graphTicket = {};
   const status = el('span', {}, ' Waiting for you to finish signing in…');
+  // otc: the Mac and iPad apps enter the code on Microsoft's page themselves.
+  const page = `${info.verificationUri}?otc=${encodeURIComponent(info.userCode)}`;
   sub.replaceChildren(el('div', { class: 'graph-signin', style: 'padding:10px 12px;border:1px solid var(--line, #ccc);border-radius:8px;margin:6px 0;line-height:1.6' },
-    'To use your Microsoft 365 calendar, open ', el('a', { href: info.verificationUri, target: '_blank', rel: 'noopener' }, info.verificationUri),
+    'To use your Microsoft 365 calendar, open ', el('a', { href: page, target: '_blank', rel: 'noopener' }, info.verificationUri),
     ' and enter the code ', el('b', { style: 'font-size:1.15em;letter-spacing:.08em;user-select:all' }, info.userCode), ' ',
     el('button', { onclick: () => navigator.clipboard?.writeText(info.userCode).then(() => toast('Code copied')) }, 'Copy code'), ' ',
     el('button', { onclick: () => { cal.graphTicket = null; signInDone(); loadCalendar(); } }, 'Cancel'),
@@ -4041,8 +4043,7 @@ async function graphSignIn({ keepSource = false } = {}) {
       ? `Sign in with your work account and accept reading and updating your calendar (SF Desk only adds the "${dsMeta?.label || 'Deal Support'}" category).`
       : 'Sign in with your work account and accept reading your calendar.', status));
   navigator.clipboard?.writeText(info.userCode).catch(() => {});
-  // otc: the Mac and iPad apps enter the code on Microsoft's page themselves.
-  window.open(`${info.verificationUri}?otc=${encodeURIComponent(info.userCode)}`, '_blank', 'noopener');
+  window.open(page, '_blank', 'noopener');
   while (cal.graphTicket === ticket) {
     await new Promise((r) => setTimeout(r, 3000));
     if (cal.graphTicket !== ticket) return;
