@@ -3308,9 +3308,22 @@ function renderTesPanel(r, box, { d = tes.data, onAdded = loadTes, open = false 
         await onAdded();
       } catch (e) { toast(e.message, 'err'); save.disabled = false; }
     });
+    // The server adds my initials before the notes and the TES dates, engineer, competitor and close date after
+    // them (see /tes/:id/update-parts); shown here as it will be saved.
+    const preview = el('div', { class: 'sub', style: 'grid-column:2/-1;white-space:pre-wrap;margin:0;padding:8px 10px;border:1px dashed var(--line);border-radius:6px' }, 'Loading…');
+    let parts = null;
+    const showPreview = () => {
+      if (!parts) return;
+      let text = notes.value.trim();
+      if (parts.initials && !new RegExp(`^${parts.initials}\\b`, 'i').test(text)) text = `${parts.initials}:  ${text}`;
+      preview.replaceChildren(el('b', {}, 'Saved as:'), '\n', `${text}\n\n${parts.footer}`);
+    };
+    notes.addEventListener('input', showPreview);
+    api(`/tes/${r.Id}/update-parts`).then((p) => { parts = p; showPreview(); }, (e) => { preview.textContent = e.message; });
     form = el('div', { class: 'tes-update' },
       el('label', {}, el('span', {}, 'TES Status'), status),
       el('label', { class: 'wide' }, el('span', {}, f.statusNotes?.label || 'Notes'), notes),
+      preview,
       el('div', { class: 'form-actions' }, save));
   }
   box.replaceChildren(

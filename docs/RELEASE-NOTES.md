@@ -15,6 +15,12 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 5
+
+- **TES status update notes:** a new update's notes start with your initials ("KC:  ", unless they already do) and
+  end with the TES event duration (TES Start Date to TES End Date), the assigned engineer, the opportunity's primary
+  competitor and its close date. The form shows the notes as they'll be saved.
+
 ### Build 4
 
 - **Three ways from free time:** clicking free time on Time Entry opens tabs: **Meeting with Deal Support** (as
