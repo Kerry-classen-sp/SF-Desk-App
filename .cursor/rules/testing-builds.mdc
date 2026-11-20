@@ -1,0 +1,35 @@
+---
+description: How to build SF Desk - local Mac client only when testing, every client on a deploy
+alwaysApply: true
+---
+
+# Testing new features: local Mac client only
+
+When testing a new feature, build and launch only the local Mac app. No release, no iPad install, no Windows or
+iOS builds.
+
+```bash
+export PATH="/Applications/SF Desk.app/Contents/Resources/node/bin:/opt/homebrew/bin:$PATH"
+osascript -e 'quit app "SF Desk"'
+scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip --worktree   # uncommitted changes included
+rsync -a --delete "dist/SF Desk.app/" "/Applications/SF Desk.app/"
+codesign --verify --strict "/Applications/SF Desk.app" && open "/Applications/SF Desk.app"
+```
+
+- `--worktree` builds the tracked files as they are, so no commit is needed. Untracked new files have to be
+  `git add`ed first, or they're left out.
+- The build is labeled `-dirty` and keeps the current build number. There's no version bump, PR or tag.
+- If `--from` refuses because `package-lock.json` changed, rebuild the zip with `scripts/build-mac-package.sh`.
+
+# Deploy: build all the others too
+
+When the user asks to deploy (release), build every client:
+1. Add the release note to `docs/RELEASE-NOTES.md`, then `git add -A && git commit`.
+2. `osascript -e 'quit app "SF Desk"'; scripts/build-apps.sh`: bumps the build, opens and merges a PR, tags it,
+   and builds the Mac app, disk image and Windows package.
+3. Install the Mac app: `rsync -a --delete "dist/SF Desk.app/" "/Applications/SF Desk.app/"`, `codesign --verify
+   --strict`, `open`.
+4. Install to the iPad: `ios/build-device.sh 00008103-0012550636C3001E` (unlocked, on the cable; the Cisco VPN
+   can block it). If it can't connect, say so and offer to retry.
+
+Never upload to TestFlight unless the user explicitly asks.

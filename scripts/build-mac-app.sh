@@ -5,8 +5,10 @@
 #
 #   scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip     # recommended
 #   scripts/build-mac-app.sh [--node /path/to/node]          # from this checkout
+#   scripts/build-mac-app.sh --from dist/SF-Desk-mac.zip --worktree   # a test build with uncommitted changes
 #
-# The app's code is always this checkout's current commit. --from takes node_modules and Node.js from the
+# The app's code is this checkout's current commit, or with --worktree its tracked files as they are now
+#   (uncommitted changes included, untracked files not), for trying a change before it's committed. --from takes node_modules and Node.js from the
 #   download scripts/build-mac-package.sh makes (the zip or its unzipped folder), which can be built
 #   anywhere npm and nodejs.org are reachable; it only needs rebuilding when package-lock.json changes.
 # Without --from it uses this checkout's node_modules, with --node (default: the node on PATH). That has
@@ -20,6 +22,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 FROM=""
 NODE=""
+REV="HEAD"
 die() { printf '%s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
@@ -27,6 +30,7 @@ while [ $# -gt 0 ]; do
     --from) FROM="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
+    --worktree) REV="$(git -C "$ROOT" stash create)"; REV="${REV:-HEAD}"; shift ;;
     *) die "Unknown option $1. See the top of $0." ;;
   esac
 done
@@ -40,7 +44,7 @@ trap 'rm -rf "$TMP"' EXIT
 # 1. The server (this commit), its node_modules and Node.js.
 PAYLOAD="$TMP/payload"
 mkdir -p "$PAYLOAD"
-git -C "$ROOT" archive HEAD | tar -x -C "$PAYLOAD"
+git -C "$ROOT" archive "$REV" | tar -x -C "$PAYLOAD"
 BUILD_NO="$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$PAYLOAD/package.json" | head -1)"
 BUILD_NO="${BUILD_NO:-0}"
 BUILD_INFO="($(git -C "$ROOT" describe --always --dirty), $(git -C "$ROOT" log -1 --format=%cs))"

@@ -11,7 +11,7 @@ view, and the Salesforce CLI's connected app for sign-in. Still to do:
   Apple Developer team; move it to the company's Apple Developer account, or company device management, for wider use.
 - **Own connected app:** if Salesforce or IT ever limits the CLI's `PlatformCLI` app, an SF Desk connected
   app (or External Client App) with a `sfdesk://` callback, opened in `ASWebAuthenticationSession`.
-- **Touch wording:** Time Entry says "right-click it to create…". On a phone, say "tap it", and offer the
+- **Touch wording:** Calendar says "right-click it to create…". On a phone, say "tap it", and offer the
   quick menu on a long press.
 
 ## Smaller ideas offered along the way

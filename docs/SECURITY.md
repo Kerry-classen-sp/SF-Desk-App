@@ -59,7 +59,7 @@ device. Signing out revokes it with Salesforce and deletes it.
 
 ### Microsoft 365
 
-For reading your calendar in Time Entry (on the desktop and the iPad), and for marking meetings in Outlook.
+For reading your calendar in Calendar (on the desktop and the iPad), and for marking meetings in Outlook.
 It uses Microsoft's device-code sign-in with SailPoint's SF Desk app registration (a public client with no
 secret; its client and tenant IDs are in `.env.example` and `ios/SFDesk/Host/host.js`). The Mac and iPad
 apps show Microsoft's page in a sheet with a non-persistent web session, so no other Microsoft sign-in is
@@ -95,7 +95,7 @@ locally. To clear the local copy, quit SF Desk and delete `sf-desk.db`. It is re
 
 ### Calendar
 
-Time Entry reads only your Microsoft 365 calendar, through Microsoft Graph after you sign in, or your
+Calendar reads only your Microsoft 365 calendar, through Microsoft Graph after you sign in, or your
 Salesforce events. Calendars on the computer or iPad itself (macOS Calendar, classic Outlook, iCloud, Google
 and the like) are never read, so SF Desk doesn't ask for calendar access.
 Meetings are read when you open the tab and are not stored, apart from the links described above.

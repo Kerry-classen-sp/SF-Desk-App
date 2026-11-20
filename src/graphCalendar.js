@@ -155,7 +155,7 @@ export function graphCalendar(opts) {
   // Events between two instants in the given calendars, each with a stable id for its occurrence.
   async function events(fromIso, toIso, ids) {
     const me = String(saved?.account || '').toLowerCase();
-    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs,isOrganizer,type,responseStatus';
+    const select = 'id,iCalUId,subject,start,end,isAllDay,location,body,organizer,attendees,isCancelled,showAs,isOrganizer,type,responseStatus,onlineMeeting';
     const out = [];
     for (const id of ids) {
       const calId = id.replace(/^graph:/, '');
@@ -173,7 +173,7 @@ export function graphCalendar(opts) {
             uid: e.iCalUId || e.id, title: e.subject || '', start: start.toISOString(), end: end.toISOString(),
             date: localDay(start), allDay: !!e.isAllDay, location: e.location?.displayName || '',
             notes: String(e.body?.content || '').slice(0, 20000), calendar: title, calendarId: id,
-            organizer: e.organizer?.emailAddress?.name || '',
+            organizer: e.organizer?.emailAddress?.name || '', joinUrl: e.onlineMeeting?.joinUrl || '',
             attendees: (e.attendees || []).filter((a) => a.type !== 'resource').map((a) => ({
               name: a.emailAddress?.name || '', email: a.emailAddress?.address || '',
               me: !!me && String(a.emailAddress?.address || '').toLowerCase() === me,
@@ -193,12 +193,13 @@ export function graphCalendar(opts) {
   }
 
   // A meeting in one of my calendars, from Graph's event fields (subject, start, end and so on; attendees, if any,
-  // get invitations). Returns its id as events() gives it.
-  async function createEvent(calendarId, fields) {
+  // get invitations, with `signature` at the end of the description). Returns its id as events() gives it.
+  async function createEvent(calendarId, fields, { signature = '' } = {}) {
     needWrite('add meetings to it');
     const calId = String(calendarId).replace(/^graph:/, '');
     const body = { ...fields };
     if (body.isOnlineMeeting) body.onlineMeetingProvider = 'teamsForBusiness';
+    if (signature && body.attendees?.length) body.body = { contentType: 'text', content: withSignature(body.body?.content, signature) };
     const e = await graph(`/me/calendars/${encodeURIComponent(calId)}/events`, { Prefer: 'outlook.timezone="UTC"' }, { method: 'POST', body });
     return { id: occurrenceId(e, e.id) };
   }
@@ -222,12 +223,31 @@ export function graphCalendar(opts) {
   }
 
   // Removes one meeting (one occurrence of a series) from my calendar. For a meeting I organized, Microsoft sends
-  // the attendees a cancellation.
-  async function deleteEvent(id, graphId) {
+  // the attendees a cancellation, with `signature` as its message.
+  async function deleteEvent(id, graphId, { signature = '' } = {}) {
     needWrite('remove meetings');
-    const { path } = await checked(id, graphId);
-    await graph(path, {}, { method: 'DELETE' });
+    const { path, e } = await checked(id, graphId, 'isOrganizer,attendees');
+    const invited = e.isOrganizer !== false && (e.attendees || []).some((a) => a.type !== 'resource');
+    if (signature && invited) await graph(`${path}/cancel`, {}, { method: 'POST', body: { comment: signature } });
+    else await graph(path, {}, { method: 'DELETE' });
   }
+
+  // The signature goes at the end of what's sent, once: text that already ends with it (or has it) is left alone.
+  const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const htmlText = (h) => String(h || '').replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const hasSignature = (text, signature) => flat(text).includes(flat(signature));
+  const withSignature = (text, signature) => {
+    const t = String(text || '').replace(/\s+$/, '');
+    return !signature || hasSignature(t, signature) ? t : t ? `${t}\n\n${signature}` : signature;
+  };
+  const htmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const withSignatureHtml = (html, signature) => {
+    if (!signature || hasSignature(htmlText(html), signature)) return null;
+    const sig = `<div><br>${htmlEscape(signature).replace(/\r?\n/g, '<br>')}</div>`;
+    const h = String(html || '');
+    return /<\/body>/i.test(h) ? h.replace(/<\/body>(?![\s\S]*<\/body>)/i, `${sig}</body>`) : h + sig;
+  };
 
   const DETAIL = 'subject,body,end,location,attendees,showAs,isReminderOn,reminderMinutesBeforeStart,sensitivity,importance,' +
     'categories,isOnlineMeeting,onlineMeeting,organizer,isOrganizer,responseStatus,responseRequested,allowNewTimeProposals,type,recurrence,webLink';
@@ -255,22 +275,35 @@ export function graphCalendar(opts) {
   // Saves the changed fields of a meeting (Graph's own names: subject, body as text, start/end, isAllDay, location,
   // attendees, showAs, reminder, sensitivity, importance, categories, isOnlineMeeting, responseRequested,
   // allowNewTimeProposals, recurrence). Rooms stay when the attendees change. For a meeting I organized with
-  // attendees, Microsoft sends them the update. Returns the meeting's id as events() will give it.
-  async function updateEvent(id, graphId, changes) {
+  // attendees, Microsoft sends them the update, with `signature` at the end of the description (added to the
+  // description as it is, formatting kept, when it isn't being changed). Returns the meeting's id as events() will give it.
+  async function updateEvent(id, graphId, changes, { signature = '' } = {}) {
     needWrite('change meetings');
-    const { path, e } = await checked(id, graphId, 'attendees');
+    const { path, e } = await checked(id, graphId, 'attendees,isOrganizer,body');
     const body = { ...changes };
     if (body.attendees) body.attendees = [...body.attendees, ...(e.attendees || []).filter((a) => a.type === 'resource')];
     if (body.isOnlineMeeting) body.onlineMeetingProvider = 'teamsForBusiness';
+    const invited = e.isOrganizer !== false && (body.attendees || e.attendees || []).some((a) => a.type !== 'resource');
+    // Only with a change the attendees are sent anyway: a new description alone would send them an update.
+    const sent = ['subject', 'body', 'start', 'end', 'isAllDay', 'location', 'attendees', 'isOnlineMeeting', 'recurrence'].some((k) => k in body);
+    if (signature && invited && sent) {
+      if (body.body) body.body = { contentType: 'text', content: withSignature(body.body.content, signature) };
+      else if (e.body?.contentType === 'html') {
+        const html = withSignatureHtml(e.body.content, signature);
+        if (html != null) body.body = { contentType: 'html', content: html };
+      } else if (!hasSignature(e.body?.content, signature)) body.body = { contentType: 'text', content: withSignature(e.body?.content, signature) };
+    }
     const after = await graph(path, { Prefer: 'outlook.timezone="UTC"' }, { method: 'PATCH', body });
     return { id: after?.start?.dateTime ? occurrenceId(after, graphId) : id };
   }
 
-  // Accept, tentatively accept or decline a meeting I was invited to, telling the organizer (with comment) or not.
-  async function respondEvent(id, graphId, action, { comment = '', sendResponse = true } = {}) {
+  // Accept, tentatively accept or decline a meeting I was invited to, telling the organizer (with comment, and
+  // `signature` after it) or not.
+  async function respondEvent(id, graphId, action, { comment = '', sendResponse = true, signature = '' } = {}) {
     needWrite('answer meetings');
     if (!['accept', 'tentativelyAccept', 'decline'].includes(action)) throw new CalendarError('Unknown response.', 400);
     const { path } = await checked(id, graphId);
+    if (sendResponse) comment = withSignature(comment, signature);
     await graph(`${path}/${action}`, {}, { method: 'POST', body: { comment, sendResponse } });
   }
 

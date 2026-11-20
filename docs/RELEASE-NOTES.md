@@ -15,6 +15,37 @@ Everything from the 1.7.5 builds below, as one release:
 - **Remove this event:** on an event's right-click menu, with a confirmation saying what happens.
 - **Security:** updated body-parser and qs.
 
+### Build 7
+
+- **Edit or delete a TES update:** each update in a TES Request's history has Edit (its status, the notes, and the
+  request's Competitor and Exec Readout Date) and Delete (to Salesforce's Recycle Bin), as your Salesforce user
+  allows. An edited update gets the TES details written again with today's values, and the request's Most Recent
+  TES Status and notes follow its newest update after an edit or delete.
+- **Competitor and Exec Readout Date always in the notes:** when the request's Most Recent TES Status Notes field
+  is too short for the whole text, the notes are shortened instead of the TES details at the end.
+- **Use Cases Accepted:** a third field kept by SF Desk for each TES Request, a checkbox on the add and edit update
+  forms, written into every update's notes as "Use Cases Accepted: Yes" or "No".
+- **Customer Resource Agreement:** a fourth one, a checkbox that starts ticked, written into every update's notes
+  as "Customer Resource Agreement: Yes" or "No".
+- **Competitor starts as the Primary Competitor:** the notes no longer have a separate Primary Competitor line.
+  Instead, a TES Request's Competitor starts as its opportunity's Primary Competitor until it's first saved.
+- **Event details on Time Entry:** clicking an event shows its details in the right column (when, calendar,
+  organizer, where, attendees and notes), also when it already has its Deal Support, with a Join button for its
+  Teams, Zoom, Webex or Google Meet meeting.
+- **TES Request window:** the Deal Supports linked to the request are now at the bottom, under the updates and
+  all fields.
+- **Attendee lookup:** when editing or creating a Microsoft 365 meeting, Required and Optional attendees show as
+  chips, and typing a name searches Salesforce's active users and contacts. Anyone else can be added with their
+  full email address (typed, or pasted as a list); people outside your company are marked External.
+- **Time Entry is now Calendar.**
+- **Calendar Time Zone:** pick the time zone the Calendar is shown in, in Settings or beside the calendar list
+  (US zones; your computer's by default). Days, hours, the "now" line and the times in the event, new meeting
+  and Calendar Event Only forms all follow it, and meetings are created and changed in it.
+- **Email Signature (Settings):** a text block added once to the end of the Microsoft 365 meeting invitations,
+  updates and cancellations you send from SF Desk, and to your reply when you accept or decline with a response.
+  A meeting's formatted description is kept when the signature is added to it, and changing only your own
+  reminder, categories or Show as sends nobody anything.
+
 ### Build 6
 
 - **Competitor and Exec Readout Date on TES updates:** the update form has these two fields, kept by SF Desk for

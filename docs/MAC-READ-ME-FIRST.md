@@ -7,7 +7,7 @@ Salesforce user can.
 
 - A Mac on macOS 13 (Ventura) or newer.
 - A Salesforce login to `sailpoint.my.salesforce.com` (your usual SSO login).
-- Your SailPoint Microsoft 365 account, for your meetings in Time Entry.
+- Your SailPoint Microsoft 365 account, for your meetings in Calendar.
 
 ## Install
 
@@ -19,7 +19,7 @@ Salesforce user can.
    - offers to download the Salesforce CLI, which it signs in with (no admin rights needed);
    - opens your browser to sign in to Salesforce with SSO. Sign in, then come back to SF Desk;
    - offers to set up the Outlook add-in. See **Outlook Add-in** in this window.
-4. **Click Connect**, then open **Time Entry** and choose **Sign in to Microsoft 365...** in the list at
+4. **Click Connect**, then open **Calendar** and choose **Sign in to Microsoft 365...** in the list at
    the top. Microsoft's sign-in opens on the SF Desk window with the code already entered: pick or type
    your SailPoint account and accept.
 

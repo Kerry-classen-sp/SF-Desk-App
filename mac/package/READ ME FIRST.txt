@@ -6,7 +6,7 @@ to Applications and open it, no Terminal needed. This download is the Terminal i
 
 Before you start
 - You need a Salesforce login to sailpoint.my.salesforce.com (your usual SSO login).
-- SF Desk's Time Entry tab reads your meetings from Microsoft 365: pick it in Time Entry's calendar
+- SF Desk's Calendar tab reads your meetings from Microsoft 365: pick it in the Calendar tab's calendar
   list and sign in with your SailPoint account. Salesforce events work too.
 
 Install

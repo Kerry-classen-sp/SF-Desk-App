@@ -21,7 +21,7 @@ nothing else to install and no Terminal window to keep open.
    - offers to install the Salesforce CLI if it can't find one: with Homebrew (`brew install sf`) if you
      have it, else Salesforce's own download (no admin rights needed);
    - opens your browser to sign in to `sailpoint.my.salesforce.com` with SSO, if the CLI isn't signed in.
-4. **Click Connect**, then open **Time Entry** and choose **Sign in to Microsoft 365...** in the list at
+4. **Click Connect**, then open **Calendar** and choose **Sign in to Microsoft 365...** in the list at
    the top. Microsoft's sign-in opens in a sheet on the SF Desk window with the code already entered;
    pick or type your SailPoint account. See [Your Microsoft 365 calendar](#your-microsoft-365-calendar).
 
@@ -125,7 +125,7 @@ Use this if you'd rather work from a Git checkout, for example to change the cod
 | Git (or GitHub Desktop) and read access to `Kerry-classen-sp/SF-Desk-App` | To get the code; ask Kerry Classen for access | `git --version` |
 | Salesforce CLI (`sf`) | SF Desk borrows its login, because we can't create our own Salesforce app | `sf --version` |
 | A Salesforce login to `sailpoint.my.salesforce.com` with API access | Your normal SSO login is fine | |
-| Your SailPoint Microsoft 365 account | The **Time Entry** tab reads your meetings from it | You can sign in to Outlook on the web |
+| Your SailPoint Microsoft 365 account | The **Calendar** tab reads your meetings from it | You can sign in to Outlook on the web |
 
 Run every command below in **Terminal.app** (Applications > Utilities > Terminal).
 
@@ -236,11 +236,11 @@ You'll see `SF Desk running at http://localhost:3000`. Open that address in your
 
 ## Your Microsoft 365 calendar
 
-**Time Entry** reads your meetings from Microsoft 365 through Microsoft Graph, the same on the Mac app, a
+**Calendar** reads your meetings from Microsoft 365 through Microsoft Graph, the same on the Mac app, a
 Terminal or manual install, Windows and the iPad. It works with any Outlook (new, classic, on the web) and
 doesn't need the calendar set up on the computer. The other choice in its list is **Salesforce events**.
 
-1. Open **Time Entry** and choose **Sign in to Microsoft 365...** in the list at the top.
+1. Open **Calendar** and choose **Sign in to Microsoft 365...** in the list at the top.
 2. SF Desk shows a code. In the Mac and iPad apps, Microsoft's sign-in page opens in a sheet with the code
    already entered; in a browser it opens in a new tab with the code copied, so paste it.
 3. Pick or type your `@sailpoint.com` account and finish SSO and MFA. The sheet starts with no saved
@@ -262,7 +262,7 @@ in) and your SailPoint Microsoft 365 account for the calendar.
    (no admin rights) and adds SF Desk to the Start menu and the Desktop.
 2. SF Desk starts. The first time it offers to download the Salesforce CLI (unless one is installed) and opens
    your browser to sign in to `sailpoint.my.salesforce.com`.
-3. Click **Connect**, open **Time Entry** and sign in to Microsoft 365 (see
+3. Click **Connect**, open **Calendar** and sign in to Microsoft 365 (see
    [Your Microsoft 365 calendar](#your-microsoft-365-calendar)). The sign-in is kept in
    `%LOCALAPPDATA%\SF Desk\data\graph-token.json`.
 
@@ -293,7 +293,7 @@ installer, or your checkout for a manual one.
   records, and which meetings you've logged or marked as not needing a Deal Support. Deleting the
   `data` folder resets all of that; it's rebuilt as you use the app.
 - `data/graph-token.json` keeps your Microsoft 365 sign-in (a refresh token, readable only by you).
-  **Sign out of Microsoft 365** in Time Entry deletes it.
+  **Sign out of Microsoft 365** in Calendar deletes it.
 - Your Salesforce token is only held in memory and never written to disk. Every edit goes straight to
   Salesforce when you click **Save** or **Add**.
 - The server only listens on `localhost`, so nobody else on the network can reach it.
@@ -310,7 +310,7 @@ redo step 3's dependency step first.
 
 ## Troubleshooting
 
-### Time Entry shows only "Salesforce events"
+### Calendar shows only "Salesforce events"
 
 1. **Signed in to Microsoft 365?** The list at the top says **Sign in to Microsoft 365...** until you are;
    see [Your Microsoft 365 calendar](#your-microsoft-365-calendar).

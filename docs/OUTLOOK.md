@@ -1,7 +1,7 @@
 # SF Desk in Outlook
 
 The SF Desk add-in puts a **Create Deal Support** button on meetings in Outlook. It opens a panel beside the
-meeting with the same form as the **Time Entry** tab, prefilled from that meeting:
+meeting with the same form as the **Calendar** tab, prefilled from that meeting:
 
 - the opportunity, from the Salesforce copy of the meeting at the same time (e.g. synced by Outreach), else
   suggested from the account named in the title or the attendees' email domains
@@ -13,13 +13,13 @@ The panel also shows the Deal Supports that already cover the meeting (made from
 for the same opportunity, account or name). A meeting with a Deal Support gets a green **Deal Support** category
 in Outlook, so it stands out in your calendar without opening it (the category is added to your Outlook
 category list the first time). **No DS Required** (in the form, where Cancel would be) marks a meeting that
-doesn't need one, as on the Time Entry tab, and gives it a gray **No DS Required** category in Outlook; for a
-meeting synced into Salesforce the mark shows on Time Entry too. Everything runs through SF Desk on your Mac, so SF Desk must be running for the
+doesn't need one, as on the Calendar tab, and gives it a gray **No DS Required** category in Outlook; for a
+meeting synced into Salesforce the mark shows on Calendar too. Everything runs through SF Desk on your Mac, so SF Desk must be running for the
 button to work. It only reads the meeting you click it on, and nothing is saved to Salesforce until you click
 **Create Deal Support**; in Outlook it only ever adds that category.
 
 The add-in can only mark the meeting it's open on. SF Desk also marks every meeting without opening each one,
-once you've signed in to Microsoft 365 in **Time Entry** (where it reads your calendar): each week you open
+once you've signed in to Microsoft 365 in **Calendar** (where it reads your calendar): each week you open
 there has its meetings with a Deal Support marked green and those needing none gray, and loses a category
 that no longer applies. **Mark in Outlook** on that tab does the same on demand, signing in first if needed.
 
@@ -80,7 +80,7 @@ you to accept the new permission.
 
 **If there is no "Custom Addins" section, or adding the file fails:** your company's Microsoft 365 admin
 policy may block custom add-ins (the Exchange "My Custom Apps" user role). That can only be changed by IT,
-for example by deploying the manifest to you from the Microsoft 365 admin center. Until then, the Time Entry
+for example by deploying the manifest to you from the Microsoft 365 admin center. Until then, the Calendar
 tab in SF Desk does the same thing.
 
 ## 3. Use it
@@ -88,7 +88,7 @@ tab in SF Desk does the same thing.
 Open a meeting in your Outlook calendar (double-click it, or select it to show it in the reading pane) and
 click **Create Deal Support** in its toolbar (it may be under **•••** or **Apps**). The panel shows the
 meeting, then the form. Check the opportunity and fields and click **Create Deal Support**. The meeting then
-gets the **Deal Support** category. Meetings that already had a Deal Support (for example, made in Time Entry)
+gets the **Deal Support** category. Meetings that already had a Deal Support (for example, made in Calendar)
 get it the next time you open the panel on them.
 
 If the panel says it can't connect, check that SF Desk is running (with the Mac app, closing its window
@@ -109,6 +109,6 @@ then click **Connect** in the panel.
 - The panel is `https://localhost:3443/outlook/pane`: SF Desk's own page with Microsoft's Office.js added. It
   reads the meeting (subject, time, location, body and attendees) and sends it to `POST /api/outlook/event`,
   which finds the matching Salesforce event and covering Deal Supports and returns the prefill. Creating
-  goes through the same endpoint as Time Entry, which remembers the meeting in the local database.
+  goes through the same endpoint as Calendar, which remembers the meeting in the local database.
 - The HTTPS listener has its own session cookie (`sfdesk.sid`, `SameSite=None; Secure`) because Outlook's
   web view keeps cookies apart from your browser. Like the HTTP one, it only listens on `localhost`.
