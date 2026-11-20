@@ -72,8 +72,8 @@ foreach ($path in $links) {
 }
 Say 'Added SF Desk to the Start menu and the Desktop.'
 
-# 4. Time Entry reads meetings from Microsoft 365 (or Salesforce events).
-Say 'For your meetings in Time Entry, pick Microsoft 365 in its calendar list and sign in with your work account.'
+# 4. Calendar reads meetings from Microsoft 365 (or Salesforce events).
+Say 'For your meetings in Calendar, pick Microsoft 365 in its calendar list and sign in with your work account.'
 
 Write-Host "`nDone. Starting SF Desk..." -ForegroundColor Cyan
 Say 'The first time, it offers to download the Salesforce CLI and opens your browser to sign in.'

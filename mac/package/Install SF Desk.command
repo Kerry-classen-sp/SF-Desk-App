@@ -119,5 +119,5 @@ cp "$DEST/Start SF Desk.command" "$HOME/Desktop/Start SF Desk.command" 2>/dev/nu
   note "Put \"Start SF Desk\" on your Desktop."
 
 bold "Done. Starting SF Desk..."
-note "For your meetings in Time Entry, pick Microsoft 365 in its calendar list and sign in with your SailPoint account."
+note "For your meetings in Calendar, pick Microsoft 365 in its calendar list and sign in with your SailPoint account."
 exec "$DEST/Start SF Desk.command"

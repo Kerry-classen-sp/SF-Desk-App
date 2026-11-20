@@ -33,7 +33,8 @@ calendar permission and troubleshooting.
 - **Export to Excel** on the Pipeline deal list and the My Time activity list downloads the rows shown (after
   filters, hidden records and any clicked bar, tile or opportunity) as an .xlsx with typed dates, amounts and
   hours, a total row and a link to each record
-- **Time Entry** shows your calendar a week at a time. It reads your **Microsoft 365** calendars through
+- **Calendar** (formerly Time Entry) shows your calendar a week at a time, in the time zone picked beside the
+  calendar list or in Settings (US zones; your computer's by default). It reads your **Microsoft 365** calendars through
   Microsoft Graph (`graphCalendar.js`), on the Mac, Windows and the iPad alike: a one-time sign-in with
   SailPoint's SF Desk app registration (**Sign in to Microsoft 365...** in the list at the top; the Mac and
   iPad apps show Microsoft's page in a sheet and enter the code themselves). The same list picks
@@ -72,8 +73,8 @@ calendar permission and troubleshooting.
 - **Outlook add-in** (optional): a **Create Deal Support** button on Outlook meetings opens the same prefilled
   form beside the meeting. See [OUTLOOK.md](OUTLOOK.md) to set it up
 - Works from phone width up to wide desktops: on phones the tabs fold into a ☰ menu, Accounts shows the list
-  or the account (with a back button), Time Entry lists the week day by day, and list tables become cards; on wide
-  screens (1100px and up) Time Entry keeps a panel beside the calendar for entering time: the selected event and its
+  or the account (with a back button), Calendar lists the week day by day, and list tables become cards; on wide
+  screens (1100px and up) Calendar keeps a panel beside the calendar for entering time: the selected event and its
   create form, the Deal Support being edited, or a prompt when nothing is picked
 - Lists accounts where you are the Lead SE by default (or all you can see) with search
 - The account screen shows the sales rep prominently, and a **Deal Supports** panel with everyone's Deal Supports
@@ -120,7 +121,7 @@ see [INSTALL.md](INSTALL.md#windows)). `SF-Desk-windows.zip` holds the app, Node
 **Install SF Desk** script that needs no admin rights. SF Desk opens in an Edge window of its own and keeps an
 icon by the clock to reopen it, edit settings, restart the server, see the log or quit.
 
-- **Calendar:** Time Entry reads your **Microsoft 365** calendar through Microsoft Graph, as on a Mac (any
+- **Calendar:** the Calendar tab reads your **Microsoft 365** calendar through Microsoft Graph, as on a Mac (any
   Outlook, new or classic): a one-time sign-in with a code on Microsoft's device sign-in page.
 - **Settings and data:** `%LOCALAPPDATA%\SF Desk` (`.env`, `data\`, `logs\server.log`, `sf-cli\`); the app is in
   `%LOCALAPPDATA%\Programs\SF Desk`.

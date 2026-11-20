@@ -23,7 +23,7 @@ The same app as the Mac's, without the Outlook add-in. It's for iPad only (`TARG
 - **Salesforce sign-in:** uses the Salesforce CLI's connected app (`PlatformCLI`, which every org has), with
   PKCE. The org's login page (`SFDeskLoginURL` in `ios/SFDesk/Info.plist`, the My Domain) opens in the app and
   continues to SSO. The refresh token stays in the Keychain. **Disconnect** revokes it.
-- **Calendar:** Time Entry reads your Microsoft 365 calendar through Microsoft Graph (`src/graphCalendar.js`,
+- **Calendar:** the Calendar tab reads your Microsoft 365 calendar through Microsoft Graph (`src/graphCalendar.js`,
   bundled into the core), as on the Mac, with SailPoint's SF Desk app registration (set in `Host/host.js`).
   **Sign in to Microsoft 365...** opens Microsoft's page in a sheet with a fresh session, and `WebHost.swift`
   enters the code; the sign-in is kept in the Keychain. Calendars on the device itself aren't read, so the

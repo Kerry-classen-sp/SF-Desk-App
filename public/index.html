@@ -132,7 +132,8 @@ darkQuery.addEventListener('change', applyTheme);
   section h3 .spacer { flex: 1; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
   .grid label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  .grid label.wide { grid-column: 1 / -1; }
+  .grid label.wide, .grid div.field.wide { grid-column: 1 / -1; }
+  .grid div.field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
 
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
@@ -172,12 +173,15 @@ darkQuery.addEventListener('change', applyTheme);
   .tes-update label span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   .tes-update textarea { min-height: calc(3lh + 14px); resize: vertical; }
   .tes-update .form-actions { grid-column: 1 / -1; margin-top: 0; }
+  .tes-update .tes-check { flex: 0 0 auto; }
+  .tes-update .tes-check input { width: auto; margin: 8px 0 0; }
   .grid.tes-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tes-create-col { display: grid; gap: 10px 14px; align-content: start; }
   .tes-show-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; color: var(--ink); cursor: pointer; }
   .tes-create div.field { display: flex; flex-direction: column; }
   .tes-create .tes-create-opp { grid-column: 1 / -1; }
   .linked-ds { margin: 8px 0 14px; }
+  .ds-more + .linked-ds { margin-top: 18px; }
   .linked-ds h3 { font-size: 14px; margin: 0 0 8px; }
   tr.linked-mine td { font-weight: 600; }
   h4.req-head { display: flex; align-items: center; gap: 10px; }
@@ -228,6 +232,15 @@ darkQuery.addEventListener('change', applyTheme);
   .pick-list li span { color: var(--muted); font-size: 12px; }
   .pick-list li.on, .pick-list li:hover { background: var(--bg); }
   .pick-list li.none { color: var(--muted); cursor: default; }
+  .rcpt { position: relative; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 4px 6px; min-height: 34px; box-sizing: border-box;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: text; }
+  .rcpt.off { opacity: .7; cursor: default; }
+  .rcpt input { flex: 1 1 160px; width: auto; min-width: 120px; border: 0; padding: 3px 2px; background: transparent; outline: none; box-shadow: none; }
+  .rcpt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); font-size: 13px; max-width: 100%; }
+  .rcpt-chip.ext { border-color: var(--declined-line); }
+  .rcpt-chip small { color: var(--muted); font-size: 11px; }
+  .rcpt-chip button { border: 0; background: none; padding: 0 4px; margin: 0; min-height: 0; line-height: 1; cursor: pointer; color: var(--muted); font-size: 14px; }
+  .rcpt .pick-list { top: calc(100% + 2px); }
   .reassign-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; max-height: 160px; overflow: auto; }
 
   .center { display: grid; place-items: center; height: calc(100vh - var(--chrome)); }
@@ -481,7 +494,7 @@ darkQuery.addEventListener('change', applyTheme);
     <button id="navDash" onclick="showDashboard()">Deals</button>
     <button id="navTime" onclick="showTime()">DS Time</button>
     <button id="navTeam" onclick="showTeam()">My Team</button>
-    <button id="navCal" onclick="showCalendar()">Time Entry</button>
+    <button id="navCal" onclick="showCalendar()">Calendar</button>
     <button id="navTes" onclick="showTes()">TES</button>
     <button id="navAccts" onclick="showMain()">Accounts</button>
   <div class="hdr-right">
@@ -877,8 +890,41 @@ function showSettings() {
     el('section', {},
       el('fieldset', {}, el('legend', {}, 'Display Mode'), modes.map(choice)),
       el('div', { class: 'sub', style: 'margin:10px 0 0' }, 'System Auto follows your computer\'s light or dark appearance.')),
+    el('section', {},
+      el('fieldset', {}, el('legend', {}, 'Calendar Time Zone'),
+        tzSelect(() => toast(`The calendar now shows ${tzLabel()} times`, 'ok'), { style: 'width:auto;max-width:320px' })),
+      el('div', { class: 'sub', style: 'margin:10px 0 0' }, 'The Calendar screen shows days and times in this zone, and new meetings and ' +
+        'changes are made in it. It starts as your computer\'s, and can also be changed beside the calendar picker.')),
+    me?.connected ? signatureSettings() : null,
     me?.connected ? null : el('button', { onclick: () => showConnect() }, '← Back'),
   ));
+}
+
+// The email signature, kept by SF Desk for this Salesforce org and added to what it has Microsoft 365 send.
+function signatureSettings() {
+  const text = el('textarea', { rows: 6, 'aria-label': 'Email Signature', disabled: true, placeholder: 'Kerry Classen\nAdvisory Solution Consultant\n…',
+    style: 'width:100%;box-sizing:border-box;font:inherit' });
+  const save = el('button', { class: 'primary', type: 'button', disabled: true }, 'Save signature');
+  const note = el('span', { class: 'sub', style: 'margin:0 0 0 10px' });
+  let saved = '';
+  const dirty = () => { save.disabled = text.value.trim() === saved; note.textContent = save.disabled ? '' : 'Not saved yet'; };
+  text.addEventListener('input', dirty);
+  api('/prefs/signature').then((r) => {
+    saved = r.text || ''; text.value = saved; text.maxLength = r.max || 2000; text.disabled = false;
+  }, (e) => { note.textContent = e.message; });
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const r = await api('/prefs/signature', { method: 'PUT', body: { text: text.value } });
+      saved = r.text || ''; text.value = saved; note.textContent = '';
+      toast(saved ? 'Saved your email signature' : 'Removed your email signature', 'ok');
+    } catch (e) { toast(e.message, 'err'); dirty(); }
+  });
+  return el('section', {},
+    el('fieldset', {}, el('legend', {}, 'Email Signature'), text),
+    el('div', { class: 'sub', style: 'margin:10px 0' }, 'Added to the end of the Microsoft 365 meeting invitations, updates and cancellations you send ' +
+      'from SF Desk, and to your reply when you accept or decline with a response. Leave it empty for none.'),
+    el('div', { style: 'display:flex;align-items:center' }, save, note));
 }
 
 function showMain() {
@@ -1888,8 +1934,8 @@ function openTesDialog(r, d, reload) {
       el('span', { class: 'spacer', style: 'flex:1' }),
       el('button', { onclick: () => dlg.close(), 'aria-label': 'Close' }, 'Close')),
     sub ? el('div', { class: 'sub' }, sub) : '',
-    linkedDealSupports(r.Id, 'TES Request'),
     box,
+    linkedDealSupports(r.Id, 'TES Request'),
   );
   document.body.append(dlg);
   dlg.showModal();
@@ -3303,34 +3349,39 @@ function renderTesPanel(r, box, { d = tes.data, onAdded = loadTes, open = false 
       save.disabled = true;
       try {
         const res = await api(`/tes/${r.Id}/updates`, { method: 'POST', body: { status: status.value, notes: notes.value,
-          local: parts ? { competitor: competitor.value, execReadout: execReadout.value } : undefined } });
+          local: parts ? { competitor: competitor.value, execReadout: execReadout.value, useCases: useCases.checked, customerResources: customerResources.checked } : undefined } });
         tes.updates.set(r.Id, Promise.resolve(res));
         toast(res.warning || `Added a ${u.label} update to ${r.Name}`, res.warning ? 'err' : 'ok');
         await onAdded();
       } catch (e) { toast(e.message, 'err'); save.disabled = false; }
     });
-    // The server adds my initials before the notes and the TES dates, engineer, competitor and close date after
+    // The server adds my initials before the notes and the TES dates, engineer, local fields and close date after
     // them (see /tes/:id/update-parts); shown here as it will be saved.
     const preview = el('div', { class: 'sub', style: 'grid-column:2/-1;white-space:pre-wrap;margin:0;padding:8px 10px;border:1px dashed var(--line);border-radius:6px' }, 'Loading…');
-    // Competitor and Exec Readout Date are kept by SF Desk for each TES Request (not in Salesforce), start as last
-    // saved, and go into every update's notes.
+    // Competitor, Exec Readout Date and Use Cases Accepted are kept by SF Desk for each TES Request (not in
+    // Salesforce), start as last saved, and go into every update's notes.
     const competitor = el('input', { type: 'text', maxlength: 120, 'aria-label': 'Competitor', placeholder: 'Who we\'re up against', disabled: true });
     const execReadout = el('input', { type: 'date', 'aria-label': 'Exec Readout Date', disabled: true });
+    const useCases = el('input', { type: 'checkbox', disabled: true });
+    const customerResources = el('input', { type: 'checkbox', checked: true, disabled: true });
     let parts = null;
     const mdy = (v) => v ? `${+v.slice(5, 7)}/${+v.slice(8, 10)}/${v.slice(0, 4)}` : 'not set';
     const showPreview = () => {
       if (!parts) return;
       let text = notes.value.trim();
       if (parts.initials && !new RegExp(`^${parts.initials}\\b`, 'i').test(text)) text = `${parts.initials}:  ${text}`;
-      const local = `Competitor: ${competitor.value.trim() || 'not set'}\nExec Readout Date: ${mdy(execReadout.value)}`;
+      const local = `Competitor: ${competitor.value.trim() || 'not set'}\nExec Readout Date: ${mdy(execReadout.value)}\nUse Cases Accepted: ${useCases.checked ? 'Yes' : 'No'}` +
+        `\nCustomer Resource Agreement: ${customerResources.checked ? 'Yes' : 'No'}`;
       preview.replaceChildren(el('b', {}, 'Saved as:'), '\n', `${text}\n\n${parts.before}\n${local}\n${parts.after}`);
     };
-    for (const n of [notes, competitor, execReadout]) n.addEventListener('input', showPreview);
+    for (const n of [notes, competitor, execReadout, useCases, customerResources]) n.addEventListener('input', showPreview);
     api(`/tes/${r.Id}/update-parts`).then((p) => {
       parts = p;
       competitor.value = p.local?.competitor || '';
       execReadout.value = p.local?.execReadout || '';
-      competitor.disabled = execReadout.disabled = false;
+      useCases.checked = !!p.local?.useCases;
+      customerResources.checked = p.local?.customerResources !== false;
+      competitor.disabled = execReadout.disabled = useCases.disabled = customerResources.disabled = false;
       showPreview();
     }, (e) => { preview.textContent = e.message; });
     form = el('div', { class: 'tes-update' },
@@ -3338,7 +3389,9 @@ function renderTesPanel(r, box, { d = tes.data, onAdded = loadTes, open = false 
       el('label', { class: 'wide' }, el('span', {}, f.statusNotes?.label || 'Notes'), notes),
       el('div', { style: 'grid-column:2/-1;display:flex;flex-wrap:wrap;gap:10px 14px' },
         el('label', { style: 'flex:2 1 220px' }, el('span', {}, 'Competitor'), competitor),
-        el('label', { style: 'flex:1 1 160px' }, el('span', {}, 'Exec Readout Date'), execReadout)),
+        el('label', { style: 'flex:1 1 160px' }, el('span', {}, 'Exec Readout Date'), execReadout),
+        tesCheck('Use Cases Accepted', useCases),
+        tesCheck('Customer Resource Agreement', customerResources)),
       preview,
       el('div', { class: 'form-actions' }, save));
   }
@@ -3353,16 +3406,80 @@ function renderTesPanel(r, box, { d = tes.data, onAdded = loadTes, open = false 
   );
   if (!u) return history.replaceChildren(el('div', { class: 'empty' }, 'No TES Status object found, so updates can\'t be shown here.'));
   if (!tes.updates.has(r.Id)) tes.updates.set(r.Id, api(`/tes/${r.Id}/updates`).catch((e) => { tes.updates.delete(r.Id); throw e; }));
-  tes.updates.get(r.Id).then(({ records }) => {
+  // Edit (status, what was entered, and the request's Competitor and Exec Readout Date; the server writes the
+  // footer again) or delete each update, as Salesforce allows.
+  const done = async (res, what) => {
+    tes.updates.set(r.Id, Promise.resolve(res));
+    toast(res.warning || what, res.warning ? 'err' : 'ok');
+    await onAdded();
+  };
+  const editRow = (x, tr) => {
+    const status = el('select', { 'aria-label': 'TES Status' }, u.options.map((o) => el('option', { value: o }, o)));
+    status.value = x[u.status] || '';
+    const notes = el('textarea', { rows: 3, 'aria-label': 'Notes', style: 'width:100%;box-sizing:border-box' });
+    notes.value = tesEntered(u.notes ? x[u.notes] : '');
+    const competitor = el('input', { type: 'text', maxlength: 120, 'aria-label': 'Competitor', placeholder: 'Competitor', disabled: true });
+    const execReadout = el('input', { type: 'date', 'aria-label': 'Exec Readout Date', disabled: true });
+    const useCases = el('input', { type: 'checkbox', disabled: true });
+    const customerResources = el('input', { type: 'checkbox', checked: true, disabled: true });
+    let local = null;
+    api(`/tes/${r.Id}/update-parts`).then((p) => {
+      local = p.local || {};
+      competitor.value = local.competitor || '';
+      execReadout.value = local.execReadout || '';
+      useCases.checked = !!local.useCases;
+      customerResources.checked = local.customerResources !== false;
+      competitor.disabled = execReadout.disabled = useCases.disabled = customerResources.disabled = false;
+    }, () => {});
+    const save = el('button', { class: 'primary', type: 'button' }, 'Save');
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        const res = await api(`/tes/${r.Id}/updates/${x.Id}`, { method: 'PATCH', body: { status: status.value, notes: notes.value,
+          local: local ? { competitor: competitor.value, execReadout: execReadout.value, useCases: useCases.checked, customerResources: customerResources.checked } : undefined } });
+        await done(res, `Saved the ${u.label} update`);
+      } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+    });
+    tr.replaceChildren(el('td', { colspan: 5 }, el('div', { class: 'tes-update', style: 'margin:0' },
+      el('label', {}, el('span', {}, 'TES Status'), status),
+      el('label', { class: 'wide' }, el('span', {}, 'Notes (the TES details are added again when you save)'), notes),
+      el('div', { style: 'grid-column:2/-1;display:flex;flex-wrap:wrap;gap:10px 14px' },
+        el('label', { style: 'flex:2 1 220px' }, el('span', {}, 'Competitor'), competitor),
+        el('label', { style: 'flex:1 1 160px' }, el('span', {}, 'Exec Readout Date'), execReadout),
+        tesCheck('Use Cases Accepted', useCases),
+        tesCheck('Customer Resource Agreement', customerResources)),
+      el('div', { class: 'form-actions' }, el('button', { type: 'button', onclick: () => tes.updates.get(r.Id).then(draw) }, 'Cancel'), save))));
+    notes.focus();
+  };
+  const remove = async (x) => {
+    const when = new Date(String(x.CreatedDate).replace(/\+0000$/, 'Z')).toLocaleString();
+    if (!confirm(`Delete the ${u.label} update from ${when}${x.CreatedBy?.Name ? ` by ${x.CreatedBy.Name}` : ''}? It goes to Salesforce's Recycle Bin.`)) return;
+    try { await done(await api(`/tes/${r.Id}/updates/${x.Id}`, { method: 'DELETE' }), `Deleted the ${u.label} update`); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  const actions = u.canUpdate || u.canDelete;
+  const draw = ({ records }) => {
     history.replaceChildren(records.length ? el('table', { class: 'tes-history' },
-      el('thead', {}, el('tr', {}, el('th', {}, 'Entered'), el('th', {}, 'TES Status'), el('th', {}, 'Notes'), el('th', {}, 'Entered by'))),
-      el('tbody', {}, records.map((x) => el('tr', {},
-        el('td', {}, new Date(String(x.CreatedDate).replace(/\+0000$/, 'Z')).toLocaleString()),
-        el('td', {}, tesChip(x[u.status])),
-        el('td', { class: 'tes-notes' }, u.notes ? x[u.notes] || '' : ''),
-        el('td', {}, x.CreatedBy?.Name || ''))))) : el('div', { class: 'empty' }, 'No status updates yet.'));
-  }, (e) => history.replaceChildren(el('div', { class: 'empty' }, e.message)));
+      el('thead', {}, el('tr', {}, el('th', {}, 'Entered'), el('th', {}, 'TES Status'), el('th', {}, 'Notes'), el('th', {}, 'Entered by'),
+        actions ? el('th', { 'aria-label': 'Actions' }) : null)),
+      el('tbody', {}, records.map((x) => {
+        const tr = el('tr', {},
+          el('td', {}, new Date(String(x.CreatedDate).replace(/\+0000$/, 'Z')).toLocaleString()),
+          el('td', {}, tesChip(x[u.status])),
+          el('td', { class: 'tes-notes' }, u.notes ? x[u.notes] || '' : ''),
+          el('td', {}, x.CreatedBy?.Name || ''),
+          actions ? el('td', { style: 'white-space:nowrap' },
+            u.canUpdate ? el('button', { class: 'linkish', style: 'display:inline;margin-right:8px', onclick: () => editRow(x, tr) }, 'Edit') : null,
+            u.canDelete ? el('button', { class: 'linkish', style: 'display:inline', onclick: () => remove(x) }, 'Delete') : null) : null);
+        return tr;
+      }))) : el('div', { class: 'empty' }, 'No status updates yet.'));
+  };
+  tes.updates.get(r.Id).then(draw, (e) => history.replaceChildren(el('div', { class: 'empty' }, e.message)));
 }
+const tesCheck = (label, box) => el('label', { class: 'tes-check' }, el('span', {}, label), box);
+
+// What was entered in an update's notes, without the TES details added when it was saved.
+const tesEntered = (text) => { const s = String(text ?? ''); const at = s.lastIndexOf('\n\nTES event Duration:'); return at < 0 ? s : s.slice(0, at); };
 
 // The opportunity as on the Accounts tab (its fields and Deal Supports), in a pop-up over this page.
 async function openOppPopup(oppId, accountId) {
@@ -3969,8 +4086,64 @@ const CAL_SOURCE = 'sfdesk.calSource';
 // Meetings you declined are hidden unless this is ticked (remembered on this device).
 const SHOW_DECLINED = 'sfdesk.showDeclined';
 try { cal.showDeclined = !!localStorage.getItem(SHOW_DECLINED); } catch { cal.showDeclined = false; }
+// The calendar's time zone (Settings, or beside the calendar picker; remembered on this device): one of the US
+// zones, the computer's by default. Days, hours and the edit forms' times are in it.
+const CAL_TZ = 'sfdesk.calTz';
+const US_ZONES = [['America/New_York', 'Eastern'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'],
+  ['America/Phoenix', 'Mountain (Arizona)'], ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'],
+  ['Pacific/Honolulu', 'Hawaii'], ['America/Puerto_Rico', 'Atlantic (Puerto Rico)'], ['Pacific/Guam', 'Chamorro (Guam)']];
+const computerTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })();
+// The computer's zone, if it's none of the above but behaves like one now, is shown under that one's name.
+const usZoneOf = (tz) => US_ZONES.find(([z]) => z === tz)?.[0]
+  || US_ZONES.find(([z]) => [0, 6].every((m) => tzOffset(new Date(2026, m, 1), z) === tzOffset(new Date(2026, m, 1), tz)))?.[0] || null;
+let calTz;
+try { calTz = localStorage.getItem(CAL_TZ) || ''; } catch { calTz = ''; }
+const tzFormats = new Map();
+function tzParts(d, tz = calTz) {
+  if (!tzFormats.has(tz)) tzFormats.set(tz, new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+  const p = Object.fromEntries(tzFormats.get(tz).formatToParts(d).map((x) => [x.type, x.value]));
+  return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute };
+}
+// Minutes the zone is ahead of UTC at instant d.
+function tzOffset(d, tz = calTz) {
+  const p = tzParts(d, tz);
+  return Math.round((Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi) - Math.floor(+d / 60000) * 60000) / 60000);
+}
+const tzDay = (d) => { const p = tzParts(d); return `${p.y}-${String(p.mo).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`; };
+const tzMins = (d) => { const p = tzParts(d); return p.h * 60 + p.mi; };
+const tzHhmm = (d) => { const p = tzParts(d); return `${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')}`; };
+const tzToday = () => tzDay(new Date());
+// The instant of `mins` past midnight on `date` (YYYY-MM-DD) in the calendar's zone.
+function tzInstant(date, mins = 0) {
+  const wall = Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10), 0, mins);
+  let t = wall - tzOffset(new Date(wall)) * 60000;
+  t = wall - tzOffset(new Date(t)) * 60000;
+  return new Date(t);
+}
+// "HH:MM" on `date` in the calendar's zone, or an invalid Date.
+const tzAt = (date, hm) => /^\d{4}-\d{2}-\d{2}$/.test(date || '') && /^\d{1,2}:\d{2}/.test(hm || '')
+  ? tzInstant(date, +hm.split(':')[0] * 60 + +hm.split(':')[1]) : new Date(NaN);
+calTz = US_ZONES.some(([z]) => z === calTz) ? calTz : usZoneOf(computerTz) || computerTz;
+function setCalTz(tz) {
+  calTz = tz;
+  try { localStorage.setItem(CAL_TZ, tz); } catch {}
+}
+// A select of the US zones (plus the computer's, if it's outside them), on the calendar's zone.
+function tzSelect(onChange, props = {}) {
+  const zones = US_ZONES.some(([z]) => z === calTz) ? US_ZONES : [...US_ZONES, [calTz, calTz.replace(/_/g, ' ')]];
+  const here = usZoneOf(computerTz) || computerTz;
+  const s = el('select', { 'aria-label': 'Time zone', ...props }, zones.map(([z, name]) =>
+    el('option', { value: z }, `${name} (${tzAbbr(z)})${z === here ? ' · this computer' : ''}`)));
+  s.value = calTz;
+  s.addEventListener('change', () => { setCalTz(s.value); onChange?.(s.value); });
+  return s;
+}
+const tzLabel = (tz = calTz) => `${US_ZONES.find(([z]) => z === tz)?.[1] || tz.replace(/_/g, ' ')} (${tzAbbr(tz)})`;
+const tzAbbr = (tz) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find((x) => x.type === 'timeZoneName')?.value || tz; } catch { return tz; } };
+
 const evTime = (s) => new Date(String(s).replace(/\+0000$/, 'Z'));
-const hhmm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const hhmm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: calTz });
 const evStatus = (e) => e.supports.length ? 'covered' : e.skipped ? 'skipped' : 'open';
 const STATUS_TEXT = { covered: 'Has a Deal Support', open: 'No Deal Support', skipped: 'No Deal Support needed' };
 const localDate = (s) => new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
@@ -3978,17 +4151,18 @@ const localDate = (s) => new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8
 function showCalendar() {
   setNav('cal');
   current = null;
-  cal.week ||= mondayOf(todayStr());
+  cal.week ||= mondayOf(tzToday());
   document.getElementById('app').replaceChildren(el('div', { class: 'cal', id: 'cal' },
     el('div', { class: 'cal-main' },
       el('div', { class: 'dash-head' },
-        el('h2', {}, 'Time Entry'),
+        el('h2', {}, 'Calendar'),
         el('span', { class: 'fynav' },
           el('button', { id: 'calPrev', onclick: () => CAL_NARROW.matches ? moveDay(-1) : moveWeek(-7) }, '‹'),
           el('span', { id: 'calWeek' }),
           el('button', { id: 'calNext', onclick: () => CAL_NARROW.matches ? moveDay(1) : moveWeek(7) }, '›')),
-        el('button', { id: 'calNow', onclick: () => { cal.day = todayStr(); cal.week = mondayOf(cal.day); cal.sel = null; loadCalendar(); } }, 'This week'),
+        el('button', { id: 'calNow', onclick: () => { cal.day = tzToday(); cal.week = mondayOf(cal.day); cal.sel = null; loadCalendar(); } }, 'This week'),
         el('select', { id: 'calSource', 'aria-label': 'Calendar', style: 'width:auto;max-width:280px', hidden: true }),
+        tzSelect(() => { cal.sel = null; loadCalendar(); }, { id: 'calTz', style: 'width:auto;max-width:240px', title: 'The time zone the calendar is shown in' }),
         el('span', { class: 'cal-legend' },
           el('span', {}, el('i', { style: 'background:var(--covered);border-color:var(--covered-line)' }), 'Has a Deal Support'),
           el('span', {}, el('i', { style: 'background:var(--open);border-color:var(--open-line)' }), 'No Deal Support'),
@@ -4145,7 +4319,7 @@ async function markOutlook(auto) {
   const week = cal.week;
   try {
     const r = await api('/graph/mark', { method: 'POST', body: {
-      from: localDate(week).toISOString(), to: localDate(addDays(week, 7)).toISOString(), category: dsMeta.label,
+      from: tzInstant(week).toISOString(), to: tzInstant(addDays(week, 7)).toISOString(), category: dsMeta.label,
       events: events.map((e) => ({ start: e.start, allDay: e.allDay, date: e.date, subject: e.subject, tag: tag(e) })) } });
     for (const e of events) outlookSent.set(key(e), tag(e));
     const parts = [r.marked ? `Marked ${plural(r.marked, 'meeting')} in Outlook` : null,
@@ -4170,7 +4344,7 @@ function moveDay(n) {
 // The day shown on phones: the one picked, if it's in the week loaded, else today, else the week's Monday.
 function calDay() {
   const inWeek = (d) => d && d >= cal.week && d <= addDays(cal.week, 6);
-  return cal.day = inWeek(cal.day) ? cal.day : inWeek(todayStr()) ? todayStr() : cal.week;
+  return cal.day = inWeek(cal.day) ? cal.day : inWeek(tzToday()) ? tzToday() : cal.week;
 }
 // The ‹ › label and buttons: the week, or the day on phones.
 function calNav() {
@@ -4191,8 +4365,9 @@ async function loadCalendar() {
   const week = cal.week, ticket = ++cal.loading;
   const end = addDays(week, 7);
   calNav();
-  const params = new URLSearchParams({ from: localDate(week).toISOString(), to: localDate(end).toISOString(),
-    d0: week, d1: addDays(week, 6), tz: new Date().getTimezoneOffset(), source: cal.source || 'salesforce' });
+  const from = tzInstant(week);
+  const params = new URLSearchParams({ from: from.toISOString(), to: tzInstant(end).toISOString(),
+    d0: week, d1: addDays(week, 6), tz: -tzOffset(from), tzName: calTz, source: cal.source || 'salesforce' });
   document.getElementById('calSub').textContent = 'Loading…';
   try {
     const [data] = await Promise.all([api('/calendar?' + params), dsMeta ? null : api('/deal-supports/meta').then((m) => { dsMeta = m; })]);
@@ -4245,10 +4420,10 @@ function renderCalendar() {
   let h0 = 8, h1 = 18;
   for (const e of timed) {
     const s = evTime(e.start), en = evTime(e.end);
-    h0 = Math.min(h0, s.getHours());
-    h1 = Math.max(h1, en.getDate() !== s.getDate() ? 24 : Math.ceil(en.getHours() + en.getMinutes() / 60));
+    h0 = Math.min(h0, Math.floor(tzMins(s) / 60));
+    h1 = Math.max(h1, tzDay(en) !== tzDay(s) ? 24 : Math.ceil(tzMins(en) / 60));
   }
-  const hourPx = 48, height = (h1 - h0) * hourPx, today = todayStr();
+  const hourPx = 48, height = (h1 - h0) * hourPx, today = tzToday();
   const evBox = (e) => {
     const st = evStatus(e);
     const n = el('button', { class: `ev ${st}${e.declined ? ' declined' : ''}${cal.sel === e.id ? ' sel' : ''}`,
@@ -4273,14 +4448,14 @@ function renderCalendar() {
     });
     for (let h = h0; h < h1; h++) col.append(el('div', { class: 'hl', style: `top:${(h - h0) * hourPx}px` }));
     if (d === today) {
-      const now = new Date(), m = (now.getHours() - h0) * 60 + now.getMinutes();
+      const m = tzMins(new Date()) - h0 * 60;
       if (m >= 0 && m <= (h1 - h0) * 60) col.append(el('div', { class: 'now-line', style: `top:${m / 60 * hourPx}px` }));
     }
     // Lay overlapping events side by side: group events that overlap, then give each the first free lane.
     const list = timed.filter((e) => e.date === d).map((e) => {
       const s = evTime(e.start), en = evTime(e.end);
-      const a = (s.getHours() - h0) * 60 + s.getMinutes();
-      const b = en.getDate() !== s.getDate() ? (h1 - h0) * 60 : (en.getHours() - h0) * 60 + en.getMinutes();
+      const a = tzMins(s) - h0 * 60;
+      const b = tzDay(en) !== tzDay(s) ? (h1 - h0) * 60 : tzMins(en) - h0 * 60;
       return { e, a, b: Math.max(b, a + 20) };
     }).sort((x, y) => x.a - y.a || y.b - x.b);
     let group = [], groupEnd = -1;
@@ -4653,7 +4828,6 @@ const SHOW_AS = {
 const REMINDERS = [[null, "Don't remind me"], [0, 'At time of event'], [5, '5 minutes before'], [15, '15 minutes before'], [30, '30 minutes before'],
   [60, '1 hour before'], [120, '2 hours before'], [720, '12 hours before'], [1440, '1 day before'], [10080, '1 week before']];
 const RESPONSES = { accepted: 'You accepted', tentativelyAccepted: 'You tentatively accepted', declined: 'You declined', notResponded: "You haven't responded", none: "You haven't responded" };
-const personText = (p) => p.name && p.name !== p.email ? `${p.name} <${p.email}>` : p.email;
 // "Name <a@b.c>; d@e.f" -> [{ name, email }]; throws on anything that isn't an address.
 function parsePeople(text) {
   return String(text || '').split(/[;\n]|,(?![^<]*>)/).map((s) => s.trim()).filter(Boolean).map((s) => {
@@ -4661,6 +4835,93 @@ function parsePeople(text) {
     if (!m) throw new Error(`"${s}" isn't an email address.`);
     return { name: m[1].trim(), email: m[2] };
   });
+}
+
+// Attendees as removable chips, with a box that searches the directory (Salesforce users and contacts) while
+// typing. A full email address can be typed or pasted for anyone else; ones outside my company are marked
+// External. people() gives the list, and throws if something typed isn't an address yet.
+function recipientPicker(list, { label, disabled = false } = {}) {
+  const mine = String(cal.sources?.graph?.account || '').split('@')[1]?.toLowerCase() || '';
+  const outside = (email) => !!mine && String(email).split('@')[1]?.toLowerCase() !== mine;
+  let people = [...list], found = [], active = -1, timer, seq = 0;
+  const input = el('input', { type: 'text', 'aria-label': label, disabled, role: 'combobox', 'aria-autocomplete': 'list', autocomplete: 'off',
+    placeholder: 'Type a name to search, or a full email address' });
+  const chips = el('span', { style: 'display:contents' });
+  const results = el('ul', { class: 'pick-list', role: 'listbox', hidden: true });
+  const box = el('div', { class: 'rcpt' + (disabled ? ' off' : '') }, chips, input, results);
+  box.addEventListener('mousedown', (ev) => { if (ev.target === box) { ev.preventDefault(); input.focus(); } });
+  const drawChips = () => chips.replaceChildren(...people.map((p, i) => el('span', { class: 'rcpt-chip' + (outside(p.email) ? ' ext' : ''), title: p.email },
+    p.name || p.email, outside(p.email) ? el('small', {}, 'External') : null,
+    disabled ? null : el('button', { type: 'button', 'aria-label': `Remove ${p.name || p.email}`, onclick: () => { people.splice(i, 1); drawChips(); input.focus(); } }, '×'))));
+  const add = (list) => {
+    for (const p of list) if (!people.some((x) => x.email.toLowerCase() === p.email.toLowerCase())) people.push({ name: p.name || '', email: p.email });
+    drawChips();
+  };
+  const typed = () => { try { return parsePeople(input.value); } catch { return null; } };
+  const options = () => {
+    const t = typed();
+    const extra = t?.length && !found.some((f) => t.some((p) => p.email.toLowerCase() === f.email.toLowerCase()))
+      ? [{ typed: t, text: t.length > 1 ? `Add ${t.length} addresses` : `Add ${t[0].email}` }] : [];
+    return [...extra, ...found];
+  };
+  const showList = () => {
+    const opts = options(), q = input.value.trim();
+    if (active >= opts.length) active = opts.length - 1;
+    results.replaceChildren(...(opts.length ? opts.map((o, i) => el('li', { role: 'option', class: i === active ? 'on' : null,
+      onmousedown: (ev) => { ev.preventDefault(); choose(o); } },
+      o.typed ? [el('b', {}, o.text), outside(o.typed[0].email) ? el('span', {}, 'External') : null]
+        : [el('b', {}, o.name), el('span', {}, [o.email, o.title, o.account || (o.kind === 'user' ? 'Salesforce user' : '')].filter(Boolean).join(' · '))]))
+      : q.length >= 2 ? [el('li', { class: 'none' }, q.includes('@') ? 'Type the whole address, like name@company.com' : 'No one in the directory matches. Type their full email address to add them.')] : []));
+    results.hidden = !results.children.length;
+  };
+  const choose = (o) => {
+    add(o.typed || [o]);
+    input.value = ''; found = []; active = -1; results.hidden = true;
+  };
+  const search = async () => {
+    const q = input.value.trim(), n = ++seq;
+    if (q.length < 2 || typed()) { found = []; active = options().length ? 0 : -1; return showList(); }
+    try {
+      const r = await api('/directory?q=' + encodeURIComponent(q));
+      if (n !== seq) return;
+      found = r; active = options().length ? 0 : -1;
+      showList();
+    } catch (e) { found = []; showList(); toast(e.message, 'err'); }
+  };
+  input.addEventListener('input', () => {
+    // A ; or , after a full address adds it, as in Outlook.
+    if (/[;,]\s*$/.test(input.value) && typed()?.length) return choose({ typed: typed() });
+    clearTimeout(timer); timer = setTimeout(search, 250);
+  });
+  input.addEventListener('paste', (ev) => {
+    const text = ev.clipboardData?.getData('text') || '';
+    if (!text.includes('@')) return;
+    try { const t = parsePeople(text); ev.preventDefault(); add(t); } catch { /* left as typed */ }
+  });
+  input.addEventListener('keydown', (ev) => {
+    const opts = options();
+    if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && opts.length) {
+      ev.preventDefault();
+      active = (active + (ev.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length;
+      showList();
+    } else if ((ev.key === 'Enter' || ev.key === 'Tab') && input.value.trim() && opts[active]) {
+      ev.preventDefault(); choose(opts[active]);
+    } else if (ev.key === 'Escape' && !results.hidden) { ev.stopPropagation(); ev.preventDefault(); results.hidden = true; }
+    else if (ev.key === 'Backspace' && !input.value && people.length) { people.pop(); drawChips(); }
+  });
+  input.addEventListener('blur', () => {
+    results.hidden = true;
+    if (typed()?.length) { add(typed()); input.value = ''; }
+  });
+  drawChips();
+  return {
+    node: box, input,
+    people() {
+      const q = input.value.trim();
+      if (q) { const t = typed(); if (!t) { input.focus(); throw new Error(`"${q}" isn't an email address. Pick someone from the list, or type their full address.`); } add(t); input.value = ''; }
+      return people.map((p) => ({ ...p }));
+    },
+  };
 }
 
 async function editEventDialog(e) {
@@ -4679,7 +4940,7 @@ async function editEventDialog(e) {
 // startMins (an hour long). Saved through /calendar/events.
 function blankEvent(source, date, startMins) {
   const graph = source !== 'salesforce';
-  const s = new Date(`${date}T00:00`); s.setMinutes(startMins);
+  const s = tzInstant(date, startMins);
   const calName = graph ? (cal.sources?.graph?.calendars || []).find((c) => c.id === source)?.title : null;
   return {
     e: { id: null, calendar: calName, copies: [], supports: [] },
@@ -4695,8 +4956,8 @@ function eventForm(e, d, { close, create = null }) {
   const graph = d.kind === 'graph';
   const own = d.isOrganizer;
   const locked = !own; // details only the organizer can change
-  const dateOf = (iso) => localDay(new Date(iso));
-  const timeOf = (iso) => hhmm24(new Date(iso));
+  const dateOf = (iso) => tzDay(new Date(iso));
+  const timeOf = (iso) => tzHhmm(new Date(iso));
   // All-day ends are exclusive in the calendars and shown inclusive, as Outlook does.
   const endShown = d.allDay ? addDays(d.end, -1) : dateOf(d.end);
   const startIso = d.allDay ? null : d.start;
@@ -4725,10 +4986,8 @@ function eventForm(e, d, { close, create = null }) {
   body.addEventListener('input', () => { bodyNote.hidden = !graph || body.value === d.body; });
 
   const people = (type) => (d.attendees || []).filter((a) => a.type === type);
-  const required = el('textarea', { rows: 2, disabled: locked, 'aria-label': 'Required attendees', placeholder: 'Name <name@company.com>; …', style: 'width:100%;box-sizing:border-box;font:inherit' });
-  const optional = el('textarea', { rows: 1, disabled: locked, 'aria-label': 'Optional attendees', placeholder: 'Name <name@company.com>; …', style: 'width:100%;box-sizing:border-box;font:inherit' });
-  required.value = people('required').map(personText).join('; ');
-  optional.value = people('optional').map(personText).join('; ');
+  const required = recipientPicker(people('required'), { label: 'Required attendees', disabled: locked });
+  const optional = recipientPicker(people('optional'), { label: 'Optional attendees', disabled: locked });
   const teams = el('input', { type: 'checkbox', checked: !!d.teams, disabled: locked || d.teams });
   const importance = pick([['low', 'Low'], ['normal', 'Normal'], ['high', 'High']], d.importance || 'normal', { disabled: locked, 'aria-label': 'Importance' });
   const categories = el('input', { type: 'text', value: (d.categories || []).join(', '), 'aria-label': 'Categories', placeholder: 'Comma-separated' });
@@ -4759,7 +5018,7 @@ function eventForm(e, d, { close, create = null }) {
   // Moving the start keeps the length, as in Outlook.
   const times = () => {
     if (allDay.checked) return { allDay: true, start: sd.value, end: addDays(ed.value, 1), ok: !!sd.value && !!ed.value && ed.value >= sd.value };
-    const s = new Date(`${sd.value}T${st.value}`), en = new Date(`${ed.value}T${et.value}`);
+    const s = tzAt(sd.value, st.value), en = tzAt(ed.value, et.value);
     return { allDay: false, start: isNaN(s) ? '' : s.toISOString(), end: isNaN(en) ? '' : en.toISOString(), ok: !isNaN(s) && !isNaN(en) && en > s };
   };
   let was = times();
@@ -4771,7 +5030,7 @@ function eventForm(e, d, { close, create = null }) {
         ed.value = addDays(now.start, days - 1);
       } else if (!now.allDay && !was.allDay) {
         const end = new Date(Date.parse(now.start) + (Date.parse(was.end) - Date.parse(was.start)));
-        ed.value = localDay(end); et.value = hhmm24(end);
+        ed.value = tzDay(end); et.value = tzHhmm(end);
       }
     }
     was = times();
@@ -4795,6 +5054,7 @@ function eventForm(e, d, { close, create = null }) {
         !graph && e.id ? el('a', { href: `${me.instanceUrl}/${e.id}`, target: '_blank', rel: 'noopener', style: 'font-size:13px;font-weight:normal' }, 'Open in Salesforce ↗') : null),
       el('div', { class: 'sub', style: 'margin:-4px 0 12px' }, [
         calName,
+        d.allDay ? null : `Times in ${tzLabel()}`,
         graph && !own ? `Organized by ${d.organizer.name || d.organizer.email}. Only the organizer can change the meeting itself; you can answer it and change how it shows on your calendar.` : null,
         graph && own && attendeeCount ? `Saving sends ${plural(attendeeCount, 'attendee')} an update.` : null,
         create && graph ? 'Attendees you add get an invitation when you create it.' : null,
@@ -4808,8 +5068,8 @@ function eventForm(e, d, { close, create = null }) {
         field('Message to the organizer', answerComment, 'wide'), check(sendAnswer, 'Send a response to the organizer')) : null,
       el('div', { class: 'grid' },
         field('Title', subject, 'wide'),
-        graph ? field('Required attendees', required, 'wide') : null,
-        graph ? field('Optional attendees', optional, 'wide') : null,
+        graph ? el('div', { class: 'wide field' }, el('span', {}, 'Required attendees'), required.node) : null,
+        graph ? el('div', { class: 'wide field' }, el('span', {}, 'Optional attendees'), optional.node) : null,
         graph && d.rooms?.length ? el('div', { class: 'sub wide', style: 'grid-column:1/-1;margin:0' }, `Rooms: ${d.rooms.map((r) => r.name || r.email).join(', ')}`) : null,
         !graph && d.invitees?.length ? el('div', { class: 'sub', style: 'grid-column:1/-1;margin:0' },
           `Invitees (change these in Salesforce): ${d.invitees.map((r) => `${r.name || r.email}${r.status ? ` (${r.status})` : ''}`).join(', ')}`) : null,
@@ -4844,11 +5104,11 @@ function eventForm(e, d, { close, create = null }) {
           if (subject.value.trim() !== d.subject || create) c.subject = subject.value.trim();
           const sameTime = t.allDay === d.allDay && (t.allDay ? t.start === d.start && t.end === d.end
             : Date.parse(t.start) === Date.parse(d.start) && Date.parse(t.end) === Date.parse(d.end));
-          if (!sameTime || create) Object.assign(c, { allDay: t.allDay, start: t.start, end: t.end, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+          if (!sameTime || create) Object.assign(c, { allDay: t.allDay, start: t.start, end: t.end, timeZone: calTz });
           if (location.value !== d.location) c.location = location.value;
           if (body.value !== d.body) c.body = body.value;
           if (graph) {
-            const list = [...parsePeople(required.value).map((p) => ({ ...p, type: 'required' })), ...parsePeople(optional.value).map((p) => ({ ...p, type: 'optional' }))];
+            const list = [...required.people().map((p) => ({ ...p, type: 'required' })), ...optional.people().map((p) => ({ ...p, type: 'optional' }))];
             const sig = (l) => l.map((p) => `${p.type}:${p.email.toLowerCase()}`).sort().join('|');
             if (sig(list) !== sig(d.attendees || [])) c.attendees = list;
             if (teams.checked && !d.teams) c.teams = true;
@@ -4926,7 +5186,7 @@ function eventPrefill(e) {
   const p = cal.data.prefill, v = {};
   if (p.dateField) {
     v[p.dateField.name] = p.dateField.type === 'datetime' && !e.allDay
-      ? `${e.date}T${hhmm24(evTime(e.start))}` : e.date;
+      ? `${localDay(evTime(e.start))}T${hhmm24(evTime(e.start))}` : e.date;
   }
   const mins = e.minutes ?? (e.allDay ? null : (evTime(e.end) - evTime(e.start)) / 60000);
   const setTime = (f, m) => {
@@ -4987,8 +5247,29 @@ function renderEventPanel() {
       `or click ✎ on one of your ${dsMeta.labelPlural} below to edit it.`)) : '');
   const st = evStatus(e);
   const when = e.allDay ? `${localDate(e.date).toLocaleDateString()} (all day)`
-    : `${evTime(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`;
+    : `${evTime(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: calTz })}, ${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`;
   const sfLink = (id, text) => el('a', { href: `${me.instanceUrl}/${id}`, target: '_blank', rel: 'noopener' }, text);
+  // The event itself, shown whether or not it has its Deal Support: rows and actions are added to it.
+  const join = meetingJoin(e);
+  const people = e.people?.length ? e.people.slice(0, 12).join(', ') + (e.people.length > 12 ? ` and ${e.people.length - 12} more` : '') : '';
+  const details = (rows, actions) => el('section', {},
+    el('h3', {}, e.title || e.subject, el('span', { class: 'spacer' }), el('button', { onclick: () => selectEvent(e.id), title: 'Close this event' }, 'Close')),
+    el('div', { style: 'margin:-6px 0 10px' }, el('span', { class: 'status-pill ' + st }, STATUS_TEXT[st])),
+    join ? el('div', { style: 'margin:0 0 10px' }, el('a', { class: 'btn primary', href: join.url, target: '_blank', rel: 'noopener',
+      title: join.url }, `Join ${join.label} meeting`)) : null,
+    el('dl', {},
+      el('dt', {}, 'When'), el('dd', {}, when),
+      e.calendar ? [el('dt', {}, 'Calendar'), el('dd', {}, e.calendar)] : null,
+      e.organizer ? [el('dt', {}, 'Organizer'), el('dd', {}, e.organizer)] : null,
+      e.location ? [el('dt', {}, 'Where'), el('dd', {}, e.location)] : null,
+      people ? [el('dt', {}, 'Attendees'), el('dd', {}, people)] : e.who ? [el('dt', {}, 'With'), el('dd', {}, e.who)] : null,
+      e.what ? [el('dt', {}, 'Related to'), el('dd', {}, sfLink(e.what.id, e.what.name || e.what.id), e.what.type ? ` (${e.what.type})` : '')] : null,
+      rows,
+    ),
+    // Meeting invitations (Teams, Zoom...) are never shown, only what was written about the meeting.
+    meetingNotes(e.description) ? el('div', { class: 'desc' }, meetingNotes(e.description)) : el('div', { class: 'sub' }, 'No notes on this event.'),
+    el('div', { class: 'panel-actions', style: 'margin-top:12px' }, actions, e.sfEvent === false ? null : sfLink(e.id, 'Open event in Salesforce ↗')),
+  );
   const skip = el('button', { onclick: async () => {
     try {
       await api(`/calendar/events/${e.id}/skip`, { method: 'POST', body: { skip: !e.skipped, copies: e.copies || [] } });
@@ -4998,20 +5279,19 @@ function renderEventPanel() {
   } }, e.skipped ? 'Needs a Deal Support after all' : 'No Deal Support needed');
   // The Deal Support being edited, if it is one of this event's.
   const editing = e.supports.some((r) => r.Id === evEdit.editing?.id) ? evEdit.editing : null;
-  // Once an event has its Deal Support, the panel shows just that, not the event: a summary with an
-  // Edit link that opens the form.
+  // Once an event has its Deal Support, the panel shows the event and under it a summary of the Deal Support
+  // with an Edit link that opens the form (which then takes the event's place).
   if (st === 'covered') {
     // With one Deal Support, Edit sits on the title line; with several, beside each.
     const one = e.supports.length === 1;
     const editBtn = (r, props = {}) => dsMeta.canUpdate && editing?.id !== r.Id ? el('button', { ...props, onclick: () => editFromEvent(r) }, 'Edit') : null;
     const list = el('section', {},
-      el('h3', {}, one ? dsMeta.label : `${dsMeta.labelPlural} for this event`, one ? editBtn(e.supports[0], { style: 'margin-left:10px' }) : null,
-        el('span', { class: 'spacer' }), el('button', { onclick: () => selectEvent(e.id), title: 'Close this event' }, 'Close')),
+      el('h3', {}, one ? dsMeta.label : `${dsMeta.labelPlural} for this event`, one ? editBtn(e.supports[0], { style: 'margin-left:10px' }) : null),
       e.supports.map((r) => el('div', {},
         el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
         one ? null : editBtn(r, { class: 'linkish', style: 'display:inline;margin-left:8px' }),
         editing?.id !== r.Id ? dsSummary(r.Id) : null)));
-    return panel.replaceChildren(...(editing && e.supports.length === 1 ? [editing.box] : [list, editing?.box].filter(Boolean)));
+    return panel.replaceChildren(...(editing && e.supports.length === 1 ? [editing.box] : [details(), list, editing?.box].filter(Boolean)));
   }
   const formBox = el('div', {}, editing?.box);
   const create = el('button', { class: 'primary', onclick: () => {
@@ -5022,26 +5302,33 @@ function renderEventPanel() {
   if (!dsMeta.canCreate || st === 'covered') create.hidden = true;
 
   panel.replaceChildren(
-    el('section', {},
-      el('h3', {}, e.title || e.subject, el('span', { class: 'spacer' }), el('button', { onclick: () => selectEvent(e.id), title: 'Close this event' }, 'Close')),
-      el('div', { style: 'margin:-6px 0 10px' }, el('span', { class: 'status-pill ' + st }, STATUS_TEXT[st])),
-      el('dl', {},
-        el('dt', {}, 'When'), el('dd', {}, when),
-        e.calendar ? [el('dt', {}, 'Calendar'), el('dd', {}, e.calendar)] : null,
-        e.location ? [el('dt', {}, 'Where'), el('dd', {}, e.location)] : null,
-        e.who ? [el('dt', {}, 'With'), el('dd', {}, e.who)] : null,
-        e.what ? [el('dt', {}, 'Related to'), el('dd', {}, sfLink(e.what.id, e.what.name || e.what.id), e.what.type ? ` (${e.what.type})` : '')] : null,
-        e.supports.length ? [el('dt', {}, dsMeta.labelPlural), el('dd', {}, e.supports.map((r) => el('div', {},
-          el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
-          r.how === 'matched' ? el('span', { class: 'tag', title: 'Yours, on the same date, on the same opportunity or account (from the title or attendees for Microsoft 365 and Outlook events), or with the same name' }, 'matched') : null,
-          dsMeta.canUpdate && editing?.id !== r.Id ? el('button', { class: 'linkish', style: 'display:inline;margin-left:8px', onclick: () => editFromEvent(r) }, 'Edit') : null)))] : null,
-      ),
-      // Meeting invitations (Teams, Zoom...) are never shown, only what was written about the meeting.
-      meetingNotes(e.description) ? el('div', { class: 'desc' }, meetingNotes(e.description)) : el('div', { class: 'sub' }, 'No notes on this event.'),
-      el('div', { class: 'panel-actions', style: 'margin-top:12px' }, create, st !== 'covered' ? skip : null, e.sfEvent === false ? null : sfLink(e.id, 'Open event in Salesforce ↗')),
-    ),
+    details(e.supports.length ? [el('dt', {}, dsMeta.labelPlural), el('dd', {}, e.supports.map((r) => el('div', {},
+      el('a', { href: `${me.instanceUrl}/${r.Id}`, target: '_blank', rel: 'noopener', title: r.Name || null }, dsNum(r.Name) || r.Id), r.oppName ? ` · ${r.oppName}` : '',
+      r.how === 'matched' ? el('span', { class: 'tag', title: 'Yours, on the same date, on the same opportunity or account (from the title or attendees for Microsoft 365 and Outlook events), or with the same name' }, 'matched') : null,
+      dsMeta.canUpdate && editing?.id !== r.Id ? el('button', { class: 'linkish', style: 'display:inline;margin-left:8px', onclick: () => editFromEvent(r) }, 'Edit') : null)))] : null,
+    [create, skip]),
     formBox,
   );
+}
+
+// The link to join an event's online meeting: Microsoft 365's own for a Teams meeting, else the first Teams, Zoom,
+// Webex or Google Meet joining link in its location or description (not their help, dial-in or options links).
+const JOIN_LINKS = [
+  [/^teams\.(microsoft|live)\.com\/(l\/meetup-join|meet)\//i, 'Teams'],
+  [/^([\w-]+\.)*zoom(gov)?\.(us|com)\/(j|my|w|s)\//i, 'Zoom'],
+  [/^([\w-]+\.)*webex\.com\/(meet|join|[\w-]+\/j\.php|wbxmjs\/joinservice)\b/i, 'Webex'],
+  [/^meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}\b/i, 'Google Meet'],
+];
+function meetingJoin(e) {
+  const found = `${e.location || ''}\n${e.description || ''}`.match(/https:\/\/[^\s<>"'()[\]]+/gi) || [];
+  for (const raw of [e.joinUrl, ...found].filter(Boolean)) {
+    let u;
+    try { u = new URL(String(raw).replace(/[.,;:!?]+$/, '')); } catch { continue; }
+    if (u.protocol !== 'https:') continue;
+    const hit = JOIN_LINKS.find(([re]) => re.test(u.host + u.pathname));
+    if (hit) return { url: u.href, label: hit[1] };
+  }
+  return null;
 }
 
 // The fields an edited Deal Support's description falls back to when it held only a meeting invitation:
@@ -5058,7 +5345,7 @@ const meetingSubject = (e) => String(e.title || e.subject || '').replace(/^\s*\[
 const dsTitle = (e) => meetingSubject(e.sf?.title ? { title: e.sf.title } : e);
 const dsNotes = (e) => meetingNotes(e.sf?.description) || meetingNotes(e.description);
 
-// onCreated(rec, opp) runs after the save; by default the Time Entry calendar reloads.
+// onCreated(rec, opp) runs after the save; by default the Calendar tab reloads.
 function createFromEvent(e, close, onCreated = () => loadCalendar(), cancel = null) {
   // The event's opportunity (its own, or borrowed from the Salesforce copy of a Microsoft 365 or Outlook event) is preselected.
   const oppId = e.oppId || (e.what?.type === 'Opportunity' || String(e.what?.id || '').startsWith('006') ? e.what.id : null);
@@ -5084,7 +5371,7 @@ function createFromEvent(e, close, onCreated = () => loadCalendar(), cancel = nu
   });
 }
 
-// A new meeting at the time clicked on Time Entry, with its Deal Support: the meeting's title and time above the
+// A new meeting at the time clicked on Calendar, with its Deal Support: the meeting's title and time above the
 // usual form, whose date and hours follow them. The meeting goes in the calendar shown (see /calendar/new-event).
 function newMeetingDialog(date, startMins) {
   const source = cal.source || 'salesforce';
@@ -5099,7 +5386,7 @@ function newMeetingDialog(date, startMins) {
   const from = el('input', { type: 'time', step: 300, value: hm(startMins), 'aria-label': 'Starts' });
   const to = el('input', { type: 'time', step: 300, value: hm(Math.min(startMins + 60, 24 * 60 - 1)), 'aria-label': 'Ends' });
   const times = () => {
-    const s = new Date(`${day.value}T${from.value}`), e = new Date(`${day.value}T${to.value}`);
+    const s = tzAt(day.value, from.value), e = tzAt(day.value, to.value);
     return { s, e, ok: !isNaN(s) && !isNaN(e) && e > s };
   };
   const prefill = () => {
@@ -5120,10 +5407,10 @@ function newMeetingDialog(date, startMins) {
   const fromWas = { value: from.value };
   from.addEventListener('change', () => {
     // Moving the start keeps the meeting's length.
-    const a = new Date(`${day.value}T${fromWas.value}`), b = new Date(`${day.value}T${to.value}`), s = new Date(`${day.value}T${from.value}`);
+    const a = tzAt(day.value, fromWas.value), b = tzAt(day.value, to.value), s = tzAt(day.value, from.value);
     if (!isNaN(a) && !isNaN(b) && !isNaN(s) && b > a) {
       const end = new Date(+s + (b - a));
-      if (localDay(end) === day.value) to.value = hhmm24(end);
+      if (tzDay(end) === day.value) to.value = tzHhmm(end);
     }
     fromWas.value = from.value;
     sync();
@@ -5299,7 +5586,7 @@ document.getElementById('logout').addEventListener('click', async () => {
 
 // ---------- Outlook add-in ----------
 // In Outlook's task pane (/outlook/pane) the page shows just the meeting that is open in Outlook and the
-// Time Entry tab's "create from event" form for it, prefilled the same way.
+// Calendar tab's "create from event" form for it, prefilled the same way.
 const IN_OUTLOOK = location.pathname === '/outlook/pane';
 
 // Office.js item properties are plain values when reading a meeting and { getAsync } when editing one.
@@ -5383,7 +5670,7 @@ async function untagMeeting(name) {
 
 function renderOutlookPane(e, reload) {
   const when = e.allDay ? `${localDate(e.date).toLocaleDateString()} (all day)`
-    : `${evTime(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`;
+    : `${evTime(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: calTz })}, ${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`;
   const st = e.supports.length ? 'covered' : e.skipped ? 'skipped' : 'open';
   const formBox = el('div');
   const skip = el('button', { onclick: async () => {
@@ -5401,7 +5688,7 @@ function renderOutlookPane(e, reload) {
     setTimeout(reload, 1500);
   }, skip));
   const again = el('button', { class: 'primary', onclick: open }, `Create ${dsMeta.label}`);
-  // Skipped meetings carry the gray category in Outlook; any other meeting loses it (e.g. undone on Time Entry).
+  // Skipped meetings carry the gray category in Outlook; any other meeting loses it (e.g. undone on Calendar).
   // A recurring meeting gets neither category: Outlook puts it on every occurrence of the series, so it comes off.
   const grayNote = document.createTextNode('');
   const seriesNote = `This is a recurring meeting, so it isn't marked with a category in Outlook: the category would go on every occurrence.`;

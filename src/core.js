@@ -628,6 +628,24 @@ api.get('/users', wrap(async (req, res) => {
     `AND Name LIKE '%${soqlLike(q)}%' ORDER BY Name LIMIT 25`, 25));
 }));
 
+// People with an email address whose name or email matches, for meeting attendees: active users first, then
+// contacts (with their account). One entry per address.
+api.get('/directory', wrap(async (req, res) => {
+  const words = String(req.query.q || '').slice(0, 80).split(/\s+/).map((w) => w.replace(/[?&|!{}[\]()^~*:\\"'+\-]/g, '')).filter(Boolean);
+  if (words.join('').length < 2) return res.json([]);
+  const find = words.map((w) => `${w}*`).join(' AND ');
+  const sosl = `FIND {${find}} IN ALL FIELDS RETURNING ` +
+    `User(Name, Email, Title WHERE IsActive = true AND UserType = 'Standard' AND Email != null ORDER BY Name LIMIT 10), ` +
+    `Contact(Name, Email, Title, Account.Name WHERE Email != null ORDER BY Name LIMIT 15)`;
+  const data = await sf(req, 'GET', `/services/data/${API}/search?q=${encodeURIComponent(sosl)}`);
+  const seen = new Set();
+  const rank = (r) => r.attributes?.type === 'User' ? 0 : 1;
+  res.json((data.searchRecords || []).sort((a, b) => rank(a) - rank(b)).map((r) => ({
+    kind: r.attributes?.type === 'User' ? 'user' : 'contact',
+    name: r.Name || '', email: String(r.Email || '').trim(), title: r.Title || '', account: r.Account?.Name || '',
+  })).filter((p) => p.email && !seen.has(p.email.toLowerCase()) && seen.add(p.email.toLowerCase())));
+}));
+
 // The field each role sets on Account and Opportunity: the owner for the sales rep, the Lead SE fields for the SE.
 // `name` reads the current person's name (a lookup's related Name, else the field's own text).
 async function reassignFields(req, role) {
@@ -1150,7 +1168,7 @@ async function createDealSupport(req, meta, oppId, fields, extra = {}) {
 api.post('/opportunities/:id/deal-supports', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const meta = await dealSupportMeta(req);
-  // mine: from Time Entry, so it's mine (the user field) even when that field isn't on the form.
+  // mine: from Calendar, so it's mine (the user field) even when that field isn't on the form.
   const cm = req.body?.mine ? await calendarMeta(req) : null;
   const extra = cm?.userField && !cm.userField.onForm ? { [cm.userField.name]: sfId(req.session.sf.user.id) } : {};
   res.status(201).json(await createDealSupport(req, meta, id, req.body?.fields, extra));
@@ -1891,7 +1909,7 @@ api.post('/opportunities/:id/tes', wrap(async (req, res) => createRequest(req, r
 api.post('/opportunities/:id/rfp', wrap(async (req, res) => createRequest(req, res, RFP_RECORD_TYPE, await rfpMeta(req))));
 
 async function tesMeta(req) {
-  if (req.session.tesMeta?.v === 9) return req.session.tesMeta;
+  if (req.session.tesMeta?.v === 10) return req.session.tesMeta;
   const ds = await dealSupportMeta(req);
   if (!ds.oppRel) throw new HttpError(400, `${ds.label} has no opportunity relationship to read the account through.`);
   const d = await sf(req, 'GET', `/services/data/${API}/sobjects/${ds.object}/describe`);
@@ -1905,7 +1923,7 @@ async function tesMeta(req) {
         isUser: isUserRef(f), length: f.length || null };
     } else missing.push(label);
   }
-  req.session.tesMeta = { v: 9, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
+  req.session.tesMeta = { v: 10, recordType: TES_RECORD_TYPE, object: ds.object, label: d.label,
     recordTypeId: rt.available ? rt.recordTypeId : null, canCreate: !!d.createable,
     fields, missing, updates: await tesUpdatesMeta(req, d), stageEdit: await tesStageEdit(req, d, rt, fields.stage),
     createForm: await requestCreateForm(req, d, rt, TES_CREATE_FIELDS) };
@@ -1944,6 +1962,7 @@ async function tesUpdatesMeta(req, dsDescribe) {
       status: status.name, notes: notes?.name || null, notesLength: notes?.length || null,
       options: (status.picklistValues || []).filter((v) => v.active).map((v) => v.value),
       canCreate: !!c.createable && !!status.createable,
+      canUpdate: !!c.updateable && !!status.updateable, canDelete: !!c.deletable,
     };
   }
   return null;
@@ -1958,9 +1977,9 @@ const listTesUpdates = (req, u, id) => query(req, `SELECT Id, Name, ${u.status}$
   `FROM ${u.object} WHERE ${u.parentField} = '${id}' ORDER BY CreatedDate DESC`, 500);
 
 // A status update's notes start with my initials ("KC:  ", unless they already do) and end with the TES Request's
-// dates, assigned engineer, the opportunity's primary competitor, the request's Competitor and Exec Readout Date
-// (kept here, not in Salesforce: see tesLocal) and the opportunity's close date. Fields the org doesn't have, or
-// that are empty, say "not set".
+// dates, assigned engineer, its local fields (kept here, not in Salesforce: see tesLocal) and the opportunity's close
+// date. Fields the org doesn't have, or that are empty, say "not set". The opportunity's Primary Competitor isn't
+// shown: it's only where Competitor starts.
 async function tesNoteFields(req) {
   if (req.session.tesNoteFields?.v === 1) return req.session.tesNoteFields;
   const ds = await dealSupportMeta(req);
@@ -1992,34 +2011,48 @@ async function tesNoteParts(req, id) {
     before: [
       `TES event Duration: ${date(get(col(nf.start))) || 'not set'} to ${date(get(col(f.endDate))) || 'not set'}`,
       `Assigned Engineer: ${val(get(col(f.assignedSe)))}`,
-      `Primary Competitor: ${val(get(col(nf.competitor, `${o}.`)))}`,
     ].join('\n'),
     after: `Opportunity Close Date: ${date(get(`${o}.CloseDate`)) || 'not set'}`,
-    local: tesLocal.get(req, id),
+    local: tesLocal.get(req, id, { competitor: String(get(col(nf.competitor, `${o}.`)) ?? '').replace(/;/g, ', ').slice(0, 120) }),
   };
 }
 
-// Competitor and Exec Readout Date of a TES Request: kept in SF Desk's database (not Salesforce fields), set from
-// the update form and written into every update's notes.
+// Competitor, Exec Readout Date, Use Cases Accepted and Customer Resource Agreement (yes until unticked) of a TES
+// Request: kept in SF Desk's database (not Salesforce fields), set from the update form and written into every
+// update's notes. Until they're first saved, Competitor starts as the opportunity's Primary Competitor (initial).
 const tesLocal = {
-  get: (req, id) => ({ competitor: '', execReadout: '', ...store.getSetting(orgOf(req), `tesLocal:${id}`) }),
+  get: (req, id, initial = {}) => ({ competitor: '', execReadout: '', useCases: false, customerResources: true, ...initial,
+    ...store.getSetting(orgOf(req), `tesLocal:${id}`) }),
   set(req, id, v) {
     const competitor = String(v?.competitor ?? '').trim().slice(0, 120);
     const execReadout = /^\d{4}-\d{2}-\d{2}$/.test(String(v?.execReadout || '')) ? v.execReadout : '';
-    store.saveSetting(orgOf(req), `tesLocal:${id}`, { competitor, execReadout });
-    return { competitor, execReadout };
+    const useCases = v?.useCases === true;
+    const customerResources = v?.customerResources !== false;
+    store.saveSetting(orgOf(req), `tesLocal:${id}`, { competitor, execReadout, useCases, customerResources });
+    return { competitor, execReadout, useCases, customerResources };
   },
 };
-const tesLocalLines = ({ competitor, execReadout }) => [`Competitor: ${competitor || 'not set'}`,
-  `Exec Readout Date: ${execReadout ? `${+execReadout.slice(5, 7)}/${+execReadout.slice(8, 10)}/${execReadout.slice(0, 4)}` : 'not set'}`].join('\n');
+const tesLocalLines = ({ competitor, execReadout, useCases, customerResources }) => [`Competitor: ${competitor || 'not set'}`,
+  `Exec Readout Date: ${execReadout ? `${+execReadout.slice(5, 7)}/${+execReadout.slice(8, 10)}/${execReadout.slice(0, 4)}` : 'not set'}`,
+  `Use Cases Accepted: ${useCases ? 'Yes' : 'No'}`,
+  `Customer Resource Agreement: ${customerResources !== false ? 'Yes' : 'No'}`].join('\n');
 
-// The notes as saved: initials, what was entered, then the footer, within the field's length.
-function tesNoteText({ initials, before, after, local }, entered, max) {
+// The notes as saved: initials, what was entered, then the footer, within the field's length. anyInitials (when
+// editing someone's update) keeps whoever's initials it starts with.
+const TES_FOOTER_START = '\n\nTES event Duration:';
+function tesNoteText({ initials, before, after, local }, entered, max, { anyInitials = false } = {}) {
   const footer = `${before}\n${tesLocalLines(local)}\n${after}`;
   let notes = String(entered ?? '').trim();
-  if (initials && !new RegExp(`^${initials}\\b`, 'i').test(notes)) notes = `${initials}:  ${notes}`;
-  const room = max ? max - footer.length - 2 : Infinity;
-  return `${notes.slice(0, Math.max(0, room))}\n\n${footer}`;
+  const has = anyInitials ? /^\p{L}{2,3}\s*:/u.test(notes) : initials && new RegExp(`^${initials}\\b`, 'i').test(notes);
+  if (initials && !has) notes = `${initials}:  ${notes}`;
+  return fitTesNotes(`${notes}\n\n${footer}`, max);
+}
+// Shortens what was entered, not the footer, to fit max characters.
+function fitTesNotes(text, max) {
+  if (!max || text.length <= max) return text;
+  const at = text.lastIndexOf(TES_FOOTER_START);
+  if (at < 0 || text.length - at >= max) return text.slice(0, max);
+  return text.slice(0, max - (text.length - at)) + text.slice(at);
 }
 
 // What a new status update's notes get around what's entered, for the form to show.
@@ -2034,38 +2067,82 @@ api.get('/tes/:id/updates', wrap(async (req, res) => {
   res.json({ records: await listTesUpdates(req, u, id) });
 }));
 
-// Add a status update. local ({ competitor, execReadout }) saves the request's local fields first (see tesLocal).
-// The TES Request's Most Recent TES Status, its notes and Last TES Status date follow the newest update; when no
-// automation in the org has set them, they're set here.
+// The TES Request's Most Recent TES Status, its notes and Last TES Status date follow its newest update (records,
+// newest first); when no automation in the org has set them, they're set here. Returns a warning, or null.
+async function syncTesLatest(req, id, u, records) {
+  const newest = records[0];
+  if (!newest) return null;
+  const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
+  const notes = u.notes ? newest[u.notes] || null : null;
+  const day = new Date(String(newest.CreatedDate).replace(/\+0000$/, 'Z')).toLocaleDateString('en-CA');
+  const latest = [[f.tesStatus, newest[u.status]], [f.statusNotes, notes && fitTesNotes(notes, f.statusNotes?.length)], [f.lastStatus, day]]
+    .filter(([x]) => x?.name);
+  if (!latest.length) return null;
+  const [rec] = await query(req, `SELECT ${latest.map(([x]) => x.name).join(', ')} FROM ${ds.object} WHERE Id = '${id}'`);
+  const same = (a, b) => String(a ?? '').replace(/\r\n/g, '\n').trim() === String(b ?? '').replace(/\r\n/g, '\n').trim();
+  if (!latest.some(([x, v]) => x !== f.lastStatus && !same(rec?.[x.name], v))) return null;
+  try {
+    await sf(req, 'PATCH', `/services/data/${API}/sobjects/${ds.object}/${id}`, { body: Object.fromEntries(latest.map(([x, v]) => [x.name, v])) });
+    return null;
+  } catch (err) {
+    if (err.status === 401 || err.status >= 502) throw err;
+    return `The update was saved, but the ${ds.label}'s ${f.tesStatus?.label || 'status'} couldn't be set: ${err.message}`;
+  }
+}
+const tesStatusOf = (u, body) => {
+  const status = String(body?.status || '');
+  if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
+  return status;
+};
+// One of this TES Request's updates, or 404.
+async function tesUpdateOf(req, u, id, uid) {
+  const [rec] = await query(req, `SELECT Id, ${u.parentField} FROM ${u.object} WHERE Id = '${uid}'`);
+  if (!rec || sfId(rec[u.parentField]) !== id) throw new HttpError(404, `That ${u.label} update isn't on this request.`);
+  return rec;
+}
+
+// Add a status update. local ({ competitor, execReadout, useCases, customerResources }) saves the request's local fields first (see tesLocal);
+// the notes always end with them (see tesNoteText).
 api.post('/tes/:id/updates', wrap(async (req, res) => {
   const id = sfId(req.params.id);
   const u = await tesUpdatesOrFail(req);
   if (!u.canCreate) throw new HttpError(403, `Your user can't create ${u.labelPlural}.`);
-  const status = String(req.body?.status || '');
-  if (!u.options.includes(status)) throw new HttpError(400, `Pick a TES Status: ${u.options.join(', ')}.`);
+  const status = tesStatusOf(u, req.body);
   const parts = await tesNoteParts(req, id);
   if (req.body?.local) parts.local = tesLocal.set(req, id, req.body.local);
   const notes = tesNoteText(parts, req.body?.notes, u.notesLength);
   await sf(req, 'POST', `/services/data/${API}/sobjects/${u.object}`,
     { body: { [u.parentField]: id, [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
-  const ds = await dealSupportMeta(req), f = (await tesMeta(req)).fields;
-  const latest = [[f.tesStatus, status], [f.statusNotes, f.statusNotes?.length ? notes.slice(0, f.statusNotes.length) : notes], [f.lastStatus, new Date().toLocaleDateString('en-CA')]]
-    .filter(([x]) => x?.name);
-  let warning = null;
-  if (latest.length) {
-    const [rec] = await query(req, `SELECT ${latest.map(([x]) => x.name).join(', ')} FROM ${ds.object} WHERE Id = '${id}'`);
-    const same = (a, b) => String(a ?? '').replace(/\r\n/g, '\n').trim() === String(b ?? '').replace(/\r\n/g, '\n').trim();
-    if (latest.some(([x, v]) => x !== f.lastStatus && !same(rec?.[x.name], v))) {
-      try {
-        await sf(req, 'PATCH', `/services/data/${API}/sobjects/${ds.object}/${id}`,
-          { body: Object.fromEntries(latest.map(([x, v]) => [x.name, v])) });
-      } catch (err) {
-        if (err.status === 401 || err.status >= 502) throw err;
-        warning = `The update was saved, but the ${ds.label}'s ${f.tesStatus?.label || 'status'} couldn't be set: ${err.message}`;
-      }
-    }
-  }
-  res.json({ records: await listTesUpdates(req, u, id), warning });
+  const records = await listTesUpdates(req, u, id);
+  res.json({ records, warning: await syncTesLatest(req, id, u, records) });
+}));
+
+// Edit an update: its status and what was entered (notes without the footer); the footer is written again with the
+// request's details and local fields as they are now (local saves those first, as when adding).
+api.patch('/tes/:id/updates/:uid', wrap(async (req, res) => {
+  const id = sfId(req.params.id), uid = sfId(req.params.uid);
+  const u = await tesUpdatesOrFail(req);
+  if (!u.canUpdate) throw new HttpError(403, `Your user can't change ${u.labelPlural}.`);
+  const status = tesStatusOf(u, req.body);
+  await tesUpdateOf(req, u, id, uid);
+  const parts = await tesNoteParts(req, id);
+  if (req.body?.local) parts.local = tesLocal.set(req, id, req.body.local);
+  const notes = tesNoteText(parts, req.body?.notes, u.notesLength, { anyInitials: true });
+  await sf(req, 'PATCH', `/services/data/${API}/sobjects/${u.object}/${uid}`,
+    { body: { [u.status]: status, ...(u.notes ? { [u.notes]: notes || null } : {}) } });
+  const records = await listTesUpdates(req, u, id);
+  res.json({ records, warning: await syncTesLatest(req, id, u, records) });
+}));
+
+// Delete an update (it goes to Salesforce's Recycle Bin); the request then follows the newest one left.
+api.delete('/tes/:id/updates/:uid', wrap(async (req, res) => {
+  const id = sfId(req.params.id), uid = sfId(req.params.uid);
+  const u = await tesUpdatesOrFail(req);
+  if (!u.canDelete) throw new HttpError(403, `Your user can't delete ${u.labelPlural}.`);
+  await tesUpdateOf(req, u, id, uid);
+  await sf(req, 'DELETE', `/services/data/${API}/sobjects/${u.object}/${uid}`);
+  const records = await listTesUpdates(req, u, id);
+  res.json({ records, warning: await syncTesLatest(req, id, u, records) });
 }));
 
 // The TES Requests matching `where` (SOQL conditions), newest first, with the fields the TES tab shows.
@@ -2428,6 +2505,17 @@ async function accountsForDomains(req, domains) {
 }
 
 // The local calendar date a Salesforce event falls on, given the page's UTC offset in minutes (from getTimezoneOffset).
+// (iso) => its YYYY-MM-DD in the IANA time zone tz, or null for a zone this JavaScript doesn't know.
+function zonedDay(tz) {
+  if (!/^[A-Za-z_]+(\/[A-Za-z0-9_+\-]+){0,2}$/.test(String(tz || ''))) return null;
+  let f;
+  try { f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); } catch { return null; }
+  return (iso) => {
+    const p = Object.fromEntries(f.formatToParts(new Date(String(iso).replace(/\+0000$/, 'Z'))).map((x) => [x.type, x.value]));
+    return `${p.year}-${p.month}-${p.day}`;
+  };
+}
+
 function eventDate(e, tzOffset) {
   if (e.IsAllDayEvent) return e.ActivityDate;
   const t = Date.parse(String(e.StartDateTime).replace(/\+0000$/, 'Z')) - tzOffset * 60_000;
@@ -2502,6 +2590,9 @@ async function graphEvents(req, calendarId, { from, to }) {
       audience: audienceOf((e.attendees || []).filter((a) => !a.me).map((a) => a.email), myDomain),
       graphId: e.graphId, isOrganizer: e.isOrganizer, recurring: e.recurring, declined: !!e.declined,
       attendeeCount: (e.attendees || []).filter((a) => !a.me).length,
+      // For the event panel: who organized it and who's invited, and its Teams link.
+      organizer: e.organizer || '', joinUrl: e.joinUrl || '',
+      people: (e.attendees || []).filter((a) => !a.me).slice(0, 100).map((a) => a.name || a.email).filter(Boolean),
     };
   }).sort((a, b) => String(a.start).localeCompare(String(b.start)));
   list.note = events.note; // why there are none, when the reader says
@@ -2516,7 +2607,7 @@ const simpleSubject = (s) => cleanSubject(s).toLowerCase().replace(/[^a-z0-9&]+/
 // One meeting has a different Id in each calendar (Outlook add-in, Mac, Microsoft 365, Salesforce), so each
 // event also gets a key of its own from its start and subject, "mt_" plus a hash, among its copies. Marks
 // ("No Deal Support needed", and the Deal Support created from it) are saved under it too, so the Outlook
-// add-in and Time Entry agree whichever calendar they read.
+// add-in and Calendar agree whichever calendar they read.
 function meetingKey(e) {
   const when = e.allDay ? `d:${e.date}` : `t:${Number.isNaN(Date.parse(e.start)) ? e.start : new Date(Date.parse(e.start)).toISOString()}`;
   return 'mt_' + sha1Hex(`${when}|${simpleSubject(e.subject)}`).slice(0, 24);
@@ -2525,11 +2616,11 @@ function addMeetingKeys(events) {
   for (const e of events) e.copies = [...new Set([...e.copies, meetingKey(e)])];
 }
 
-// The calendar Time Entry last showed, so the Outlook add-in matches against the same meetings.
+// The calendar Calendar last showed, so the Outlook add-in matches against the same meetings.
 const CAL_SOURCE_SETTING = 'calendarSource';
 
 // My meetings in a range from that calendar (Salesforce when it's that, unknown or can't be read), with
-// Salesforce links borrowed and meeting keys added, as Time Entry has them.
+// Salesforce links borrowed and meeting keys added, as Calendar has them.
 async function calendarEvents(req, range) {
   const source = store.getSetting(orgOf(req), CAL_SOURCE_SETTING)?.source;
   let events = null;
@@ -2553,7 +2644,7 @@ async function borrowSalesforceLinks(req, events, range) {
     const hit = named || (same.length === 1 ? same[0] : null);
     if (!hit) continue;
     // The same meeting by name: its Salesforce records count as copies, so "No Deal Support needed" (and a
-    // Deal Support created from it) set in the Outlook add-in, Time Entry or the Salesforce calendar show in all.
+    // Deal Support created from it) set in the Outlook add-in, Calendar or the Salesforce calendar show in all.
     if (named) e.copies = [...new Set([...e.copies, hit.id, ...hit.copies])];
     e.accountIds = hit.accountIds;
     e.oppId = hit.oppId;
@@ -2622,6 +2713,9 @@ api.get('/calendar', wrap(async (req, res) => {
     const ds = await dealSupportMeta(req);
     const cm = await calendarMeta(req);
     const events = source === 'salesforce' ? await salesforceEvents(req, range) : await graphEvents(req, source, range);
+    // The day a timed event is on, in the calendar's time zone (tzName) rather than this computer's.
+    const dayIn = zonedDay(req.query.tzName);
+    if (dayIn) for (const e of events) if (!e.allDay && e.start) e.date = dayIn(e.start);
     if (source !== 'salesforce') await borrowSalesforceLinks(req, events, range);
     addMeetingKeys(events);
 
@@ -2724,7 +2818,7 @@ function eventId(value) {
   return sfId(id);
 }
 
-// The meeting open in Outlook (sent by the add-in's task pane), as a calendar event like the Time Entry
+// The meeting open in Outlook (sent by the add-in's task pane), as a calendar event like the Calendar
 // tab's, with the account and opportunity of the Salesforce copy at the same time (e.g. synced by
 // Outreach), the Deal Supports already covering it and what the create form prefills.
 api.post('/outlook/event', wrap(async (req, res) => {
@@ -2754,7 +2848,7 @@ api.post('/outlook/event', wrap(async (req, res) => {
   const to = Date.parse(end) > Date.parse(start) ? end : new Date(Date.parse(start) + 60_000).toISOString().replace(/\.\d+Z$/, 'Z');
   await borrowSalesforceLinks(req, [e], { from: start, to, d0: date, d1: date, tz });
   addMeetingKeys([e]);
-  // Matched with the rest of that day's meetings, as on Time Entry, so a Deal Support that belongs to another
+  // Matched with the rest of that day's meetings, as on Calendar, so a Deal Support that belongs to another
   // meeting isn't shown here too. The same meeting in that calendar lends its Ids (and so its marks).
   const dayStart = Date.parse(`${date}T00:00:00Z`) + tz * 60_000;
   const iso = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
@@ -2793,7 +2887,7 @@ api.post('/calendar/events/:id/deal-support', wrap(async (req, res) => {
   res.status(201).json(rec);
 }));
 
-// A new meeting and its Deal Support, from a click on free time in Time Entry: the Deal Support first (its
+// A new meeting and its Deal Support, from a click on free time in Calendar: the Deal Support first (its
 // required fields are what usually fails), then the meeting in the calendar shown (a Salesforce event on the
 // opportunity, or a Microsoft 365 meeting without attendees), linked to it. A failed meeting leaves the
 // Deal Support and says so in `warning`.
@@ -2833,9 +2927,9 @@ api.post('/calendar/new-event', wrap(async (req, res) => {
   res.status(201).json({ dealSupport: rec, eventId: evId, warning });
 }));
 
-// Remove an event from its calendar: a Microsoft 365 meeting (graphId, as Time Entry has it; for a meeting I
+// Remove an event from its calendar: a Microsoft 365 meeting (graphId, as Calendar has it; for a meeting I
 // organized, Microsoft cancels it for the attendees) or one of my Salesforce events. Then the Deal Supports
-// Time Entry shows on it (dealSupportIds) are deleted too, after the event, so a failed removal leaves them.
+// Calendar shows on it (dealSupportIds) are deleted too, after the event, so a failed removal leaves them.
 // Replies { deleted, failed: [{ id, error }] }.
 api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
   const evId = eventId(req.params.id);
@@ -2844,7 +2938,7 @@ api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
   if (dsIds.length && !meta.canDelete) throw new HttpError(403, `Your Salesforce user can't delete ${meta.labelPlural}, so the event was left as it is.`);
   if (evId.startsWith('gr_')) {
     if (!graphCal) throw new HttpError(400, 'Microsoft 365 isn\'t set up.');
-    await graphCal.deleteEvent(evId, String(req.body?.graphId || '').slice(0, 1000));
+    await graphCal.deleteEvent(evId, String(req.body?.graphId || '').slice(0, 1000), { signature: signatureOf(req) });
   } else if (/^(mac|ios|win|ol|mt)_/.test(evId)) {
     throw new HttpError(400, 'Only Microsoft 365 meetings and Salesforce events can be removed here.');
   } else {
@@ -2865,7 +2959,7 @@ api.post('/calendar/events/:id/remove', wrap(async (req, res) => {
   res.json({ ok: true, deleted, failed });
 }));
 
-// The event as the edit form shows it: a Microsoft 365 meeting (graphId, as Time Entry has it; see
+// The event as the edit form shows it: a Microsoft 365 meeting (graphId, as Calendar has it; see
 // graphCal.eventDetails) or one of my Salesforce events, with its invitees (changed in Salesforce, not here).
 const EVENT_EDIT = ['Id', 'Subject', 'StartDateTime', 'EndDateTime', 'IsAllDayEvent', 'ActivityDate', 'DurationInMinutes', 'Location',
   'Description', 'ShowAs', 'IsPrivate', 'IsReminderSet', 'ReminderDateTime', 'WhatId', 'What.Name'];
@@ -3010,7 +3104,7 @@ function salesforceEventFields({ c, has, text, allDay, start, end, reminder }, e
 // Save changes from the edit form: `changes` (see eventChanges) holds only what changed. respond ({ action:
 // accept|tentativelyAccept|decline, comment, send }) answers an invitation. A changed subject or start changes the
 // event's key (and a Microsoft 365 meeting's id), so its marks (the Deal Support created from it, "No Deal Support
-// needed") are copied to the new ones; `copies` are the other ids Time Entry shows it under, and `now` ({ subject,
+// needed") are copied to the new ones; `copies` are the other ids Calendar shows it under, and `now` ({ subject,
 // start, allDay, date }) is the event after the change. Replies { id }.
 api.post('/calendar/events/:id/update', wrap(async (req, res) => {
   const evId = eventId(req.params.id);
@@ -3022,9 +3116,10 @@ api.post('/calendar/events/:id/update', wrap(async (req, res) => {
   if (evId.startsWith('gr_')) {
     const graphId = text(b.graphId, 1000);
     const p = graphEventFields(x);
-    if (Object.keys(p).length) id = (await graphCal.updateEvent(evId, graphId, p)).id;
+    const signature = signatureOf(req);
+    if (Object.keys(p).length) id = (await graphCal.updateEvent(evId, graphId, p, { signature })).id;
     const r = b.respond;
-    if (r?.action) await graphCal.respondEvent(id, graphId, r.action, { comment: text(r.comment, 2000), sendResponse: r.send !== false });
+    if (r?.action) await graphCal.respondEvent(id, graphId, r.action, { comment: text(r.comment, 2000), sendResponse: r.send !== false, signature });
   } else {
     const p = salesforceEventFields(x, await myEvent(req, evId, EVENT_EDIT));
     if (Object.keys(p).length) await sf(req, 'PATCH', `/services/data/${API}/sobjects/Event/${evId}`, { body: p });
@@ -3056,7 +3151,7 @@ api.post('/calendar/events', wrap(async (req, res) => {
   let id;
   if (source !== 'salesforce') {
     if (!graphCal?.status().canWrite) throw new HttpError(403, 'Sign out of Microsoft 365 and sign in again, accepting updates to your calendar, to add meetings to it.');
-    id = (await graphCal.createEvent(source, { showAs: 'busy', ...graphEventFields(x) })).id;
+    id = (await graphCal.createEvent(source, { showAs: 'busy', ...graphEventFields(x) }, { signature: signatureOf(req) })).id;
   } else {
     const created = await sf(req, 'POST', `/services/data/${API}/sobjects/Event`,
       { body: { ...salesforceEventFields(x, {}), OwnerId: sfId(req.session.sf.user.id) } });
@@ -3220,6 +3315,17 @@ api.put('/prefs/accounts', (req, res) => {
   }
   store.saveSetting(orgOf(req), 'acctPrefs', prefs);
   res.json(prefs);
+});
+
+// The email signature (Settings), added to the end of the meeting invitations, updates, cancellations and replies
+// SF Desk has Microsoft 365 send.
+const SIGNATURE_MAX = 2000;
+const signatureOf = (req) => String(store.getSetting(orgOf(req), 'emailSignature')?.text || '').trim();
+api.get('/prefs/signature', (req, res) => res.json({ text: signatureOf(req), max: SIGNATURE_MAX }));
+api.put('/prefs/signature', (req, res) => {
+  const text = String(req.body?.text ?? '').replace(/\r\n?/g, '\n').replace(/\s+$/, '').slice(0, SIGNATURE_MAX);
+  store.saveSetting(orgOf(req), 'emailSignature', { text });
+  res.json({ text: text.trim(), max: SIGNATURE_MAX });
 });
 
 function hiddenIds(body) {
