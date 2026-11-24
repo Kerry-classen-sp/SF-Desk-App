@@ -372,6 +372,7 @@ darkQuery.addEventListener('change', applyTheme);
   .ev.skipped { background: var(--skip); border-color: var(--skip-line); color: var(--muted); }
   .ev.declined { background: var(--declined); border-color: var(--declined-line); color: var(--ink); }
   .ev.sel { box-shadow: 0 0 0 2px var(--accent); z-index: 3; }
+  .ev.dragging { opacity: .85; z-index: 4; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: grabbing; }
   .ev .t { font-size: 11px; opacity: .8; }
   .ev .s { font-weight: 600; overflow-wrap: anywhere; }
   .cal-panel section { margin-bottom: 14px; }
@@ -4404,7 +4405,7 @@ function renderCalendar() {
     ? `${plural(events.length, 'event')} this week · ${by.covered} with a ${dsMeta.label} · ${by.open} without` +
       (by.skipped ? ` · ${by.skipped} marked not needed` : '') +
       (declined ? ` · ${plural(declined, 'declined meeting')} ${cal.showDeclined ? 'shown in yellow' : 'hidden'}` : '') +
-      ' · Click an event to see it, or right-click it to edit it, create a ' + dsMeta.label + ' or mark it not needed' +
+      ' · Click an event to see it, drag it to another time, or right-click it to edit it, create a ' + dsMeta.label + ' or mark it not needed' +
       (dsMeta.canCreate ? `. Click free time to add a meeting with a ${dsMeta.label}` : '')
     : fromGraph ? 'No events in this calendar this week.' + (cal.data.note ? ` ${cal.data.note}` : '') : 'No Salesforce events this week. If your Exchange calendar reaches Salesforce through Einstein Activity Capture, ' +
       'those meetings may not be stored as Salesforce events, so they can\'t be shown here: pick Microsoft 365 in the calendar list to see them.');
@@ -4428,20 +4429,64 @@ function renderCalendar() {
     const st = evStatus(e);
     const n = el('button', { class: `ev ${st}${e.declined ? ' declined' : ''}${cal.sel === e.id ? ' sel' : ''}`,
       title: `${e.title || e.subject} · ${e.declined ? 'Declined · ' : ''}${STATUS_TEXT[st]}`,
-      onclick: () => { if (!pressedLong()) selectEvent(e.id); },
+      onclick: () => { if (!pressedLong() && !draggedJust()) selectEvent(e.id); },
       oncontextmenu: (ev) => { if (openEventMenu(e, ev.clientX, ev.clientY)) ev.preventDefault(); } },
       el('div', { class: 's' }, e.title || e.subject),
       e.allDay ? null : el('div', { class: 't' }, `${hhmm(evTime(e.start))} – ${hhmm(evTime(e.end))}`));
     onLongPress(n, (x, y) => openEventMenu(e, x, y));
+    if (!e.allDay && (e.graphId || e.sfEvent)) dragToMove(n, e);
     return n;
   };
+  // Drag a timed event to another time or day shown (mouse or pen; a long press opens the menu on touch screens).
+  // It snaps to 15 minutes within the hours shown and keeps its length; Escape puts it back.
+  const dragToMove = (n, e) => n.addEventListener('pointerdown', (down) => {
+    if (down.button !== 0 || down.pointerType === 'touch') return;
+    const s0 = evTime(e.start), m0 = tzMins(s0), len = evTime(e.end) - s0;
+    const x0 = down.clientX, y0 = down.clientY, height = n.style.height;
+    const lenMins = Math.min(Math.round(len / 60000), (h1 - h0) * 60);
+    let drag = null;
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('keydown', key, true);
+    };
+    const move = (ev) => {
+      if (!drag && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      if (!drag) { drag = {}; n.classList.add('dragging'); closeEventMenu(); }
+      const cols = [...document.querySelectorAll('#calBody .hours-col[data-date]')];
+      const col = cols.find((c) => { const r = c.getBoundingClientRect(); return ev.clientX >= r.left && ev.clientX < r.right; }) || drag.col || n.parentNode;
+      const mins = Math.max(h0 * 60, Math.min(h1 * 60 - Math.max(15, lenMins),
+        Math.round((m0 + (ev.clientY - y0) / hourPx * 60) / 15) * 15));
+      Object.assign(drag, { col, mins });
+      if (n.parentNode !== col) col.append(n);
+      n.style.cssText = `top:${(mins - h0 * 60) / 60 * hourPx}px;height:${height};left:2px;width:calc(100% - 4px)`;
+      const s = tzInstant(col.dataset.date, mins);
+      const t = n.querySelector('.t');
+      if (t) t.textContent = `${hhmm(s)} – ${hhmm(new Date(+s + len))}`;
+    };
+    const up = () => {
+      stop();
+      if (!drag) return;
+      calDragAt = Date.now();
+      moveEvent(e, drag.col.dataset.date, drag.mins);
+    };
+    const key = (ev) => {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      stop();
+      if (drag) { calDragAt = Date.now(); renderCalendar(); }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('keydown', key, true);
+  });
   const canAdd = dsMeta.canCreate;
   const cols = days.map((d) => {
-    const col = el('div', { class: 'hours-col' + (canAdd ? ' can-add' : ''), style: `height:${height}px`,
+    const col = el('div', { class: 'hours-col' + (canAdd ? ' can-add' : ''), style: `height:${height}px`, 'data-date': d,
       title: canAdd ? `Click free time to add a meeting with a ${dsMeta.label}` : null });
     // Free time (not an event): a new meeting there, starting on the half hour clicked, for an hour.
     if (canAdd) col.addEventListener('click', (ev) => {
-      if (ev.target.closest('.ev')) return;
+      if (ev.target.closest('.ev') || draggedJust()) return;
       const y = ev.clientY - col.getBoundingClientRect().top;
       const mins = h0 * 60 + Math.max(0, Math.floor(y / hourPx * 2)) * 30;
       newMeetingDialog(d, Math.min(mins, 23 * 60 + 30));
@@ -4793,6 +4838,48 @@ function openEventMenu(e, x, y) {
   if (r.right > window.innerWidth - 8) menu.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
   if (r.bottom > window.innerHeight - 8) menu.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
   return true;
+}
+// The click that ends a drag lands on the event or the free time under it; it does nothing.
+let calDragAt = 0;
+const draggedJust = () => Date.now() - calDragAt < 400;
+// A timed event dropped at startMins on `date`, keeping its length. Yours (and Salesforce events) move, sending
+// attendees an update after asking; for a meeting someone else organized, the new time can be proposed to them
+// instead, with a tentative answer as in Outlook.
+async function moveEvent(e, date, startMins) {
+  const s = tzInstant(date, startMins), en = new Date(+s + (evTime(e.end) - evTime(e.start)));
+  if (+s === +evTime(e.start)) return renderCalendar();
+  const name = `"${e.title || e.subject}"`;
+  const when = `${localDate(date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${hhmm(s)} – ${hhmm(en)} ${tzAbbr(calTz)}`;
+  const once = e.recurring ? ' (this occurrence only)' : '';
+  const graph = !e.sfEvent;
+  if (graph && !cal.sources?.graph?.canWrite) {
+    renderCalendar();
+    return toast('To change Microsoft 365 meetings, sign out of it and sign in again, accepting updates to your calendar.', 'err');
+  }
+  const start = s.toISOString(), end = en.toISOString();
+  try {
+    if (graph && e.isOrganizer === false) {
+      const who = e.organizer || 'Someone else';
+      if (!confirm(`${who} organized ${name}, so only they can move it.\n\nPropose ${when} to them as a new time${once}? ` +
+        'Your answer becomes Tentative, and the meeting stays where it is unless they accept.')) return renderCalendar();
+      await api(`/calendar/events/${e.id}/update`, { method: 'POST', body: {
+        graphId: e.graphId, changes: {}, respond: { action: 'tentativelyAccept', send: true, propose: { start, end } } } });
+      toast(`Proposed ${when} for ${name} to ${e.organizer || 'the organizer'}`, 'ok');
+      return await loadCalendar();
+    }
+    if (graph && e.attendeeCount && !confirm(`Move ${name}${once} to ${when}? Microsoft sends ${plural(e.attendeeCount, 'attendee')} an update.`)) {
+      return renderCalendar();
+    }
+    const r = await api(`/calendar/events/${e.id}/update`, { method: 'POST', body: {
+      graphId: e.graphId || '', changes: { allDay: false, start, end, timeZone: calTz }, copies: e.copies || [],
+      now: { subject: e.subject, allDay: false, start, date } } });
+    toast(`Moved ${name} to ${when}` +
+      (e.supports?.length && date !== e.date ? `. Its ${dsMeta.label} keeps its own date: edit it if that should change too` : ''), 'ok');
+    if (cal.sel === e.id && r.id) cal.sel = r.id;
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  await loadCalendar();
 }
 // Removes the event from its calendar after saying what that does: a meeting you organized is cancelled for its
 // attendees, one you were invited to just leaves your calendar. The Deal Supports shown on it are deleted too.

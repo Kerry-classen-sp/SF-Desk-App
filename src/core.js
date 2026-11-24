@@ -3102,7 +3102,8 @@ function salesforceEventFields({ c, has, text, allDay, start, end, reminder }, e
 }
 
 // Save changes from the edit form: `changes` (see eventChanges) holds only what changed. respond ({ action:
-// accept|tentativelyAccept|decline, comment, send }) answers an invitation. A changed subject or start changes the
+// accept|tentativelyAccept|decline, comment, send, propose: { start, end } }) answers an invitation, propose
+// asking the organizer for a new time. A changed subject or start changes the
 // event's key (and a Microsoft 365 meeting's id), so its marks (the Deal Support created from it, "No Deal Support
 // needed") are copied to the new ones; `copies` are the other ids Calendar shows it under, and `now` ({ subject,
 // start, allDay, date }) is the event after the change. Replies { id }.
@@ -3119,7 +3120,12 @@ api.post('/calendar/events/:id/update', wrap(async (req, res) => {
     const signature = signatureOf(req);
     if (Object.keys(p).length) id = (await graphCal.updateEvent(evId, graphId, p, { signature })).id;
     const r = b.respond;
-    if (r?.action) await graphCal.respondEvent(id, graphId, r.action, { comment: text(r.comment, 2000), sendResponse: r.send !== false, signature });
+    let proposedNewTime = null;
+    if (r?.propose) {
+      proposedNewTime = { start: isoDateTime(r.propose.start), end: isoDateTime(r.propose.end) };
+      if (!(Date.parse(proposedNewTime.end) > Date.parse(proposedNewTime.start))) throw new HttpError(400, 'The new time has to end after it starts.');
+    }
+    if (r?.action) await graphCal.respondEvent(id, graphId, r.action, { comment: text(r.comment, 2000), sendResponse: r.send !== false, signature, proposedNewTime });
   } else {
     const p = salesforceEventFields(x, await myEvent(req, evId, EVENT_EDIT));
     if (Object.keys(p).length) await sf(req, 'PATCH', `/services/data/${API}/sobjects/Event/${evId}`, { body: p });

@@ -298,13 +298,25 @@ export function graphCalendar(opts) {
   }
 
   // Accept, tentatively accept or decline a meeting I was invited to, telling the organizer (with comment, and
-  // `signature` after it) or not.
-  async function respondEvent(id, graphId, action, { comment = '', sendResponse = true, signature = '' } = {}) {
+  // `signature` after it) or not. proposedNewTime ({ start, end } as UTC instants) asks the organizer to move it,
+  // as Outlook's Propose New Time does: only with a tentative or decline, always sent, and only when the organizer
+  // allows new time proposals.
+  async function respondEvent(id, graphId, action, { comment = '', sendResponse = true, signature = '', proposedNewTime = null } = {}) {
     needWrite('answer meetings');
     if (!['accept', 'tentativelyAccept', 'decline'].includes(action)) throw new CalendarError('Unknown response.', 400);
-    const { path } = await checked(id, graphId);
-    if (sendResponse) comment = withSignature(comment, signature);
-    await graph(`${path}/${action}`, {}, { method: 'POST', body: { comment, sendResponse } });
+    const { path, e } = await checked(id, graphId, proposedNewTime ? 'allowNewTimeProposals,organizer' : '');
+    const body = { comment, sendResponse };
+    if (proposedNewTime) {
+      if (action === 'accept') throw new CalendarError('A new time can only be proposed with a tentative or a decline.', 400);
+      if (e.allowNewTimeProposals === false) {
+        throw new CalendarError(`${e.organizer?.emailAddress?.name || 'The organizer'} doesn't allow new time proposals for this meeting.`, 400);
+      }
+      const at = (iso) => ({ dateTime: new Date(iso).toISOString().slice(0, 19), timeZone: 'UTC' });
+      body.proposedNewTime = { start: at(proposedNewTime.start), end: at(proposedNewTime.end) };
+      body.sendResponse = true;
+    }
+    if (body.sendResponse) body.comment = withSignature(comment, signature);
+    await graph(`${path}/${action}`, {}, { method: 'POST', body });
   }
 
   // Outlook's category list, so SF Desk's categories get their colors (preset4 green, preset12 gray) where the add-in
