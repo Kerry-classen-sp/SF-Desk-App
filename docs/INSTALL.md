@@ -71,6 +71,13 @@ With `node_modules` in your checkout and a nodejs.org build of Node, `scripts/bu
 /path/to/node` skips step 1. The bundled Node is for Apple Silicon; on an Intel Mac the app uses Node.js
 22 or newer installed from nodejs.org instead.
 
+For TestFlight, `mac/appstore/testflight.sh` builds the same app for the App Store and uploads it, after
+`scripts/build-apps.sh` (it takes the server and Node.js from `dist/SF Desk.app`). This build runs in Apple's
+sandbox, with bundle ID `com.sailpoint.sfdesk`, so it's the macOS platform of the iPad app's App Store Connect
+record. Its entitlements (`mac/appstore/SFDesk.entitlements`) keep the folders the downloaded app uses: its
+settings and data, its log, and the Salesforce CLI and its login. `--run` opens a sandboxed Debug build to try
+it first.
+
 ## Quick install with the Terminal installer
 
 Get `SF-Desk-mac.zip` from Kerry Classen. It bundles everything SF Desk needs on an Apple Silicon Mac

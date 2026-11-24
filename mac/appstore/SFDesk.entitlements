@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The App Store build's sandbox. The temporary exceptions keep the folders the direct-download app uses: its
+     settings and data, its log, the Salesforce CLI's login and files, old installs to copy from, and the CLI
+     where Salesforce's installer or Homebrew puts it. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+  <key>com.apple.security.network.server</key><true/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+  <key>com.apple.security.files.downloads.read-write</key><true/>
+  <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+  <array>
+    <string>/Library/Application Support/SF Desk/</string>
+    <string>/Library/Logs/SF Desk/</string>
+    <string>/.sf/</string>
+    <string>/.sfdx/</string>
+    <string>/.local/share/sf/</string>
+    <string>/.cache/sf/</string>
+    <string>/.config/sf/</string>
+  </array>
+  <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+  <array>
+    <string>/.local/bin/</string>
+    <string>/.local/sf-cli/</string>
+    <string>/SF-Desk/</string>
+    <string>/Documents/GitHub/SF-Desk/</string>
+    <string>/Documents/GitHub/sf-desk/</string>
+    <string>/Documents/SF-Desk/</string>
+    <string>/GitHub/SF-Desk/</string>
+    <string>/Developer/SF-Desk/</string>
+    <string>/Projects/SF-Desk/</string>
+  </array>
+  <key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+  <array>
+    <string>/opt/homebrew/</string>
+    <string>/usr/local/</string>
+  </array>
+</dict>
+</plist>

@@ -8,3 +8,5 @@ certs/
 ios/SFDesk/Generated/
 ios/build/
 ios/*.xcodeproj/
+mac/appstore/build/
+mac/appstore/*.xcodeproj/
