@@ -4,6 +4,12 @@
 
 - **Drag a meeting to another time:** on Calendar, drag a timed event with the mouse or a pen to another time or day. It snaps to 15 minutes and keeps its length; Escape puts it back. A long press still opens the menu. A meeting you organized, or a Salesforce event, moves after you confirm, and Microsoft sends the attendees an update. For a meeting someone else organized, the new time is proposed to them and your answer becomes Tentative, as in Outlook; the meeting stays where it is unless they accept. A recurring meeting moves that occurrence only. If the day changes, its Deal Support keeps its own date.
 
+### Build 2
+
+- **Mac app on TestFlight:** the native Mac app can be built for the App Store, sandboxed, and uploaded to
+  TestFlight (`mac/appstore/testflight.sh`). It keeps the same settings, data and Salesforce CLI login as the
+  downloaded app.
+
 ## 1.9.0 (November 18, 2026)
 
 Everything from the 1.7.5 builds below, as one release:
