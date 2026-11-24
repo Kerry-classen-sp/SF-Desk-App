@@ -11,7 +11,9 @@ import AppKit
 @preconcurrency import WebKit
 
 let fm = FileManager.default
-let home = fm.homeDirectoryForCurrentUser
+// The real home folder: in the App Store build's sandbox, homeDirectoryForCurrentUser and $HOME are its container.
+let home = getpwuid(getuid()).flatMap { URL(fileURLWithPath: String(cString: $0.pointee.pw_dir), isDirectory: true) }
+  ?? fm.homeDirectoryForCurrentUser
 let supportDir = home.appendingPathComponent("Library/Application Support/SF Desk")
 let logDir = home.appendingPathComponent("Library/Logs/SF Desk")
 let logFile = logDir.appendingPathComponent("server.log")
@@ -52,6 +54,12 @@ func run(_ exe: String, _ args: [String], env: [String: String]? = nil, timeout:
 }
 
 func isExecutable(_ path: String) -> Bool { !path.isEmpty && fm.isExecutableFile(atPath: path) }
+
+// This app's environment plus `extra`, with HOME the real home folder, so the Salesforce CLI and the server use the
+// same login and files with or without the sandbox.
+func childEnv(_ extra: [String: String]) -> [String: String] {
+  ProcessInfo.processInfo.environment.merging(["HOME": home.path]) { $1 }.merging(extra) { $1 }
+}
 
 // PATH as the user's shell sets it, since apps opened from Finder only get /usr/bin:/bin:/usr/sbin:/sbin.
 func shellPath() -> String {
@@ -206,7 +214,7 @@ final class Server: @unchecked Sendable {
   // Homebrew's sf formula, which then updates with the rest of brew. sf goes next to brew.
   func brewInstallSf(_ brew: String) -> String? {
     ui.status("Installing the Salesforce CLI with Homebrew...")
-    let env = ProcessInfo.processInfo.environment.merging(["PATH": path, "HOMEBREW_NO_ENV_HINTS": "1"]) { $1 }
+    let env = childEnv(["PATH": path, "HOMEBREW_NO_ENV_HINTS": "1"])
     let r = run(brew, ["install", "sf"], env: env, timeout: 1800)
     let sf = URL(fileURLWithPath: brew).deletingLastPathComponent().appendingPathComponent("sf").path
     return r.status == 0 && isExecutable(sf) ? sf : nil
@@ -249,7 +257,7 @@ final class Server: @unchecked Sendable {
     if readEnv()["SF_CLI_PATH"] != sf { setEnv("SF_CLI_PATH", sf) }
 
     ui.status("Checking your Salesforce login...")
-    let env = ProcessInfo.processInfo.environment.merging(["PATH": path, "SF_AUTOUPDATE_DISABLE": "true"]) { $1 }
+    let env = childEnv(["PATH": path, "SF_AUTOUPDATE_DISABLE": "true"])
     let shown = run(sf, ["org", "display", "--json"] + (target.isEmpty ? [] : ["--target-org", target]), env: env)
     if shown.output.range(of: #""status":\s*0"#, options: .regularExpression) != nil { return }
 
@@ -281,14 +289,14 @@ final class Server: @unchecked Sendable {
     p.executableURL = URL(fileURLWithPath: node)
     p.arguments = [appDir.appendingPathComponent("src/server.js").path]
     p.currentDirectoryURL = supportDir // the server reads .env from its working folder
-    p.environment = ProcessInfo.processInfo.environment.merging([
+    p.environment = childEnv([
       "PATH": path,
       "SF_DESK_APP": "1",
       "SF_DESK_READY": ready.path,
       "SF_DESK_DB": supportDir.appendingPathComponent("data/sf-desk.db").path,
       "SF_DESK_CERTS": supportDir.appendingPathComponent("certs").path,
       "SF_AUTOUPDATE_DISABLE": "true",
-    ]) { $1 }
+    ])
     let pipe = Pipe()
     p.standardInput = pipe // closes if the app dies, and the server then exits
     p.standardOutput = log
@@ -687,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     showStatus("Setting up the Outlook add-in...")
     let server = server!
     let certs = supportDir.appendingPathComponent("certs")
-    let env = ProcessInfo.processInfo.environment.merging(["SF_DESK_CERTS": certs.path, "PATH": server.path]) { $1 }
+    let env = childEnv(["SF_DESK_CERTS": certs.path, "PATH": server.path])
     Thread.detachNewThread {
       let cert = certs.appendingPathComponent("localhost.pem").path
       // An authority whose private key is still there is from before it was limited to localhost: replaced.
